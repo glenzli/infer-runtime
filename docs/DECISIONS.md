@@ -2,8 +2,8 @@
 
 截至 2026-08-10，启动实现所需的 Blocking 决策和 M4 durable background payload ownership
 已经关闭。异构本地执行与视觉决策在 v0.1 之外依次接受 ONNX artifact/session foundation、
-同步 local-only 人脸能力，以及 SigLIP 图文语义向量 slice；它们不改变冻结的 v0.1 发布门槛，
-也不授权视觉 durable、万能 tensor API 或通用 Resource Pool。
+同步 local-only 人脸能力、SigLIP 图文语义向量，以及 QwenVL typed understanding slices；它们
+不改变冻结的 v0.1 发布门槛，也不授权视觉 durable、万能 tensor API 或通用 Resource Pool。
 
 状态：`Proposed`、`Accepted`、`Rejected`、`Superseded`。
 
@@ -182,11 +182,11 @@
 
 ### D-106：ONNX 本地执行族与类型化视觉数据面的边界
 
-- **状态**：Accepted（foundation + experimental face/SigLIP typed slices）；不属于冻结的 v0.1 Consumer contract
+- **状态**：Accepted（foundation + experimental face/SigLIP/QwenVL typed slices）；不属于冻结的 v0.1 Consumer contract
 - **已覆盖基线**：D-008 已固定 Intent/Model/Build/Deployment/Provider/Node 身份链，D-009 已固定“控制统一、数据分型”，M2-M4 已拥有 Job/Attempt、取消、reservation、audit 和 lifecycle owner。
 - **推荐方向**：ONNX Runtime 作为新的本地 Provider/执行族接入；公共 owner 管理 Session Registry、artifact verification、原生 load/unload、Execution Provider route 和错误归类，模型专属 adapter 独占 preprocessing/tensor/postprocessing。普通 App 只使用类型化视觉协议，不接触万能 tensor-map、物理 backend 或模型路径。
 - **跨平台边界**：Apple Vision 不作为共同模型语义来源；受 Build 合同约束的 Core ML、WinML 或其他 ONNX Runtime Execution Provider 只是可验证的候选执行后端，实际 route/precision/fallback 必须进入 Attempt provenance。
-- **决定**：首个切片选择 `vision.detect_faces` / `vision.face_detection`。第二个独立切片接受原图、source revision 与 YuNet 命名五点，通过 SFace `vision.embed_face` / `vision.face_embedding` 返回归一化 128 维向量、eligibility evidence、精确 space 与完整 provenance。第三个切片使用独立 `vision.embed_image` / `vision.embed_text` 数据平面，把 SigLIP image/text encoder 绑定到同一个版本化 768d space。QwenVL 复杂理解继续使用独立 typed schema，不泄漏 Ollama chat wire。
+- **决定**：首个切片选择 `vision.detect_faces` / `vision.face_detection`。第二个独立切片接受原图、source revision 与 YuNet 命名五点，通过 SFace `vision.embed_face` / `vision.face_embedding` 返回归一化 128 维向量、eligibility evidence、精确 space 与完整 provenance。第三个切片使用独立 `vision.embed_image` / `vision.embed_text` 数据平面，把 SigLIP image/text encoder 绑定到同一个版本化 768d space。第四个切片以 `vision.describe_image` 与 `vision.review_classification` 两条独立 typed schema 封装 QwenVL，不泄漏 Ollama chat wire。
 - **Build 门槛**：exact artifact/export digest、opset、tensor contract、完整预处理、embedding space、tokenizer/vocabulary、允许的 Execution Provider/precision/fallback，以及 code/weight/data license facts 必须共同进入版本化 Build identity。
 - **ADR**：[ADR-0011](adr/0011-heterogeneous-local-runtimes-and-typed-vision.md)
 
@@ -213,6 +213,16 @@
 - **space**：两个 typed endpoint 必须返回完全相同的 `siglip2_base_patch16_224@75de2d55:fixres224:lowercase64:l2_768_fp32:v1`；只允许比较相同 space，identity 漂移形成新索引域。
 - **EP**：当前 immutable Builds 为 CPU-only。实测 Core ML 无法完整接管，失败后回退代价约为 image 17.5 秒、text 223.5 秒；不能把 fallback 后成功标成 Core ML 能力。未来导出、ORT、Core ML/Windows EP 必须使用新 Build 通过 numerical tolerance 和检索 decision-stability。
 - **资源**：release 实测 image warm 约 100 ms、text warm 约 33 ms，两 Session 合计约 1.9 GiB RSS；因此标为 heavy 并重开 D-107，但本 slice 不据此建设通用 Resource Pool。
+- **ADR**：[ADR-0011](adr/0011-heterogeneous-local-runtimes-and-typed-vision.md)
+
+### D-110：QwenVL typed understanding、闭集复核与质量路由
+
+- **状态**：Accepted for experimental synchronous slice
+- **合同**：`vision.describe_image` 返回一条有界短描述和去重关键词 proposal；`vision.review_classification` 只接受 Consumer 提供的最多 64 个类别，并只返回 `matched`、`none` 或 `uncertain`。`matched` 的 category id 必须来自请求闭集；不返回伪校准 confidence，也不把 proposal 解释为用户反馈。
+- **路由**：Consumer 只请求 Intent 与 quality floor。当前 4B Build 在两条 Intent 上评级 `basic`、resource class 为 `standard`；8B Build 评级 `general`、resource class 为 `heavy`。描述默认 basic，闭集复核默认 general；显式 `general` 描述可选择 8B。物理 Ollama tag 不进入公共请求。
+- **数据与 durable 边界**：只接受 Consumer 已完成 orientation normalization 的 display-sized JPEG/PNG、必填 `source_revision`，并强制 `local_only`、`offline_required=true`、`fallback=none`。图片、类别、描述与关键词不进入 Job metadata、默认日志、audit details 或文本 durable spool；background 只是一种队列优先级，不是可恢复照片队列。
+- **Provider 边界**：Ollama adapter 可使用其 native image/chat transport，但公共 endpoint 不暴露该 schema。当前 provider 的结构化输出兼容性实测要求使用 revisioned prompt + 严格反序列化，而不依赖 native `format`；schema/prompt revision 与实际 Build/physical model 进入 provenance。
+- **复审门槛**：Shadow 真实照片域准确性、长时间 bulk/background 与 interactive/MLX/SigLIP 混合压力、取消/断线 soak、8B residency 与 stable contract promotion。证据不足时不建设通用 Resource Pool，也不开放视觉 durable。
 - **ADR**：[ADR-0011](adr/0011-heterogeneous-local-runtimes-and-typed-vision.md)
 
 ## 已关闭的阶段决策

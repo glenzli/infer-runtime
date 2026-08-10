@@ -53,14 +53,15 @@
 ### 2.4 异构本地执行与视觉 P0 的架构映射
 
 Shadow 的 ONNX/视觉需求不改变当前核心方向，也不进入冻结的 v0.1 Consumer contract。
-D-106 至 D-109 已关闭一组收窄的实验切片：共享 ONNX artifact store、Session Registry、通用
-native lifecycle controller，以及同步、local-only 的 face 与 SigLIP 跨模态向量数据平面。
+D-106 至 D-110 已关闭一组收窄的实验切片：共享 ONNX artifact store、Session Registry、通用
+native lifecycle controller，以及同步、local-only 的 face、SigLIP 跨模态向量和 QwenVL
+typed understanding 数据平面。
 它与现有设计的关系为：
 
 | 提案内容 | 当前覆盖 | 后续新增/决策门 |
 | --- | --- | --- |
 | 跨 ONNX/Ollama/MLX 统一 Job、priority、取消、审计 | Job/Attempt、Scheduler、Quota、Resource Manager 已覆盖 | provider contract 与混合负载验收 |
-| 控制统一、视觉/音频/文本数据分型 | 设计原则与 ADR-0009 已覆盖 | face 与 SigLIP typed wire 已实现；不提供 tensor-map API |
+| 控制统一、视觉/音频/文本数据分型 | 设计原则与 ADR-0009 已覆盖 | face、SigLIP 与 QwenVL typed wire 已实现；不提供 tensor-map 或通用 VLM chat API |
 | Model Profile → Build → Deployment → Provider → Node | ADR-0008 已覆盖 | ONNX Build manifest 已绑定 artifact/export、auxiliary、tensor、preprocess/tokenizer、space、EP 和 license identity |
 | provider 原生 lifecycle | Ollama controller、MLX worker、M4 lifecycle owner 已覆盖 | ONNX Session Registry 已接入同一 native controller；模型语义留在 typed adapter |
 | 同一 Node 跨 provider 资源竞争 | 全机压力、deployment reservation、per-provider capacity 覆盖当前同步 slices；SigLIP 实测合计约 1.9 GiB | QwenVL + SigLIP/MLX 混合负载、视觉 durable 或跨节点容量出现时复审显式 Resource Pool |
@@ -259,8 +260,8 @@ vision.detect_faces       experimental; synchronous local-only P0
 vision.embed_face         experimental; synchronous local-only SensitiveBiometric
 vision.embed_image        experimental; synchronous local-only SigLIP image encoder
 vision.embed_text         experimental; synchronous local-only SigLIP text encoder
-vision.describe_image     proposed; typed QwenVL bounded structured result
-vision.classify           proposed; exact taxonomy pending D-106
+vision.describe_image     experimental; typed QwenVL bounded description/keywords
+vision.review_classification experimental; Consumer-supplied closed set
 ```
 
 Intent Profile 定义输入/输出模态、required features、默认能力下限和默认 policy；Responses Intent 还可定义调用方缺省时使用的 `default_max_output_tokens` 与 `default_reasoning_effort`。这些是任务级生成默认值，不是模型能力评级；调用方显式标准字段优先。Model Profile 则对每个 Intent 分别评级；同一模型可在总结上为 `general`、在深度推理上仅为 `basic`、在视觉上为 unsupported。参数量、provider 和 placement 均不能自动推出档位。
@@ -582,9 +583,11 @@ tensor 编码、输出解释和模型语义。
 第三个 slice 以两个 typed endpoint 暴露 SigLIP `vision.embed_image` / `vision.embed_text`：
 image adapter 独占 FixRes 224/RGB/NCHW normalization，text adapter 独占 lowercase、固定 64-token
 tokenizer；两个 immutable Builds 绑定相同 768d L2/cosine space。当前真实 Core ML 不能完整接管
-且失败探测代价过高，因此当前 Builds 明确 CPU-only，未来 EP 组合形成新 Build。QwenVL 的
-下一 slice 使用 `vision.describe_image` 之类的有界结构 schema 封装 Ollama，不把 chat wire
-暴露给 Shadow。MLX audio 继续保持独立数据面。
+且失败探测代价过高，因此当前 Builds 明确 CPU-only，未来 EP 组合形成新 Build。QwenVL 另以
+`vision.describe_image` / `vision.review_classification` 两条 typed 数据面封装 Ollama：前者返回
+有界描述和关键词 proposal，后者只在 Consumer 提供的闭集内返回
+`matched|none|uncertain`。4B 是 basic/standard bulk 候选，8B 是 general/heavy 明确复核候选；
+Consumer 只请求 Intent 与 quality floor，不绑定 Ollama tag。MLX audio 继续保持独立数据面。
 
 ## 10. 调度策略
 
@@ -1100,6 +1103,6 @@ MVP **包含**：单机 `inferd`、无状态 provider execution 的 OpenAI Respo
 
 ## 21. 决策状态
 
-启动实现所需的 `D-001` 至 `D-013` 以及 M4 payload ownership `D-105` 已接受，详见 [docs/DECISIONS.md](docs/DECISIONS.md) 及对应 ADR。D-012/D-013 只接受 experimental Codex text/image + SSE 和类型化音频 streaming 的收窄 slice，不接受 Agent surface、万能流协议或其他 CLI 的推定兼容。`D-101` 至 `D-104` 属于远程节点、跨节点大 payload、第三方扩展与 benchmark 后续阶段。`D-106` 至 `D-109` 已接受收窄的 ONNX foundation、同步 local-only face 与 SigLIP image/text slices；视觉 durable、QwenVL typed understanding、Windows tolerance 与通用 Resource Pool 仍保留独立门槛。
+启动实现所需的 `D-001` 至 `D-013` 以及 M4 payload ownership `D-105` 已接受，详见 [docs/DECISIONS.md](docs/DECISIONS.md) 及对应 ADR。D-012/D-013 只接受 experimental Codex text/image + SSE 和类型化音频 streaming 的收窄 slice，不接受 Agent surface、万能流协议或其他 CLI 的推定兼容。`D-101` 至 `D-104` 属于远程节点、跨节点大 payload、第三方扩展与 benchmark 后续阶段。`D-106` 至 `D-110` 已接受收窄的 ONNX foundation、同步 local-only face/SigLIP 与 QwenVL typed slices；视觉 durable、Windows tolerance、照片域质量与通用 Resource Pool 仍保留独立门槛。
 
-本设计基线已进入实现：Git/Cargo workspace、Responses 垂直链路、本地文件音频垂直链路、受 Candidate Plan 约束的有界 retry/fallback、短期 provider 熔断、versioned capability profile/显式 probe、per-App admission、SQLite 持久化/预算，以及 M4 的 Ollama/ONNX inventory、Attempt reservation、显式生命周期控制与加密 local background restart recovery 均可运行。ONNX 另有内容寻址 artifact store、YuNet/SFace/SigLIP Builds、Session Registry 和四条可路由的 experimental typed data planes；Codex App Server 另有动态模型组、subscription + cloud modality ACL、图像输入与文本 SSE；音频另有 PCM TTS server-stream 与 commit-redecode ASR duplex experimental slices。CI、自动资源长期启用、视觉/音频 streaming stable contract、Codex quota reconciliation、QwenVL structured understanding、background batch/音频/cloud 幂等与远程节点仍待完成。
+本设计基线已进入实现：Git/Cargo workspace、Responses 垂直链路、本地文件音频垂直链路、受 Candidate Plan 约束的有界 retry/fallback、短期 provider 熔断、versioned capability profile/显式 probe、per-App admission、SQLite 持久化/预算，以及 M4 的 Ollama/ONNX inventory、Attempt reservation、显式生命周期控制与加密 local background restart recovery 均可运行。ONNX 另有内容寻址 artifact store、YuNet/SFace/SigLIP Builds、Session Registry 和四条可路由的 experimental typed data planes；Ollama QwenVL 另有有界描述/关键词与闭集分类复核两条 typed data planes；Codex App Server 另有动态模型组、subscription + cloud modality ACL、图像输入与文本 SSE；音频另有 PCM TTS server-stream 与 commit-redecode ASR duplex experimental slices。CI、自动资源长期启用、视觉/音频 stable promotion、Codex quota reconciliation、照片域质量、background batch/音频/cloud 幂等与远程节点仍待完成。

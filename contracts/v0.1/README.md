@@ -35,6 +35,12 @@ operator 配置合同：未知键会使启动/校验失败，但它也不应由�
 本机 Web Console 的 Apps & Access credential lifecycle 同样属于 experimental operator
 surface，不改变这里冻结的 bearer consumer wire contract。
 
+以下 visual routes 出现在同一 OpenAPI 中，但由 contract manifest 的 `experimental_routes` 明确
+分区，不属于上述冻结的 candidate Consumer 兼容承诺：face detection/embedding、SigLIP
+image/text embedding，以及 QwenVL `image-descriptions` / `classification-reviews`。真实 Consumer
+应固定 daemon commit、按 endpoint 独立验收，并把响应未知字段视为兼容扩展；Runtime 对这些
+route 的请求仍严格拒绝未知字段。
+
 ## 兼容策略
 
 - `0.1.0-candidate.1` 与当前 `0.1.0-candidate.2` 一旦交给 consumer 就视为不可变；规范、fixture 或 wire 行为变化必须产生新的 candidate revision。

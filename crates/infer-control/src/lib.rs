@@ -4,6 +4,7 @@ mod app_admission;
 mod attempt_policy;
 mod audio_streaming;
 mod background_jobs;
+mod image_understanding;
 mod metrics;
 mod observer;
 mod pressure_observation;
@@ -29,16 +30,17 @@ use infer_auth::{AppCredentials, CredentialError};
 use infer_core::{
     AppConfig, AttemptOutcome, AttemptSnapshot, AttemptTrigger, AudioExecutionRequest,
     ContractError, DurablePayloadRef, ExecutionMode, ExecutionRequirements, Fallback,
-    IntentProfile, JobListPage, JobPageCursor, JobSnapshot, JobState, Modality, Priority,
-    ProviderConfig, ProviderProtocol, QuotaConfig, RequestConstraints, ResponsesRequest,
+    IntentProfile, JobListPage, JobPageCursor, JobSnapshot, JobState, LocalInventoryKind, Modality,
+    Priority, ProviderConfig, ProviderProtocol, QuotaConfig, RequestConstraints, ResponsesRequest,
     RuntimeConfig,
 };
 use infer_payload::PayloadError;
 use infer_provider::{
     AudioWorkerExecutor, CodexAppServerProvider, DynAudioDuplexExecutor, DynAudioExecutor,
     DynAudioStreamExecutor, DynFaceDetectionExecutor, DynFaceEmbeddingExecutor,
-    DynImageEmbeddingExecutor, DynProvider, DynTextEmbeddingExecutor, OnnxProviderRuntime,
-    ProviderError, ProviderModelCatalog, ResponsesProvider, probe_responses_provider,
+    DynImageEmbeddingExecutor, DynImageUnderstandingExecutor, DynProvider,
+    DynTextEmbeddingExecutor, OllamaVisionExecutor, OnnxProviderRuntime, ProviderError,
+    ProviderModelCatalog, ResponsesProvider, probe_responses_provider,
     probe_responses_provider_with_effort,
 };
 use infer_resource::{
@@ -281,6 +283,7 @@ pub struct Runtime {
     face_embedding_executors: BTreeMap<String, DynFaceEmbeddingExecutor>,
     image_embedding_executors: BTreeMap<String, DynImageEmbeddingExecutor>,
     text_embedding_executors: BTreeMap<String, DynTextEmbeddingExecutor>,
+    image_understanding_executors: BTreeMap<String, DynImageUnderstandingExecutor>,
     schedulers: BTreeMap<String, ProviderScheduler>,
     jobs: Mutex<HashMap<String, JobEntry>>,
     metrics: RuntimeMetrics,
@@ -347,6 +350,7 @@ impl Runtime {
         let mut face_embedding_executors = BTreeMap::new();
         let mut image_embedding_executors = BTreeMap::new();
         let mut text_embedding_executors = BTreeMap::new();
+        let mut image_understanding_executors = BTreeMap::new();
         let mut native_controllers = NativeControllerMap::new();
         let mut schedulers = BTreeMap::new();
         let app_admission = AppAdmission::new(&config.apps);
@@ -370,6 +374,20 @@ impl Runtime {
                         api_key,
                     )?;
                     providers.insert(id.clone(), Arc::new(adapter) as DynProvider);
+                    if let Some(inventory) = provider
+                        .local_inventory
+                        .as_ref()
+                        .filter(|inventory| inventory.kind == LocalInventoryKind::OllamaTags)
+                    {
+                        let adapter = OllamaVisionExecutor::new(
+                            id,
+                            inventory.endpoint.as_deref().expect("validated endpoint"),
+                        )?;
+                        image_understanding_executors.insert(
+                            id.clone(),
+                            Arc::new(adapter) as DynImageUnderstandingExecutor,
+                        );
+                    }
                 }
                 "codex_app_server" => {
                     let admitted_models = config
@@ -459,6 +477,7 @@ impl Runtime {
             face_embedding_executors,
             image_embedding_executors,
             text_embedding_executors,
+            image_understanding_executors,
             schedulers,
             jobs: Mutex::new(HashMap::new()),
             metrics: RuntimeMetrics::default(),
@@ -536,6 +555,7 @@ impl Runtime {
             face_embedding_executors: BTreeMap::new(),
             image_embedding_executors: BTreeMap::new(),
             text_embedding_executors: BTreeMap::new(),
+            image_understanding_executors: BTreeMap::new(),
             schedulers,
             jobs: Mutex::new(HashMap::new()),
             metrics: RuntimeMetrics::default(),
@@ -548,6 +568,22 @@ impl Runtime {
             background,
             observer,
         })
+    }
+
+    /// Constructor for typed-provider contract tests and future embedded
+    /// integrations. The caller remains responsible for matching executor ids
+    /// to configured Provider ids.
+    pub fn with_image_understanding_executors(
+        config: RuntimeConfig,
+        providers: BTreeMap<String, DynProvider>,
+        credentials: AppCredentials,
+        executors: BTreeMap<String, DynImageUnderstandingExecutor>,
+    ) -> Arc<Self> {
+        let mut runtime = Self::with_providers_and_credentials(config, providers, credentials);
+        Arc::get_mut(&mut runtime)
+            .expect("newly constructed Runtime has one owner")
+            .image_understanding_executors = executors;
+        runtime
     }
 
     pub fn authenticate(&self, bearer_token: &str) -> Result<String, RuntimeError> {

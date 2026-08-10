@@ -394,7 +394,83 @@ requested/actual EP、precision 和 fallback reason。Consumer 必须忽略未�
 十万张图库的 checkpoint、恢复、限速、重试、source revision/stale-result 仲裁和 Catalog
 发布全部由 Shadow 持有，Runtime 只负责单请求 Job/Attempt、背压、公平性、取消和 provenance。
 
-## 8. 试用 Codex 订阅模型组（experimental）
+## 8. 试用 Qwen 高级图片理解（experimental）
+
+这组接口把本机 VLM 封装成两个职责分离的 typed capability；Consumer 不依赖 Ollama chat
+schema，也不传物理模型名：
+
+| Intent | Endpoint | 结果 |
+| --- | --- | --- |
+| `vision.describe_image` | `POST /infer/v1/vision/image-descriptions` | 短描述 + 自由关键词 proposal |
+| `vision.review_classification` | `POST /infer/v1/vision/classification-reviews` | 闭集中的 `matched`，或 `none` / `uncertain` |
+
+两者都是严格 multipart 请求，必填 `model`、`source_revision`、
+`image_orientation=display_pixels_orientation_normalized` 和名为 `image` 的 JPEG/PNG。图片最多
+20 MiB，解码后最多 40,000,000 pixels；Runtime 不接受文件路径、URL、RAW 或未做 orientation
+normalization 的像素。`source_revision` 最多 256 UTF-8 bytes，必须稳定标识这份确切 raster。
+
+描述还要求最长 35 ASCII bytes 的 BCP-47-shaped `language`：
+
+```bash
+curl http://127.0.0.1:8787/infer/v1/vision/image-descriptions \
+  -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -F model=vision.describe_image \
+  -F source_revision='shadow:photo-42/recipe:7/artifact:abc123' \
+  -F image_orientation=display_pixels_orientation_normalized \
+  -F language=zh-CN \
+  -F infer.priority=background \
+  -F infer.quality_floor=basic \
+  -F infer.placement=local_only \
+  -F infer.offline_required=true \
+  -F infer.fallback=none \
+  -F image=@display.jpg\;type=image/jpeg
+```
+
+`result.description` 最多 1,024 UTF-8 bytes；`result.keyword_suggestions` 最多 16 项，每项最多
+128 bytes，并在大小写折叠后唯一。它们只是 assistant proposal，Runtime 不写用户关键字，
+也不把模型生成内容当成用户接受记录。
+
+分类复核另外要求 `taxonomy_revision` 与 JSON-string `categories`。类别数为 1–64；整个 JSON
+最多 64 KiB；每项只允许 `id`、`name` 和可选 `description`，未知字段会拒绝：
+
+```bash
+curl http://127.0.0.1:8787/infer/v1/vision/classification-reviews \
+  -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -F model=vision.review_classification \
+  -F source_revision='shadow:photo-42/recipe:7/artifact:abc123' \
+  -F image_orientation=display_pixels_orientation_normalized \
+  -F taxonomy_revision='shadow:categories:9' \
+  -F 'categories=[{"id":"travel","name":"旅行"},{"id":"food","name":"食物"}]' \
+  -F infer.priority=interactive \
+  -F infer.quality_floor=general \
+  -F infer.placement=local_only \
+  -F infer.offline_required=true \
+  -F infer.fallback=none \
+  -F image=@display.jpg\;type=image/jpeg
+```
+
+`suggestion.disposition=matched` 时必须带请求闭集内的 `category_id`；`none` / `uncertain` 必须
+省略它。响应不提供伪校准 confidence，Consumer 也不能把这个 proposal 冒充用户 feedback。
+公共响应可增加字段，Consumer 必须忽略未知响应字段；请求始终严格。错误继续按 HTTP status +
+`error.code` 处理，不解析诊断 message。
+
+当前 4B Build 在两条 Intent 上评级 `basic`、resource class 为 `standard`；8B Build 评级
+`general`、resource class 为 `heavy`。描述默认 basic，闭集复核默认 general；Consumer 可为
+明确复核请求 `infer.quality_floor=general`，但不得提交 Ollama tag。响应 `provenance` 会披露实际
+provider、deployment、model profile/build、physical model、runtime、schema/prompt revision 与
+可用的 native timing。
+
+两条路由都强制 `local_only`、`offline_required=true`、`fallback=none`。`background` 只是调度
+优先级，不表示请求可跨重启恢复；Shadow 等 Consumer 继续拥有扫描 checkpoint、resubmit、
+source revision/stale-result 仲裁与用户接受链路。图片、闭集、描述和关键词不进入普通日志、
+通用 Job metadata、audit details 或文本 durable spool。Ollama provider 当前共享有界并发与
+模型 residency；运行中取消会中止 HTTP body 读取并释放 Attempt/reservation，但 provider
+原生计算不承诺硬抢占，迟到结果不会发布为第二个终态。
+
+App 必须只为实际需要显式加入 `vision.describe_image` 和/或
+`vision.review_classification`；不需要 `resource_admin`，也不因此获得其他视觉 Intent。
+
+## 9. 试用 Codex 订阅模型组（experimental）
 
 Codex App Server 在 Runtime 中是一个 `placement=cloud`、`access_class=subscription` 的
 Provider；本机 stdio 只是 transport。一个登录会话当前发现 Sol、Terra、Luna 等多个上游模型，
@@ -488,7 +564,7 @@ GET /infer/v1/providers/codex-subscription/models
 该能力不等于完整 Codex Server 代理。Thread、工具、文件、Shell、MCP、Web、delegation 和
 memory 均不向 Consumer 暴露；adapter 一旦观察到非推理 item 会让 Attempt fail closed。
 
-## 9. 查询和解释自己的 Job
+## 10. 查询和解释自己的 Job
 
 Consumer 可以读取、取消和解释自己创建的 Job，但不能看到其他 App 的数据：
 
@@ -505,7 +581,7 @@ GET  /infer/v1/explain/{response_id}
 Provider probe、资源 load/unload、eviction、maintenance lease、budget 和进程 metrics 属于
 operator experimental surface，不是普通 consumer 合同。
 
-## 10. 接入完成门槛
+## 11. 接入完成门槛
 
 在开始真实反馈测试前，至少确认：
 
@@ -524,6 +600,8 @@ operator experimental surface，不是普通 consumer 合同。
     local-only/offline 请求零触达；图片另需 cloud image egress ACL；不得发送 tools 或 durable background。
 11. 音频 streaming Consumer 必须验证 PCM descriptor、partial replacement、final、disconnect
     cancel 和 reservation 释放，并记录实际 `transcription_mode`，不得假设原生实时 ASR。
+12. Qwen 视觉 Consumer 必须验证闭集 id 不外逸、basic/general 路由、取消与 source revision
+    仲裁；proposal 只有在应用自己的用户接受链路后才能成为业务事实。
 
 Golden request/response/error 示例位于 [contracts/v0.1/fixtures](../contracts/v0.1/fixtures)。
 接入方若使用代码生成器，应直接输入运行中 daemon 返回的 OpenAPI，并固定所使用的

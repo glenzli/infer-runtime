@@ -3,6 +3,7 @@
 mod audio_stream;
 mod audio_worker;
 mod codex_app_server;
+mod ollama_vision;
 mod onnx;
 mod probe;
 
@@ -24,6 +25,11 @@ pub use audio_worker::{
     AudioExecutionOutput, AudioExecutor, AudioWorkerExecutor, DynAudioExecutor,
 };
 pub use codex_app_server::{CodexAppServerProvider, ProviderModelCatalog, ProviderModelInfo};
+pub use ollama_vision::{
+    ClassificationReviewExecutionOutput, DynImageUnderstandingExecutor,
+    ImageDescriptionExecutionOutput, ImageUnderstandingExecutor, OllamaVisionExecutor,
+    OllamaVisionProvenance,
+};
 pub use onnx::{
     DynFaceDetectionExecutor, DynFaceEmbeddingExecutor, DynImageEmbeddingExecutor,
     DynTextEmbeddingExecutor, FaceDetectionExecutionOutput, FaceDetectionExecutor,

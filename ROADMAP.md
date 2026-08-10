@@ -2,7 +2,7 @@
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | M1、M2 已完成，M3 核心闭环完成，M4 退出门槛完成；`0.1.0-candidate.1` 已冻结，当前 `0.1.0-candidate.2` 供外部反馈并继续收口 observability/24h soak/真实 consumer 门槛；M6 的 ONNX foundation、同步人脸与 SigLIP 图文向量已作为发布外 experimental slices 落地，不扩大 v0.1 |
+| 状态 | M1、M2 已完成，M3 核心闭环完成，M4 退出门槛完成；`0.1.0-candidate.1` 已冻结，当前 `0.1.0-candidate.2` 供外部反馈并继续收口 observability/24h soak/真实 consumer 门槛；M6 的 ONNX foundation、同步人脸、SigLIP 图文向量与 QwenVL typed understanding 已作为发布外 experimental slices 落地，不扩大 v0.1 |
 | 规划方式 | 以可演示的纵向能力和退出门槛推进，不以日期代替完成定义 |
 | 首个发布目标 | 单机文本 + 本地文件音频推理控制平面 MVP |
 
@@ -312,9 +312,8 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
 
 ## 9. M6：异构本地执行与类型化多模态协议族
 
-> 当前状态：foundation、同步人脸与 SigLIP image/text embedding slices 已实现并进入
-> experimental feedback；QwenVL typed understanding 为下一独立工作包，视觉 durable 与
-> stable promotion 尚未开放。
+> 当前状态：foundation、同步人脸、SigLIP image/text embedding 与 QwenVL typed understanding
+> slices 已实现并进入 experimental feedback；视觉 durable 与 stable promotion 尚未开放。
 
 ### 目标
 
@@ -350,9 +349,11 @@ tolerance 仍不得借用本次关闭结果提前进入生产承诺。
 3. **后续 ONNX slices**：SFace `vision.embed_face` 与 SigLIP
    `vision.embed_image` + `vision.embed_text` 已分别按 Build/space/privacy 门槛完成；
    DINO 或受控 vocabulary classification/tagging 仍须重新验证；
-4. **下一工作包 / QwenVL 结构化理解**：由 Ollama qwen3-vl:4b/8b 复用控制平面，但使用
-   `vision.describe_image` typed payload/result，不泄漏 chat schema。4B 为 standard/bulk，8B
-   只在明确请求或后续复核中使用；首版同步/background-priority，不开放视觉 durable；
+4. **QwenVL 结构化理解**：`vision.describe_image` 返回有界短描述与关键词 proposal，
+   `vision.review_classification` 只在 Consumer 提供的闭集内返回 `matched|none|uncertain`；
+   两者均不泄漏 Ollama chat schema。4B 是 basic/standard bulk 候选，8B 是 general/heavy
+   明确复核候选；Consumer 以 quality floor 选择能力下限，不绑定物理 tag。首版保持同步，
+   可以使用 background priority，但不开放视觉 durable；
 5. **实时 ASR/TTS**：PCM TTS server-stream 与 commit-redecode ASR duplex experimental slice
    已完成；下一门槛是真实 Consumer 的慢读/断开 soak、长会话内存与延迟曲线，以及原生增量 ASR
    provider。它与视觉 slice 可按 consumer 优先级独立提升稳定级别。
@@ -388,6 +389,12 @@ SLO 和至少一个真实应用集成。不能只新增 Intent 枚举或共享 S
   credential 的真实 HTTP/ACL/Job/Attempt E2E 已通过；图片、查询与向量不进入 Job metadata；
 - release CPU 实测 image/text warm 约 100/33 ms，两 Session 合计约 1.9 GiB RSS，均标记
   `heavy`；当前 graph 的 Core ML 失败探测过慢，因此 immutable Builds 固定 CPU-only；
+- QwenVL 两条 typed route 已完成 strict multipart、闭集输出仲裁、4B/8B quality routing、
+  local-only/offline/no-fallback 强制约束和 payload-free Job metadata；provider adapter 使用
+  Ollama native vision transport，但 Consumer 不接触其 chat schema；真实 Shadow credential
+  HTTP E2E 已通过：4B basic 描述约 32.5 秒（load 2.8 秒）、8B general 描述约 51.0 秒
+  （load 6.2 秒）、warm 8B 闭集复核约 9.4 秒；本机 8B 实际驻留约 7.81 GB。数值只作为
+  当前 Build/机器的 admission 与 SLO 起点，不提升 provisional 质量评级；
 - Core ML 使用严格“不得暗中借 CPU”建 Session；两份当前 Build 均明确拒绝严格 Core ML，配置
   允许时重新建立纯 CPU Session并披露 requested/actual EP 与稳定 fallback reason；
 - experimental schema 尚未提升为冻结 Consumer contract；真实 Consumer feedback 与跨平台
@@ -401,7 +408,7 @@ SLO 和至少一个真实应用集成。不能只新增 Intent 枚举或共享 S
 | 人脸向量 | SFace ONNX（实验同步协议已实现）；合法授权的 ArcFace/InsightFace build | Shadow 域质量、Windows tolerance、stable contract promotion |
 | 图片相似向量 | DINOv2 ViT-S/14 ONNX export | exact export/opset、许可、内存/延迟、Shadow 照片域检索稳定性 |
 | 场景语义/图文检索 | SigLIP 2 Base 224 ONNX（experimental image/text slice 已实现） | Shadow 照片域质量、Windows tolerance、stable promotion |
-| Caption/复杂理解 | QwenVL-4B/8B via Ollama | `vision.describe_image` typed schema、4B/8B 选择、资源/SLO、实际 build 质量 |
+| Caption/复杂理解 | QwenVL-4B/8B via Ollama（experimental typed slices 已实现） | Shadow 照片域质量、混合压力/SLO、stable promotion |
 | 音频 | 现有 MLX audio worker | 保持独立音频协议与 native cache owner |
 
 候选清单不是采购、授权、下载、转换、分发或支持承诺；本机发现某文件也不自动创建 Build 或
@@ -481,7 +488,7 @@ Deployment。
 - wire/schema migration policy 文档化；（candidate 已完成，正式发布前按 consumer 反馈复核）
 - 默认安全绑定、secret 管理和脱敏通过审查；
 - 无 P0/P1 correctness 问题，尤其是隐私越界、预算超卖、重复终态和 reservation 泄漏。
-- ONNX provider、视觉协议、Shadow 集成、D-106 至 D-109 均不是发布门槛，不得因此延期。
+- ONNX provider、视觉协议、Shadow 集成、D-106 至 D-110 均不是发布门槛，不得因此延期。
 
 ### v0.2（本地资源 runtime）
 

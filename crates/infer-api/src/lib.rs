@@ -2,6 +2,7 @@
 
 mod audio_streaming;
 pub mod contract;
+mod image_understanding;
 mod observer;
 mod vision;
 
@@ -89,6 +90,14 @@ pub fn router(runtime: Arc<Runtime>) -> Router {
         .route(
             "/infer/v1/vision/text-embeddings",
             post(vision::create_text_embedding),
+        )
+        .route(
+            "/infer/v1/vision/image-descriptions",
+            post(image_understanding::create_image_description),
+        )
+        .route(
+            "/infer/v1/vision/classification-reviews",
+            post(image_understanding::create_classification_review),
         )
         .route("/infer/v1/jobs", get(get_jobs))
         .route("/infer/v1/jobs/{response_id}", get(get_job))

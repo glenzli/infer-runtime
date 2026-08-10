@@ -157,7 +157,7 @@ impl TextEmbeddingRequest {
     }
 }
 
-fn validate_local_vision_request(
+pub(crate) fn validate_local_vision_request(
     model: &str,
     image: &VisionImage,
     source_revision: &str,
@@ -181,7 +181,7 @@ fn validate_local_vision_request(
     validate_local_constraints(metadata, operation)
 }
 
-fn validate_revision(revision: &str, field: &str) -> Result<(), ContractError> {
+pub(crate) fn validate_revision(revision: &str, field: &str) -> Result<(), ContractError> {
     if revision.trim().is_empty() || revision.len() > 256 {
         return Err(ContractError::InvalidVision(format!(
             "{field} is required and must not exceed 256 UTF-8 bytes"

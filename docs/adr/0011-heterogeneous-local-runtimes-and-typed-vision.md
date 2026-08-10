@@ -1,9 +1,9 @@
 # ADR-0011：异构本地执行族共享控制平面，视觉能力保持类型化协议
 
-- 状态：Accepted（ONNX foundation + 同步 face/SigLIP typed slices；视觉 durable 与通用资源池仍分别 gated）
-- 日期：2026-08-10
+- 状态：Accepted（ONNX foundation + 同步 face/SigLIP/QwenVL typed slices；视觉 durable 与通用资源池仍分别 gated）
+- 日期：2026-08-11
 - 决策者：infer-runtime owner；由 typed vision Consumer 需求与受控 Provider 验证触发复审
-- 关联：D-106、D-107、D-108、ADR-0008、ADR-0009、ADR-0010
+- 关联：D-106、D-107、D-108、D-109、D-110、ADR-0008、ADR-0009、ADR-0010
 
 ## 背景
 
@@ -23,10 +23,10 @@ Node 上形成多个互不知情的资源 owner：每一方都可能认为资源
 
 本 ADR 先接受了严格收窄的 P0：ONNX Session owner、内容寻址 Build store、通用 native
 controller 与同步 `vision.detect_faces` 类型化数据面；第二次复审按独立 SensitiveBiometric
-边界接受 SFace 人脸向量。第三次复审现接受 SigLIP 2 image/text encoder 的同步跨模态
-embedding slice。它们仍不改变冻结的 v0.1 Consumer contract；所有视觉路由列为 experimental。
-视觉 durable background、QwenVL typed understanding、通用 Resource Pool 与 Windows tolerance
-继续保留独立门槛。
+边界接受 SFace 人脸向量。第三次复审接受 SigLIP 2 image/text encoder 的同步跨模态 embedding
+slice；第四次复审接受 QwenVL 的有界描述/关键词与闭集分类复核 typed slices。它们仍不改变
+冻结的 v0.1 Consumer contract；所有视觉路由列为 experimental。视觉 durable background、
+通用 Resource Pool、Windows tolerance 与 stable promotion 继续保留独立门槛。
 
 ## 决定
 
@@ -79,8 +79,11 @@ ONNX tensor 或 Execution Provider 专有类型。
 第三个切片开放 `vision.embed_image` / `vision.image_embedding` 与 `vision.embed_text` /
 `vision.text_embedding`，实验路由分别为 `POST /infer/v1/vision/image-embeddings` 与
 `POST /infer/v1/vision/text-embeddings`。两者由同一 SigLIP checkpoint 的 image/text encoder
-满足，必须返回相同 embedding-space identity。`vision.classify`/`vision.tag` 与 QwenVL typed
-understanding 仍是后续候选；共享 ONNX owner 不使其自动进入支持矩阵。
+满足，必须返回相同 embedding-space identity。第四个 slice 开放 `vision.describe_image` /
+`vision.image_description` 与 `vision.review_classification` / `vision.classification_review`，实验
+路由分别为 `POST /infer/v1/vision/image-descriptions` 与
+`POST /infer/v1/vision/classification-reviews`。它们通过 Ollama QwenVL adapter 执行，但公共
+合同不暴露 chat schema、物理 tag 或自由 tensor map。
 
 候选合同方向：
 
@@ -90,9 +93,11 @@ understanding 仍是后续候选；共享 ONNX owner 不使其自动进入支持
 - Image embedding 返回 vector、embedding-space identity、input artifact/source revision 和
   preprocess provenance；
 - Text embedding 返回同一 space 的 vector、query revision、language 与 tokenizer provenance；
-- Image classification/tagging 返回受版本控制的 vocabulary scores，不把自由文本直接作为
-  稳定分类主键；
-- Caption/复杂视觉理解继续可由 Ollama VLM deployment 满足，不因新增 ONNX provider 改写
+- Image description 返回有界 description 与 keyword suggestions，均只是 Consumer 可重建
+  proposal；
+- Classification review 只在 Consumer 提供的版本化闭集内返回 `matched|none|uncertain`，不把
+  模型自报概率伪装成校准 confidence，也不直接形成用户事实；
+- Caption/复杂视觉理解由 Ollama VLM typed adapter 满足，不因新增 ONNX provider 改写
   Responses/Ollama 的原生执行路径。
 
 普通应用不能传递 ONNX tensor 名、物理 backend 或任意模型路径。
@@ -158,7 +163,7 @@ Resource Manager 已不再硬编码 Ollama，ONNX Session 与 Ollama native life
 以及它与 M5 远程 Node capability/resource 声明的共同 schema。不能仅因存在多个 runtime 就
 提前建设通用集群调度器。
 
-### OD-3：视觉与 SensitiveBiometric payload ownership（同步 face/semantic 已关闭，引用与 durable 开放）
+### OD-3：视觉与 SensitiveBiometric payload ownership（同步 face/semantic/understanding 已关闭，引用与 durable 开放）
 
 同步检测与向量只接受 20 MiB 内的 JPEG/PNG multipart，服务器强制 `local_only`、
 `offline_required=true`、`fallback=none`；像素只存在于请求和 executor 内存。SFace embedding
@@ -170,6 +175,10 @@ SigLIP image 路由只接受 Consumer 已做 orientation normalization 的 displ
 并要求精确 orientation 标识；text 路由接受有界查询、`query_revision` 和可选语言标签。图片、
 查询文本与 768d 向量同样只存在于同步请求/响应，不进入通用 Job metadata、日志、audit 或
 文本 durable spool。图库队列、checkpoint/resubmit、索引和 stale-result 仲裁由 Shadow 所有。
+
+QwenVL typed routes 复用相同的 raster/source revision 下限。Consumer 提供的闭集和模型生成的
+描述、关键词、分类 proposal 只存在于单次请求/响应，不进入通用 Job metadata、默认日志、
+audit 或 durable spool；用户接受、关键字写入和 adaptation feedback 继续完全由 Shadow 所有。
 
 视觉 durable background 不能默认复用 ADR-0010 的文本 spool。只有在重新定义 payload 类型、
 大小/引用 owner、加密、恢复幂等、结果发布仲裁和删除语义并完成隐私评审后，才能单独启用。
@@ -195,12 +204,16 @@ requested/actual 均记录为 `cpu` 且无 fallback；未来更换 export/ORT/EP
 
 YuNet 2026May 与 SFace 2021dec 已固定 exact official artifact 并形成 experimental/light
 Deployment；YuNet 与 SFace 只承诺当前实验 typed slice。取得合法授权的
-ArcFace/InsightFace build、DINOv2 和 QwenVL 的新增视觉协议仍只是候选。SigLIP 2 已固定
+ArcFace/InsightFace build 与 DINOv2 仍只是候选。SigLIP 2 已固定
 official Base patch16 224 checkpoint revision
 `75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2`、Apache-2.0、checkpoint/graph/tokenizer digest、
 opset 17 与 export toolchain，并以 image/text 两个 Build 共享一个 768d space。它只是本机
 experimental Deployment；Windows tolerance 和 Shadow 照片域检索质量通过前不得提升为
 stable。当前实现也不代表 infer-runtime 提供通用自动下载或模型市场。
+
+QwenVL typed routes 当前使用 operator 已管理的 Ollama 4B/8B Builds；Runtime 记录实际 Build、
+physical model 与 runtime provenance，但不复制、下载或重新分发 Ollama 管理的权重。物理 tag、
+模板或 prompt revision 改变时必须形成新的可审计 Build/adapter identity，不能继承旧质量结论。
 
 ### OD-6：SigLIP 跨模态合同（已关闭）
 
@@ -209,6 +222,25 @@ orientation-normalized artifact 与 `source_revision`；text 请求绑定有界�
 `query_revision` 和 tokenizer identity。两种响应返回 768d L2-normalized vector、cosine、
 完全相同的 space、Build/artifact/preprocess/tokenizer/EP provenance。Consumer 必须按 space
 分区索引，并在 identity 改变时重建；Runtime 不持有图库、索引或用户关键字事实。
+
+### OD-7：QwenVL typed understanding（已关闭为 experimental slice）
+
+采用两个职责分离的 Intent，而不是让一个自由生成 endpoint 同时解释分类和描述。
+`vision.describe_image` 接受 orientation-normalized display raster、`source_revision` 和输出语言，
+返回 bounded short description 与去重 keyword suggestions。`vision.review_classification` 另接受
+`taxonomy_revision` 和最多 64 个 id/name/description 类别，只允许返回闭集 id 或
+`none|uncertain`。proposal 永远不是 adaptation feedback 或 `AiAccepted`。
+
+Consumer 以 quality floor 选择能力下限，不传 Ollama tag：当前 4B Build 为 basic/standard，
+用于 bulk/background；8B Build 为 general/heavy，用于 explicit/review。描述默认 basic，分类
+复核默认 general。两条路由都强制 local-only/offline/no-fallback，复用统一 Job/Attempt、
+deadline、取消、provider capacity 和全机 pressure；首版同步返回，background 只表达优先级，
+不形成 durable photo queue。
+
+Provider adapter 使用 Ollama native vision transport，但只接受 revisioned prompt 的严格 JSON
+结果并再次执行闭集/长度校验。真实 provider 验证显示当前 `format` JSON Schema 与 Qwen thinking
+组合不能稳定把结果放入 public content，因此本 Build 不依赖该开关；这一兼容细节只存在于
+adapter，schema/prompt revision 与实际 physical model 仍进入 provenance。
 
 ## 备选方案
 
@@ -239,13 +271,18 @@ orientation-normalized artifact 与 `source_revision`；text 请求绑定有界�
 
 ## 验证方式与当前证据
 
-基础与三个 slice 已通过公共制品 publish/reverify、真实 YuNet CPU Session/推理、官方示例人像框与五点、
+基础与四组 slice 已通过公共制品 publish/reverify、真实 YuNet CPU Session/推理、官方示例人像框与五点、
 SFace CPU load/inventory/unload/对齐/归一化、严格 Core ML 拒绝/CPU fallback disclosure，
 以及 face 路由完整 auth → ACL → HTTP → Job/Attempt → provider 端到端测试。SigLIP 另通过
 固定 checkpoint/export、image/text graph/tokenizer 内容寻址校验、中文文本、共享 space、
 768d L2 normalization、CPU-only 实际 route 和 release 内存/吞吐测量；Shadow ACL 的真实
-managed credential 已完成两条 HTTP E2E。所有 E2E 都验证通用 Job 响应不包含 image、query
-或 embedding。默认 CI 继续用不依赖权重的合同测试。后续
+managed credential 已完成两条 HTTP E2E。QwenVL 另通过 strict multipart/JSON、4B/8B quality
+routing、闭集 id 仲裁、取消与本机 native Ollama HTTP E2E；图片、类别、描述和关键词不会进入
+Job metadata 或 Console log。当前机器一次真实采样中，4B basic 描述约 32.5 秒（load 2.8 秒）、
+8B general 描述约 51.0 秒（load 6.2 秒）、warm 8B 闭集复核约 9.4 秒，8B 驻留约 7.81 GB；
+这些数据只用于 provisional admission/SLO 起点，不是跨机器承诺。所有 E2E 都验证通用 Job
+响应不包含 image、query、embedding 或生成文本。默认
+CI 继续用不依赖权重的合同测试。后续
 推广为稳定 Consumer contract 前仍必须通过：
 
 - artifact/preprocess/tensor/tokenizer/vocabulary/license identity 校验；
@@ -260,7 +297,7 @@ managed credential 已完成两条 HTTP E2E。所有 E2E 都验证通用 Job 响
 
 ## 明确非目标
 
-- 不因已批准同步 embeddings 而批准持久化、视觉 background、tagging、caption 或 QwenVL typed understanding；
+- 不因已批准同步视觉 slices 而批准持久化、视觉 durable background、开放词表自动写入或通用 VLM chat proxy；
 - 不自动下载、采购、转换或对外分发候选模型；本机 operator import 只发布已校验制品；
 - 不用 ONNX 替代 Ollama VLM 或 MLX audio；
 - 不接管 Shadow 的 Catalog、人物命名、聚类确认或照片分析计划；

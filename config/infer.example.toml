@@ -271,6 +271,24 @@ output_modalities = ["text"]
 default_quality_floor = "basic"
 default_policy = "balanced"
 
+# Bounded generative vision remains a typed local data plane. The Consumer
+# supplies a normalized display artifact and never sees Ollama's chat schema.
+[intents."vision.describe_image"]
+data_plane = "vision.image_description"
+input_modalities = ["image"]
+output_modalities = ["json"]
+required_features = ["structured_vision_output"]
+default_quality_floor = "basic"
+default_policy = "local-first"
+
+[intents."vision.review_classification"]
+data_plane = "vision.classification_review"
+input_modalities = ["image"]
+output_modalities = ["json"]
+required_features = ["structured_vision_output"]
+default_quality_floor = "general"
+default_policy = "local-first"
+
 [intents."vision.detect_faces"]
 data_plane = "vision.face_detection"
 input_modalities = ["image"]
@@ -372,11 +390,27 @@ family = "qwen3-vl"
 grade = "basic"
 status = "provisional"
 
+[model_profiles.qwen3_vl_4b.ratings."vision.describe_image"]
+grade = "basic"
+status = "provisional"
+
+[model_profiles.qwen3_vl_4b.ratings."vision.review_classification"]
+grade = "basic"
+status = "provisional"
+
 [model_profiles.qwen3_vl_8b]
 family = "qwen3-vl"
 
 [model_profiles.qwen3_vl_8b.ratings."vision.understand"]
 grade = "basic"
+status = "provisional"
+
+[model_profiles.qwen3_vl_8b.ratings."vision.describe_image"]
+grade = "general"
+status = "provisional"
+
+[model_profiles.qwen3_vl_8b.ratings."vision.review_classification"]
+grade = "general"
 status = "provisional"
 
 [model_profiles.qwen3_6_35b]
@@ -563,13 +597,15 @@ output_modalities = ["text"]
 profile = "qwen3_vl_4b"
 model_id = "qwen3-vl:4b"
 input_modalities = ["text", "image"]
-output_modalities = ["text"]
+output_modalities = ["text", "json"]
+features = ["structured_vision_output"]
 
 [model_builds.qwen3_vl_8b]
 profile = "qwen3_vl_8b"
 model_id = "qwen3-vl:8b"
 input_modalities = ["text", "image"]
-output_modalities = ["text"]
+output_modalities = ["text", "json"]
+features = ["structured_vision_output"]
 
 [model_builds.qwen3_6_35b_mlx]
 profile = "qwen3_6_35b"

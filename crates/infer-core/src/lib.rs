@@ -5,6 +5,7 @@
 
 mod audio;
 mod config;
+mod image_understanding;
 mod job;
 mod payload;
 mod request;
@@ -15,6 +16,7 @@ use thiserror::Error;
 
 pub use audio::*;
 pub use config::*;
+pub use image_understanding::*;
 pub use job::*;
 pub use payload::*;
 pub use request::*;

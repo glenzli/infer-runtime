@@ -132,14 +132,14 @@ pub(super) async fn create_text_embedding(
 }
 
 #[derive(Default)]
-struct VisionMultipart {
+pub(super) struct VisionMultipart {
     text: BTreeMap<String, String>,
-    metadata: BTreeMap<String, String>,
-    image: Option<VisionImage>,
+    pub(super) metadata: BTreeMap<String, String>,
+    pub(super) image: Option<VisionImage>,
 }
 
 impl VisionMultipart {
-    async fn parse(
+    pub(super) async fn parse(
         mut multipart: Multipart,
         allowed_text_fields: &[&str],
     ) -> Result<Self, ApiError> {
@@ -231,7 +231,7 @@ impl VisionMultipart {
         Ok(form)
     }
 
-    fn required_text(&self, name: &'static str) -> Result<String, ApiError> {
+    pub(super) fn required_text(&self, name: &'static str) -> Result<String, ApiError> {
         self.text
             .get(name)
             .filter(|value| !value.trim().is_empty())
@@ -240,7 +240,7 @@ impl VisionMultipart {
     }
 }
 
-fn fail_closed_metadata(
+pub(super) fn fail_closed_metadata(
     mut metadata: BTreeMap<String, String>,
     operation: &str,
 ) -> Result<BTreeMap<String, String>, ApiError> {

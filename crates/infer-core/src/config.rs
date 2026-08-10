@@ -1161,6 +1161,8 @@ impl RuntimeConfig {
                         | "vision.face_embedding"
                         | "vision.image_embedding"
                         | "vision.text_embedding"
+                        | "vision.image_description"
+                        | "vision.classification_review"
                 )
                 || intent.input_modalities.is_empty()
                 || intent.output_modalities.is_empty()
@@ -1367,7 +1369,16 @@ impl RuntimeConfig {
             for intent_id in model.ratings.keys() {
                 let data_plane = self.intents[intent_id].data_plane.as_str();
                 let compatible = match provider.kind.as_str() {
-                    "responses" | "codex_app_server" => data_plane == "responses",
+                    "responses" => {
+                        data_plane == "responses"
+                            || (matches!(
+                                data_plane,
+                                "vision.image_description" | "vision.classification_review"
+                            ) && provider.local_inventory.as_ref().is_some_and(|inventory| {
+                                inventory.kind == LocalInventoryKind::OllamaTags
+                            }))
+                    }
+                    "codex_app_server" => data_plane == "responses",
                     "audio_worker" => data_plane.starts_with("audio."),
                     "onnx" => data_plane.starts_with("vision."),
                     _ => false,
@@ -1675,6 +1686,24 @@ mod tests {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
         RuntimeConfig::load(path).expect("example registry must remain valid");
+    }
+
+    #[test]
+    fn typed_qwen_vision_requires_an_explicit_local_ollama_native_adapter() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let mut config = RuntimeConfig::load(path).unwrap();
+        let mut cloud = config.providers["ollama-local"].clone();
+        cloud.placement = super::Placement::Cloud;
+        cloud.local_inventory = None;
+        cloud.base_url = Some("https://example.invalid/v1".into());
+        config.providers.insert("fake-cloud-vlm".into(), cloud);
+        config
+            .deployments
+            .get_mut("ollama_qwen3_vl_4b")
+            .unwrap()
+            .provider = "fake-cloud-vlm".into();
+        assert!(config.validate().is_err());
     }
 
     #[test]

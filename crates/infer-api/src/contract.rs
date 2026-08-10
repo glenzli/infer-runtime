@@ -93,6 +93,14 @@ pub const EXPERIMENTAL_ROUTES: &[ContractRoute] = &[
         method: "POST",
         path: "/infer/v1/vision/text-embeddings",
     },
+    ContractRoute {
+        method: "POST",
+        path: "/infer/v1/vision/image-descriptions",
+    },
+    ContractRoute {
+        method: "POST",
+        path: "/infer/v1/vision/classification-reviews",
+    },
 ];
 
 #[derive(Debug, Serialize)]

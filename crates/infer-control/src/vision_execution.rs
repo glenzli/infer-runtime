@@ -245,12 +245,15 @@ impl Runtime {
         .await
     }
 
-    async fn start_vision_attempt(&self, prepared: &PreparedRun) -> Result<usize, RuntimeError> {
+    pub(super) async fn start_vision_attempt(
+        &self,
+        prepared: &PreparedRun,
+    ) -> Result<usize, RuntimeError> {
         self.mark(&prepared.job_id, JobState::Running, None).await?;
         self.begin_attempt(prepared, AttemptTrigger::Initial).await
     }
 
-    async fn await_vision<T>(
+    pub(super) async fn await_vision<T>(
         &self,
         prepared: &PreparedRun,
         upstream: impl Future<Output = Result<T, ProviderError>>,
@@ -282,7 +285,7 @@ impl Runtime {
         }
     }
 
-    async fn complete_vision_success(
+    pub(super) async fn complete_vision_success(
         &self,
         prepared: &PreparedRun,
         attempt_number: usize,
@@ -303,7 +306,7 @@ impl Runtime {
         Ok(())
     }
 
-    async fn complete_vision_error(
+    pub(super) async fn complete_vision_error(
         &self,
         prepared: &PreparedRun,
         attempt_number: usize,
