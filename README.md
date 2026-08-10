@@ -28,6 +28,11 @@ Runtime 始终保留可解释的 Job/Attempt、Candidate Plan、reason codes 和
 普通 Consumer 只获得自己的任务视图；资源控制、Provider probe 和凭证管理属于受保护的 Operator
 surface。
 
+![Infer Console 运行总览（合成演示数据）](docs/images/console-overview-demo.png)
+
+> 截图仅展示 Console 的界面结构，所有 Provider、Deployment、指标与实例身份均为合成演示数据，
+> 不代表任何开发机或用户环境。
+
 ## 快速启动
 
 基础开发需要 Rust。示例配置可以连接 Ollama；音频、ONNX、云端与订阅式 Provider 都是可选
@@ -75,6 +80,8 @@ Console 提供七个图形页面：总览、统计、任务、模型与资源、
 
 界面跟随系统浅色/深色外观。Browser 只收到随机 Console session proof；`local-operator` bearer
 credential 不会下发到页面。
+
+![Infer Console 模型与资源（合成演示数据）](docs/images/console-models-demo.png)
 
 ## Consumer 接入
 
