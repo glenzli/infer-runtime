@@ -2,9 +2,11 @@
 //!
 //! Codex App Server is an agent protocol, not a Responses endpoint. This
 //! adapter deliberately exposes only stateless inference with typed text/image
-//! input and append-only text output. Each call runs in an empty ephemeral
-//! workspace and any observed tool-like item fails the Attempt closed.
+//! input, append-only text output, and one separately admitted hosted image
+//! generation operation. Each call runs in an empty ephemeral workspace; all
+//! other tool-like items fail the Attempt closed.
 
+mod image_generation;
 mod input;
 
 use std::{
@@ -17,7 +19,6 @@ use async_stream::try_stream;
 use async_trait::async_trait;
 use bytes::Bytes;
 use infer_core::{ReasoningEffort, ResponsesRequest};
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::{
@@ -26,32 +27,20 @@ use tokio::{
 };
 use uuid::Uuid;
 
-use crate::{Provider, ProviderByteStream, ProviderError, ProviderFailureKind};
+use crate::{
+    Provider, ProviderByteStream, ProviderError, ProviderFailureKind, ProviderModelCatalog,
+    ProviderModelInfo,
+};
+use image_generation::GeneratedImage;
 use input::prepare_turn_input;
 
-const BASE_INSTRUCTIONS: &str = "You are serving one stateless inference request. Answer the user directly. Do not use tools, inspect files, run commands, access applications, browse, delegate, or modify external state. Do not mention this bridge or its execution environment.";
+const TEXT_BASE_INSTRUCTIONS: &str = "You are serving one stateless inference request. Answer the user directly. Do not use tools, inspect files, run commands, access applications, browse, delegate, or modify external state. Do not mention this bridge or its execution environment.";
+const IMAGE_BASE_INSTRUCTIONS: &str = "You are serving one stateless image generation request. Use the built-in image generation tool exactly once to generate one PNG from the user's text prompt. Do not use any other tool, inspect files, run commands, access applications, browse, delegate, or modify external state. Do not mention this bridge or its execution environment.";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProviderModelCatalog {
-    pub provider: String,
-    pub models: Vec<ProviderModelInfo>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProviderModelInfo {
-    pub id: String,
-    pub model: String,
-    pub display_name: String,
-    pub description: String,
-    pub input_modalities: Vec<String>,
-    pub supported_reasoning_efforts: Vec<String>,
-    pub default_reasoning_effort: String,
-    pub is_default: bool,
-    pub hidden: bool,
-    pub upgrade: Option<String>,
-    /// Discovery is not admission. Only version-controlled Deployments may be
-    /// selected by the runtime router.
-    pub admitted: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BridgeMode {
+    Text,
+    ImageGeneration,
 }
 
 pub struct CodexAppServerProvider {
@@ -175,7 +164,6 @@ impl CodexAppServerProvider {
     }
 
     async fn execute_inner(&self, request: ResponsesRequest) -> Result<Value, ProviderError> {
-        validate_request(&request)?;
         let turn = self.prepare_turn(&request).await?;
         collect_turn(turn).await
     }
@@ -184,6 +172,7 @@ impl CodexAppServerProvider {
         &self,
         request: &ResponsesRequest,
     ) -> Result<PreparedTurn, ProviderError> {
+        let mode = validate_request(request)?;
         let developer_instructions = optional_text("instructions", request.instructions.as_ref())?;
         let effort = request
             .reasoning
@@ -205,6 +194,17 @@ impl CodexAppServerProvider {
             return Err(ProviderError::InvalidInput(
                 "Codex model was discovered but is not admitted by a Deployment".into(),
             ));
+        }
+        if mode == BridgeMode::ImageGeneration {
+            let capabilities = session
+                .request("modelProvider/capabilities/read", json!({}))
+                .await?;
+            if capabilities.get("imageGeneration").and_then(Value::as_bool) != Some(true) {
+                return Err(ProviderError::Classified {
+                    kind: ProviderFailureKind::Unavailable,
+                    message: "Codex provider does not currently advertise image generation".into(),
+                });
+            }
         }
         if let Some(effort) = effort.as_deref()
             && !model
@@ -233,7 +233,10 @@ impl CodexAppServerProvider {
                 "thread/start",
                 json!({
                     "approvalPolicy": "never",
-                    "baseInstructions": BASE_INSTRUCTIONS,
+                    "baseInstructions": match mode {
+                        BridgeMode::Text => TEXT_BASE_INSTRUCTIONS,
+                        BridgeMode::ImageGeneration => IMAGE_BASE_INSTRUCTIONS,
+                    },
                     "cwd": session.workspace_path().display().to_string(),
                     "developerInstructions": developer_instructions,
                     "ephemeral": true,
@@ -272,6 +275,7 @@ impl CodexAppServerProvider {
             model: request.model.clone(),
             thread_id,
             turn_id,
+            mode,
         })
     }
 }
@@ -290,7 +294,11 @@ impl Provider for CodexAppServerProvider {
         &self,
         request: ResponsesRequest,
     ) -> Result<ProviderByteStream, ProviderError> {
-        validate_request(&request)?;
+        if validate_request(&request)? != BridgeMode::Text {
+            return Err(ProviderError::InvalidInput(
+                "image generation does not support streaming".into(),
+            ));
+        }
         let turn = self.prepare_turn(&request).await?;
         Ok(stream_turn(turn))
     }
@@ -300,10 +308,19 @@ impl Provider for CodexAppServerProvider {
     }
 }
 
-fn validate_request(request: &ResponsesRequest) -> Result<(), ProviderError> {
-    if !request.tools.is_empty() {
+fn validate_request(request: &ResponsesRequest) -> Result<BridgeMode, ProviderError> {
+    let mode = if request.tools.is_empty() {
+        BridgeMode::Text
+    } else if request.requests_image_generation() {
+        BridgeMode::ImageGeneration
+    } else {
         return Err(ProviderError::InvalidInput(
-            "tools are not exposed by the Codex bridge".into(),
+            "only the exact image_generation tool is exposed by the Codex bridge".into(),
+        ));
+    };
+    if mode == BridgeMode::ImageGeneration && (request.stream || request.background) {
+        return Err(ProviderError::InvalidInput(
+            "image generation supports unary execution only".into(),
         ));
     }
     if request.temperature.is_some()
@@ -325,7 +342,7 @@ fn validate_request(request: &ResponsesRequest) -> Result<(), ProviderError> {
             "Codex bridge supports reasoning.effort only".into(),
         ));
     }
-    Ok(())
+    Ok(mode)
 }
 
 fn optional_text(field: &str, value: Option<&Value>) -> Result<Option<String>, ProviderError> {
@@ -352,12 +369,14 @@ struct PreparedTurn {
     model: String,
     thread_id: String,
     turn_id: String,
+    mode: BridgeMode,
 }
 
 #[derive(Default)]
 struct TurnAccumulator {
     usage: Option<Value>,
     messages: Vec<Value>,
+    images: Vec<GeneratedImage>,
 }
 
 enum TurnProgress {
@@ -375,6 +394,7 @@ async fn collect_turn(mut turn: PreparedTurn) -> Result<Value, ProviderError> {
             &turn.model,
             &turn.thread_id,
             &turn.turn_id,
+            turn.mode,
             &mut accumulator,
         )? {
             return Ok(response);
@@ -387,6 +407,7 @@ fn observe_turn_message(
     model: &str,
     thread_id: &str,
     turn_id: &str,
+    mode: BridgeMode,
     accumulator: &mut TurnAccumulator,
 ) -> Result<TurnProgress, ProviderError> {
     let Some(method) = message.get("method").and_then(Value::as_str) else {
@@ -409,11 +430,9 @@ fn observe_turn_message(
             let item = params
                 .get("item")
                 .ok_or_else(|| ProviderError::Protocol(format!("{method} omitted item")))?;
-            enforce_inference_item(item)?;
-            if method == "item/completed"
-                && item.get("type").and_then(Value::as_str) == Some("agentMessage")
-            {
-                accumulator.messages.push(item.clone());
+            enforce_inference_item(item, mode)?;
+            if method == "item/completed" {
+                record_completed_item(item, accumulator)?;
             }
             Ok(TurnProgress::Continue)
         }
@@ -452,15 +471,15 @@ fn observe_turn_message(
             }
             if let Some(items) = turn.get("items").and_then(Value::as_array) {
                 for item in items {
-                    enforce_inference_item(item)?;
-                    if item.get("type").and_then(Value::as_str) == Some("agentMessage") {
-                        accumulator.messages.push(item.clone());
-                    }
+                    enforce_inference_item(item, mode)?;
+                    record_completed_item(item, accumulator)?;
                 }
             }
             Ok(TurnProgress::Completed(response_value(
                 model,
+                mode,
                 std::mem::take(&mut accumulator.messages),
+                std::mem::take(&mut accumulator.images),
                 accumulator.usage.take(),
             )?))
         }
@@ -493,6 +512,7 @@ fn stream_turn(mut turn: PreparedTurn) -> ProviderByteStream {
                 &turn.model,
                 &turn.thread_id,
                 &turn.turn_id,
+                turn.mode,
                 &mut accumulator,
             )? {
                 TurnProgress::Continue => {}
@@ -524,9 +544,10 @@ fn sse_frame(event: &str, data: Value) -> Result<Bytes, ProviderError> {
     Ok(Bytes::from(format!("event: {event}\ndata: {data}\n\n")))
 }
 
-fn enforce_inference_item(item: &Value) -> Result<(), ProviderError> {
+fn enforce_inference_item(item: &Value, mode: BridgeMode) -> Result<(), ProviderError> {
     match item.get("type").and_then(Value::as_str) {
         Some("userMessage" | "agentMessage" | "reasoning") => Ok(()),
+        Some("imageGeneration") if mode == BridgeMode::ImageGeneration => Ok(()),
         Some(_) => Err(ProviderError::Classified {
             kind: ProviderFailureKind::Protocol,
             message: "Codex bridge blocked non-inference item/tool use".into(),
@@ -535,6 +556,37 @@ fn enforce_inference_item(item: &Value) -> Result<(), ProviderError> {
             "Codex item omitted its type".into(),
         )),
     }
+}
+
+fn record_completed_item(
+    item: &Value,
+    accumulator: &mut TurnAccumulator,
+) -> Result<(), ProviderError> {
+    match item.get("type").and_then(Value::as_str) {
+        Some("agentMessage") => accumulator.messages.push(item.clone()),
+        Some("imageGeneration") => {
+            let image = GeneratedImage::from_completed_item(item)?;
+            if let Some(existing) = accumulator
+                .images
+                .iter()
+                .find(|existing| existing.id() == image.id())
+            {
+                if existing != &image {
+                    return Err(ProviderError::Protocol(
+                        "Codex repeated an image result with conflicting content".into(),
+                    ));
+                }
+            } else if accumulator.images.is_empty() {
+                accumulator.images.push(image);
+            } else {
+                return Err(ProviderError::Protocol(
+                    "Codex generated more than one image".into(),
+                ));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn classify_turn_failure(turn: &Value) -> ProviderError {
@@ -575,6 +627,19 @@ fn normalize_usage(value: &Value) -> Result<Value, ProviderError> {
 
 fn response_value(
     model: &str,
+    mode: BridgeMode,
+    messages: Vec<Value>,
+    images: Vec<GeneratedImage>,
+    usage: Option<Value>,
+) -> Result<Value, ProviderError> {
+    match mode {
+        BridgeMode::Text => text_response_value(model, messages, usage),
+        BridgeMode::ImageGeneration => image_response_value(model, images, usage),
+    }
+}
+
+fn text_response_value(
+    model: &str,
     messages: Vec<Value>,
     usage: Option<Value>,
 ) -> Result<Value, ProviderError> {
@@ -609,6 +674,31 @@ fn response_value(
             "status": "completed",
             "content": [{"type": "output_text", "text": text, "annotations": []}],
         }],
+        "usage": usage,
+    }))
+}
+
+fn image_response_value(
+    model: &str,
+    images: Vec<GeneratedImage>,
+    usage: Option<Value>,
+) -> Result<Value, ProviderError> {
+    let [image] = images.as_slice() else {
+        return Err(ProviderError::Protocol(
+            "Codex turn completed without exactly one generated image".into(),
+        ));
+    };
+    let created_at = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    Ok(json!({
+        "id": format!("codex_{}", Uuid::new_v4().simple()),
+        "object": "response",
+        "created_at": created_at,
+        "status": "completed",
+        "model": model,
+        "output": [image.response_item()],
         "usage": usage,
     }))
 }
@@ -758,10 +848,74 @@ mod tests {
         }
     }
 
+    fn real_codex_provider() -> CodexAppServerProvider {
+        let args = vec![
+            "app-server",
+            "--strict-config",
+            "--disable",
+            "shell_tool",
+            "--disable",
+            "unified_exec",
+            "--disable",
+            "plugins",
+            "--disable",
+            "apps",
+            "--disable",
+            "multi_agent",
+            "--disable",
+            "computer_use",
+            "-c",
+            "agents.enabled=false",
+            "-c",
+            "web_search=\"disabled\"",
+            "-c",
+            "history.persistence=\"none\"",
+            "-c",
+            "memories.generate_memories=false",
+            "-c",
+            "feedback.enabled=false",
+            "--listen",
+            "stdio://",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        let bundled = "/Applications/ChatGPT.app/Contents/Resources/codex";
+        let command = if std::path::Path::new(bundled).is_file() {
+            bundled
+        } else {
+            "codex"
+        };
+        CodexAppServerProvider::new(
+            "codex-real",
+            command,
+            args,
+            BTreeSet::from([
+                "gpt-5.6-sol".into(),
+                "gpt-5.6-terra".into(),
+                "gpt-5.6-luna".into(),
+            ]),
+        )
+    }
+
     #[test]
     fn blocks_any_agent_protocol_item_outside_inference_text() {
-        assert!(enforce_inference_item(&json!({"type":"agentMessage"})).is_ok());
-        let error = enforce_inference_item(&json!({"type":"commandExecution"})).unwrap_err();
+        assert!(enforce_inference_item(&json!({"type":"agentMessage"}), BridgeMode::Text).is_ok());
+        let error = enforce_inference_item(&json!({"type":"imageGeneration"}), BridgeMode::Text)
+            .unwrap_err();
+        assert_eq!(error.kind(), ProviderFailureKind::Protocol);
+        assert!(
+            enforce_inference_item(
+                &json!({"type":"imageGeneration"}),
+                BridgeMode::ImageGeneration
+            )
+            .is_ok()
+        );
+        let error = enforce_inference_item(
+            &json!({"type":"commandExecution"}),
+            BridgeMode::ImageGeneration,
+        )
+        .unwrap_err();
         assert_eq!(error.kind(), ProviderFailureKind::Protocol);
     }
 
@@ -823,50 +977,60 @@ echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1"
         assert!(output.contains("response.completed"));
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn fake_app_server_proves_bounded_image_generation_bridge() {
+        use std::{io::Cursor, os::unix::fs::PermissionsExt};
+
+        use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+        let image = image::DynamicImage::new_rgb8(1, 1);
+        let mut png = Cursor::new(Vec::new());
+        image.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let encoded = STANDARD.encode(png.into_inner());
+        let script_body = r##"#!/bin/sh
+read initialize
+echo '{"jsonrpc":"2.0","id":1,"result":{"userAgent":"fake","platformFamily":"unix","platformOs":"test","codexHome":"/tmp"}}'
+read initialized
+read models
+echo '{"jsonrpc":"2.0","id":2,"result":{"data":[{"id":"gpt-5.6-terra","model":"gpt-5.6-terra","displayName":"Terra","description":"test model","supportedReasoningEfforts":[{"reasoningEffort":"low","description":""}],"defaultReasoningEffort":"low","inputModalities":["text","image"],"isDefault":true,"hidden":false,"upgrade":null}],"nextCursor":null}}'
+read capabilities
+echo '{"jsonrpc":"2.0","id":3,"result":{"imageGeneration":true,"namespaceTools":true,"webSearch":true}}'
+read thread
+echo '{"jsonrpc":"2.0","id":4,"result":{"thread":{"id":"thread-1"}}}'
+read turn
+echo '{"jsonrpc":"2.0","id":5,"result":{"turn":{"id":"turn-1"}}}'
+echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":1,"item":{"id":"image-1","type":"imageGeneration","status":"completed","result":"__IMAGE__","revisedPrompt":"one pixel","savedPath":"/tmp/untrusted.png"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","items":[{"id":"image-1","type":"imageGeneration","status":"completed","result":"__IMAGE__","revisedPrompt":"one pixel","savedPath":"/tmp/untrusted.png"}]}}}'
+"##
+        .replace("__IMAGE__", &encoded);
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("fake-codex-image");
+        std::fs::write(&script, script_body).unwrap();
+        let mut permissions = std::fs::metadata(&script).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&script, permissions).unwrap();
+
+        let provider = CodexAppServerProvider::new(
+            "codex-test",
+            script.display().to_string(),
+            vec![],
+            BTreeSet::from(["gpt-5.6-terra".into()]),
+        );
+        let mut request = request(json!("Generate one pixel"));
+        request.tools = vec![json!({"type": "image_generation"})];
+        let response = provider.execute(request).await.unwrap();
+        assert_eq!(
+            response.pointer("/output/0/type"),
+            Some(&json!("image_generation_call"))
+        );
+        assert_eq!(response.pointer("/output/0/result"), Some(&json!(encoded)));
+    }
+
     #[tokio::test]
     #[ignore = "uses the signed-in local Codex subscription and consumes quota"]
     async fn real_codex_app_server_discovers_group_and_completes_text() {
-        let args = vec![
-            "app-server",
-            "--strict-config",
-            "--disable",
-            "shell_tool",
-            "--disable",
-            "unified_exec",
-            "--disable",
-            "plugins",
-            "--disable",
-            "apps",
-            "--disable",
-            "multi_agent",
-            "--disable",
-            "computer_use",
-            "-c",
-            "agents.enabled=false",
-            "-c",
-            "web_search=\"disabled\"",
-            "-c",
-            "history.persistence=\"none\"",
-            "-c",
-            "memories.generate_memories=false",
-            "-c",
-            "feedback.enabled=false",
-            "--listen",
-            "stdio://",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect();
-        let provider = CodexAppServerProvider::new(
-            "codex-real",
-            "codex",
-            args,
-            BTreeSet::from([
-                "gpt-5.6-sol".into(),
-                "gpt-5.6-terra".into(),
-                "gpt-5.6-luna".into(),
-            ]),
-        );
+        let provider = real_codex_provider();
         let catalog = provider.discover_model_catalog().await.unwrap();
         assert!(catalog.models.iter().filter(|model| model.admitted).count() >= 3);
         let mut request = request(json!("Reply with exactly: bridge-ok"));
@@ -880,6 +1044,28 @@ echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1"
                 .pointer("/output/0/content/0/text")
                 .and_then(Value::as_str)
                 .is_some_and(|text| text.contains("bridge-ok"))
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "uses the signed-in local Codex subscription image tool and consumes quota"]
+    async fn real_codex_app_server_generates_one_bounded_png() {
+        let provider = real_codex_provider();
+        let mut request = request(json!(
+            "Generate one simple solid blue circle on a white background, with no text."
+        ));
+        request.model = "gpt-5.6-luna".into();
+        request.tools = vec![json!({"type": "image_generation"})];
+        let response = provider.execute(request).await.unwrap();
+        assert_eq!(
+            response.pointer("/output/0/type"),
+            Some(&json!("image_generation_call"))
+        );
+        assert!(
+            response
+                .pointer("/output/0/result")
+                .and_then(Value::as_str)
+                .is_some_and(|result| !result.is_empty())
         );
     }
 }

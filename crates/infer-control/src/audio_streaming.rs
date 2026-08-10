@@ -89,6 +89,7 @@ impl Runtime {
         request: SpeechRequest,
     ) -> Result<SpeechRuntimeStream, RuntimeError> {
         request.validate()?;
+        self.authorize_speech_voice(app_id, &request)?;
         let logical_model = request.model.clone();
         let requirements = ExecutionRequirements {
             input_modalities: BTreeSet::from([Modality::Text]),

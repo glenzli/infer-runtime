@@ -774,6 +774,11 @@ pub struct AppConfig {
     /// list denies all inference while retaining non-inference capabilities.
     #[serde(default)]
     pub allowed_intents: Option<Vec<String>>,
+    /// Optional allowlist for the public `voice` values accepted by
+    /// `speech.synthesize`. Omitting it preserves candidate.2 compatibility;
+    /// an explicit list lets a Consumer depend only on Runtime-owned aliases.
+    #[serde(default)]
+    pub allowed_speech_voice_aliases: Option<Vec<String>>,
     /// Provider economic/access classes this App may consume. The default is
     /// deliberately standard-only so adding a subscription bridge never
     /// widens an existing Consumer's authority.
@@ -799,6 +804,12 @@ impl AppConfig {
         self.allowed_intents
             .as_ref()
             .is_none_or(|allowed| allowed.iter().any(|candidate| candidate == intent))
+    }
+
+    pub fn allows_speech_voice(&self, voice: &str) -> bool {
+        self.allowed_speech_voice_aliases
+            .as_ref()
+            .is_none_or(|allowed| allowed.iter().any(|candidate| candidate == voice))
     }
 
     pub fn allows_provider_access(&self, access_class: ProviderAccessClass) -> bool {
@@ -1003,7 +1014,12 @@ impl RuntimeConfig {
                         "Codex App Server provider {id} needs command"
                     )));
                 }
-                "responses" | "codex_app_server" | "audio_worker" | "onnx" => {}
+                "antigravity_cli" if provider.command.as_deref().is_none_or(str::is_empty) => {
+                    return Err(configuration(format!(
+                        "Antigravity CLI provider {id} needs command"
+                    )));
+                }
+                "responses" | "codex_app_server" | "antigravity_cli" | "audio_worker" | "onnx" => {}
                 _ => {
                     return Err(configuration(format!(
                         "provider {id} has unsupported kind {}",
@@ -1014,6 +1030,7 @@ impl RuntimeConfig {
             let expected_protocol = match provider.kind.as_str() {
                 "responses" => ProviderProtocol::Responses,
                 "codex_app_server" => ProviderProtocol::CodexAppServer,
+                "antigravity_cli" => ProviderProtocol::AntigravityCli,
                 "audio_worker" => ProviderProtocol::AudioWorker,
                 "onnx" => ProviderProtocol::Onnx,
                 _ => unreachable!("provider kind was validated above"),
@@ -1027,7 +1044,9 @@ impl RuntimeConfig {
             }
             if matches!(
                 expected_protocol,
-                ProviderProtocol::Responses | ProviderProtocol::CodexAppServer
+                ProviderProtocol::Responses
+                    | ProviderProtocol::CodexAppServer
+                    | ProviderProtocol::AntigravityCli
             ) && !provider
                 .capability_profile
                 .supports(ProviderCapability::Responses)
@@ -1043,6 +1062,15 @@ impl RuntimeConfig {
             {
                 return Err(configuration(format!(
                     "non-Responses provider {id} cannot declare Responses capabilities"
+                )));
+            }
+            if provider
+                .capability_profile
+                .supports(ProviderCapability::ImageGeneration)
+                && expected_protocol != ProviderProtocol::CodexAppServer
+            {
+                return Err(configuration(format!(
+                    "provider {id} cannot declare the first-slice image_generation capability outside Codex App Server"
                 )));
             }
             if provider.max_concurrency == 0
@@ -1072,6 +1100,36 @@ impl RuntimeConfig {
                 if provider.requires_api_key || provider.api_key_env.is_some() {
                     return Err(configuration(format!(
                         "Codex App Server provider {id} uses the Codex account session, not a runtime API key"
+                    )));
+                }
+            }
+            if provider.kind == "antigravity_cli" {
+                if provider.placement != Placement::Cloud {
+                    return Err(configuration(format!(
+                        "Antigravity CLI provider {id} must use cloud placement because its transport is local but inference leaves the machine"
+                    )));
+                }
+                if provider.access_class != ProviderAccessClass::Subscription {
+                    return Err(configuration(format!(
+                        "Antigravity CLI provider {id} must use subscription access_class"
+                    )));
+                }
+                if provider.requires_api_key || provider.api_key_env.is_some() {
+                    return Err(configuration(format!(
+                        "Antigravity CLI provider {id} uses its account session, not a runtime API key"
+                    )));
+                }
+                if !provider.args.is_empty() {
+                    return Err(configuration(format!(
+                        "Antigravity CLI provider {id} does not accept operator-supplied args; the bridge owns all security and execution flags"
+                    )));
+                }
+                if provider
+                    .capability_profile
+                    .supports(ProviderCapability::Streaming)
+                {
+                    return Err(configuration(format!(
+                        "Antigravity CLI provider {id} cannot declare streaming until its signed-in incremental wire is verified"
                     )));
                 }
             }
@@ -1173,6 +1231,16 @@ impl RuntimeConfig {
             }
             if let Some(profile) = &intent.default_policy {
                 self.require_profile(profile)?;
+            }
+            if id == crate::IMAGE_GENERATION_INTENT
+                && (intent.data_plane != "responses"
+                    || intent.input_modalities != vec![Modality::Text]
+                    || intent.output_modalities != vec![Modality::Image]
+                    || intent.required_features != vec!["image_generation".to_owned()])
+            {
+                return Err(configuration(
+                    "image.generate must remain unary text-to-image Responses inference",
+                ));
             }
             if intent.default_max_output_tokens == Some(0) {
                 return Err(configuration(format!(
@@ -1378,7 +1446,7 @@ impl RuntimeConfig {
                                 inventory.kind == LocalInventoryKind::OllamaTags
                             }))
                     }
-                    "codex_app_server" => data_plane == "responses",
+                    "codex_app_server" | "antigravity_cli" => data_plane == "responses",
                     "audio_worker" => data_plane.starts_with("audio."),
                     "onnx" => data_plane.starts_with("vision."),
                     _ => false,
@@ -1395,6 +1463,37 @@ impl RuntimeConfig {
                     "ONNX deployment {id} requires model_builds.{}.onnx",
                     deployment.build
                 )));
+            }
+            if provider.kind == "antigravity_cli" {
+                let expected_efforts = match build.model_id.as_str() {
+                    "gemini-3.6-flash-low" => vec![ReasoningEffort::Low],
+                    "gemini-3.6-flash-medium" => {
+                        vec![ReasoningEffort::None, ReasoningEffort::Medium]
+                    }
+                    "gemini-3.6-flash-high" => vec![ReasoningEffort::High],
+                    _ => {
+                        return Err(configuration(format!(
+                            "Antigravity deployment {id} uses a model variant outside the first verified Gemini 3.6 Flash admission set"
+                        )));
+                    }
+                };
+                if deployment.supported_efforts != expected_efforts {
+                    return Err(configuration(format!(
+                        "Antigravity deployment {id} must map reasoning effort exactly to its physical model variant"
+                    )));
+                }
+                if build.input_modalities != vec![Modality::Text]
+                    || build.output_modalities != vec![Modality::Text]
+                {
+                    return Err(configuration(format!(
+                        "Antigravity deployment {id} currently supports text input and text output only"
+                    )));
+                }
+                if deployment.supported_execution_modes != BTreeSet::from([ExecutionMode::Unary]) {
+                    return Err(configuration(format!(
+                        "Antigravity deployment {id} currently supports unary execution only"
+                    )));
+                }
             }
             if provider.kind != "onnx" && build.onnx.is_some() {
                 return Err(configuration(format!(
@@ -1463,6 +1562,21 @@ impl RuntimeConfig {
                     if !unique.insert(intent) {
                         return Err(configuration(format!(
                             "app {id} allowed_intents contains duplicate intent {intent}"
+                        )));
+                    }
+                }
+            }
+            if let Some(aliases) = &app.allowed_speech_voice_aliases {
+                let mut unique = BTreeSet::new();
+                for alias in aliases {
+                    if alias != crate::audio::SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1 {
+                        return Err(configuration(format!(
+                            "app {id} allowed_speech_voice_aliases names unknown Runtime voice alias {alias}"
+                        )));
+                    }
+                    if !unique.insert(alias) {
+                        return Err(configuration(format!(
+                            "app {id} allowed_speech_voice_aliases contains duplicate alias {alias}"
                         )));
                     }
                 }
@@ -1677,15 +1791,128 @@ fn validate_quota_limit(name: &str, limit: &QuotaLimitConfig) -> Result<(), Cont
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{collections::BTreeSet, path::PathBuf};
 
-    use super::{ObserverAccess, QuotaLimitConfig, RuntimeConfig};
+    use super::{
+        ObserverAccess, Placement, ProviderAccessClass, ProviderCapability, ProviderProtocol,
+        QuotaLimitConfig, RuntimeConfig,
+    };
 
     #[test]
     fn checked_in_example_registry_validates() {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
         RuntimeConfig::load(path).expect("example registry must remain valid");
+    }
+
+    #[test]
+    fn image_generation_is_codex_only_and_routed_as_text_to_image() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let mut config = RuntimeConfig::load(path).unwrap();
+        let intent = &config.intents[crate::IMAGE_GENERATION_INTENT];
+        assert_eq!(intent.input_modalities, vec![super::Modality::Text]);
+        assert_eq!(intent.output_modalities, vec![super::Modality::Image]);
+        assert!(
+            config.providers["codex-subscription"]
+                .capability_profile
+                .supports(ProviderCapability::ImageGeneration)
+        );
+        assert!(
+            config.model_profiles["codex_gpt_5_6_luna"]
+                .ratings
+                .contains_key(crate::IMAGE_GENERATION_INTENT)
+        );
+
+        config
+            .providers
+            .get_mut("codex-subscription")
+            .unwrap()
+            .capability_profile
+            .protocol = ProviderProtocol::Responses;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn antigravity_bridge_is_cloud_subscription_and_owns_its_flags() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let mut config = RuntimeConfig::load(path).unwrap();
+        let mut provider = config.providers["codex-subscription"].clone();
+        provider.kind = "antigravity_cli".into();
+        provider.command = Some("/opt/homebrew/bin/agy".into());
+        provider.args.clear();
+        provider.capability_profile.protocol = ProviderProtocol::AntigravityCli;
+        provider
+            .capability_profile
+            .capabilities
+            .remove(&ProviderCapability::Streaming);
+        provider
+            .capability_profile
+            .capabilities
+            .remove(&ProviderCapability::ImageGeneration);
+        config
+            .providers
+            .insert("antigravity-subscription".into(), provider.clone());
+        config.validate().unwrap();
+
+        let mut build = config.model_builds["codex_gpt_5_6_luna_subscription"].clone();
+        build.model_id = "gemini-3.6-flash-medium".into();
+        build.input_modalities = vec![super::Modality::Text];
+        build.output_modalities = vec![super::Modality::Text];
+        config
+            .model_builds
+            .insert("antigravity_flash_medium".into(), build);
+        let mut deployment = config.deployments["codex_gpt_5_6_luna"].clone();
+        deployment.provider = "antigravity-subscription".into();
+        deployment.build = "antigravity_flash_medium".into();
+        deployment.supported_efforts =
+            vec![super::ReasoningEffort::None, super::ReasoningEffort::Medium];
+        deployment.supported_execution_modes = BTreeSet::from([super::ExecutionMode::Unary]);
+        config
+            .deployments
+            .insert("antigravity_probe".into(), deployment.clone());
+        config.validate().unwrap();
+
+        deployment.supported_efforts = vec![super::ReasoningEffort::Low];
+        config
+            .deployments
+            .insert("antigravity_probe".into(), deployment);
+        assert!(config.validate().is_err());
+        config.deployments.remove("antigravity_probe");
+
+        provider.placement = Placement::Local;
+        config
+            .providers
+            .insert("antigravity-subscription".into(), provider.clone());
+        assert!(config.validate().is_err());
+
+        provider.placement = Placement::Cloud;
+        provider.access_class = ProviderAccessClass::Standard;
+        config
+            .providers
+            .insert("antigravity-subscription".into(), provider.clone());
+        assert!(config.validate().is_err());
+
+        provider.access_class = ProviderAccessClass::Subscription;
+        provider
+            .capability_profile
+            .capabilities
+            .insert(ProviderCapability::Streaming);
+        config
+            .providers
+            .insert("antigravity-subscription".into(), provider.clone());
+        assert!(config.validate().is_err());
+
+        provider
+            .capability_profile
+            .capabilities
+            .remove(&ProviderCapability::Streaming);
+        provider.args = vec!["--dangerously-skip-permissions".into()];
+        config
+            .providers
+            .insert("antigravity-subscription".into(), provider);
+        assert!(config.validate().is_err());
     }
 
     #[test]
@@ -1766,6 +1993,29 @@ mod tests {
             .get_mut("example-local-consumer")
             .unwrap()
             .allowed_intents = Some(vec!["text.summarize".into(), "text.summarize".into()]);
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn app_speech_voice_allowlist_is_optional_and_alias_only() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let mut config = RuntimeConfig::load(path).unwrap();
+        let app = config.apps.get_mut("example-local-consumer").unwrap();
+        app.allowed_speech_voice_aliases = None;
+        assert!(app.allows_speech_voice("legacy-provider-speaker"));
+
+        app.allowed_speech_voice_aliases =
+            Some(vec![crate::audio::SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1.into()]);
+        assert!(app.allows_speech_voice(crate::audio::SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1));
+        assert!(!app.allows_speech_voice("Vivian"));
+        config.validate().unwrap();
+
+        config
+            .apps
+            .get_mut("example-local-consumer")
+            .unwrap()
+            .allowed_speech_voice_aliases = Some(vec!["unknown.voice.v1".into()]);
         assert!(config.validate().is_err());
     }
 

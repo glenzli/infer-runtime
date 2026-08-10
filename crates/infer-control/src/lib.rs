@@ -36,8 +36,8 @@ use infer_core::{
 };
 use infer_payload::PayloadError;
 use infer_provider::{
-    AudioWorkerExecutor, CodexAppServerProvider, DynAudioDuplexExecutor, DynAudioExecutor,
-    DynAudioStreamExecutor, DynFaceDetectionExecutor, DynFaceEmbeddingExecutor,
+    AntigravityCliProvider, AudioWorkerExecutor, CodexAppServerProvider, DynAudioDuplexExecutor,
+    DynAudioExecutor, DynAudioStreamExecutor, DynFaceDetectionExecutor, DynFaceEmbeddingExecutor,
     DynImageEmbeddingExecutor, DynImageUnderstandingExecutor, DynProvider,
     DynTextEmbeddingExecutor, OllamaVisionExecutor, OnnxProviderRuntime, ProviderError,
     ProviderModelCatalog, ResponsesProvider, probe_responses_provider,
@@ -398,6 +398,22 @@ impl Runtime {
                         .map(|build| build.model_id.clone())
                         .collect::<BTreeSet<_>>();
                     let adapter = CodexAppServerProvider::new(
+                        id,
+                        provider.command.clone().expect("validated command"),
+                        provider.args.clone(),
+                        admitted_models,
+                    );
+                    providers.insert(id.clone(), Arc::new(adapter) as DynProvider);
+                }
+                "antigravity_cli" => {
+                    let admitted_models = config
+                        .deployments
+                        .values()
+                        .filter(|deployment| deployment.provider == *id)
+                        .filter_map(|deployment| config.model_builds.get(&deployment.build))
+                        .map(|build| build.model_id.clone())
+                        .collect::<BTreeSet<_>>();
+                    let adapter = AntigravityCliProvider::new(
                         id,
                         provider.command.clone().expect("validated command"),
                         provider.args.clone(),
@@ -1085,7 +1101,9 @@ impl Runtime {
                     .collect::<BTreeSet<_>>();
                 if matches!(
                     provider.capability_profile.protocol,
-                    ProviderProtocol::Responses | ProviderProtocol::CodexAppServer
+                    ProviderProtocol::Responses
+                        | ProviderProtocol::CodexAppServer
+                        | ProviderProtocol::AntigravityCli
                 ) && provider
                     .capability_profile
                     .supports(infer_core::ProviderCapability::Streaming)
@@ -1123,7 +1141,9 @@ impl Runtime {
             .ok_or_else(|| RuntimeError::ProviderUnavailable(provider_id.into()))?;
         if !matches!(
             config.capability_profile.protocol,
-            ProviderProtocol::Responses | ProviderProtocol::CodexAppServer
+            ProviderProtocol::Responses
+                | ProviderProtocol::CodexAppServer
+                | ProviderProtocol::AntigravityCli
         ) {
             return Err(RuntimeError::ProviderProbeUnsupported(provider_id.into()));
         }
@@ -1140,7 +1160,10 @@ impl Runtime {
             .map(|build| build.model_id.clone())
             .ok_or_else(|| RuntimeError::ProviderProbeModelMissing(provider_id.into()))?;
         let provider = self.provider(provider_id)?;
-        if config.capability_profile.protocol == ProviderProtocol::CodexAppServer {
+        if matches!(
+            config.capability_profile.protocol,
+            ProviderProtocol::CodexAppServer | ProviderProtocol::AntigravityCli
+        ) {
             Ok(probe_responses_provider_with_effort(
                 provider.as_ref(),
                 &model,
@@ -1175,6 +1198,9 @@ impl Runtime {
         request: AudioExecutionRequest,
     ) -> Result<AudioRuntimeResult, RuntimeError> {
         request.validate()?;
+        if let AudioExecutionRequest::Speech(speech) = &request {
+            self.authorize_speech_voice(app_id, speech)?;
+        }
         let logical_model = request.model().to_owned();
         let constraints = request.constraints()?;
         let (expected_data_plane, input_modalities) = match &request {
@@ -1310,6 +1336,27 @@ impl Runtime {
                 self.metrics.failed();
                 Err(error)
             }
+        }
+    }
+
+    pub(crate) fn authorize_speech_voice(
+        &self,
+        app_id: &str,
+        request: &infer_core::SpeechRequest,
+    ) -> Result<(), RuntimeError> {
+        if request.model != "speech.synthesize" {
+            return Ok(());
+        }
+        let app = self
+            .config
+            .apps
+            .get(app_id)
+            .ok_or_else(|| RuntimeError::UnknownApp(app_id.to_owned()))?;
+        let voice = request.voice.as_deref().unwrap_or_default();
+        if app.allows_speech_voice(voice) {
+            Ok(())
+        } else {
+            Err(RuntimeError::OverrideNotAllowed { field: "voice" })
         }
     }
 

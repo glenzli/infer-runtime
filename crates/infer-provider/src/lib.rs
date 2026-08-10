@@ -1,5 +1,6 @@
 //! Provider contracts and protocol-family adapters.
 
+mod antigravity_cli;
 mod audio_stream;
 mod audio_worker;
 mod codex_app_server;
@@ -17,6 +18,7 @@ use reqwest::Client;
 use serde_json::Value;
 use thiserror::Error;
 
+pub use antigravity_cli::AntigravityCliProvider;
 pub use audio_stream::{
     AudioDuplexExecutor, AudioDuplexSession, AudioStreamExecutor, DynAudioDuplexExecutor,
     DynAudioDuplexSession, DynAudioStreamExecutor, ProviderAudioByteStream, SpeechStreamOutput,
@@ -24,7 +26,7 @@ pub use audio_stream::{
 pub use audio_worker::{
     AudioExecutionOutput, AudioExecutor, AudioWorkerExecutor, DynAudioExecutor,
 };
-pub use codex_app_server::{CodexAppServerProvider, ProviderModelCatalog, ProviderModelInfo};
+pub use codex_app_server::CodexAppServerProvider;
 pub use ollama_vision::{
     ClassificationReviewExecutionOutput, DynImageUnderstandingExecutor,
     ImageDescriptionExecutionOutput, ImageUnderstandingExecutor, OllamaVisionExecutor,
@@ -43,6 +45,33 @@ pub use probe::{
 };
 
 pub type ProviderByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, ProviderError>> + Send>>;
+
+/// One Provider-native model group observed by the operator plane.
+///
+/// Dynamic discovery never mutates routing admission. `admitted` is derived
+/// exclusively from version-controlled Build/Deployment configuration.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ProviderModelCatalog {
+    pub provider: String,
+    pub models: Vec<ProviderModelInfo>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ProviderModelInfo {
+    pub id: String,
+    pub model: String,
+    pub display_name: String,
+    pub description: String,
+    pub input_modalities: Vec<String>,
+    pub supported_reasoning_efforts: Vec<String>,
+    pub default_reasoning_effort: String,
+    pub is_default: bool,
+    pub hidden: bool,
+    pub upgrade: Option<String>,
+    /// Discovery is not admission. Only version-controlled Deployments may be
+    /// selected by the runtime router.
+    pub admitted: bool,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]

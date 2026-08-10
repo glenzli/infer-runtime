@@ -121,6 +121,7 @@ pub fn plan_candidates(
                 provider.capability_profile.protocol,
                 infer_core::ProviderProtocol::Responses
                     | infer_core::ProviderProtocol::CodexAppServer
+                    | infer_core::ProviderProtocol::AntigravityCli
             );
         if !responses_stream_compatibility
             && !deployment
@@ -921,7 +922,15 @@ mod tests {
                 unavailable_deployments: &empty,
             },
         );
-        assert_eq!(general.candidates[0].deployment_id, "codex_gpt_5_6_luna");
+        let general_deployments = general
+            .candidates
+            .iter()
+            .map(|candidate| candidate.deployment_id.as_str())
+            .collect::<BTreeSet<_>>();
+        assert!(general_deployments.contains("codex_gpt_5_6_luna"));
+        assert!(general_deployments.contains("antigravity_gemini_3_6_flash_low"));
+        assert!(!general_deployments.contains("antigravity_gemini_3_6_flash"));
+        assert!(!general_deployments.contains("antigravity_gemini_3_6_flash_high"));
 
         let deep = plan_candidates(
             &config,
@@ -956,6 +965,73 @@ mod tests {
             },
         );
         assert_eq!(strongest.candidates[0].deployment_id, "codex_gpt_5_6_sol");
+    }
+
+    #[test]
+    fn image_generation_routes_only_to_the_explicit_codex_subscription_slice() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let config = RuntimeConfig::load(path).unwrap();
+        let intent = config.intent(infer_core::IMAGE_GENERATION_INTENT).unwrap();
+        let requirements = ExecutionRequirements {
+            provider_capabilities: BTreeSet::from([
+                infer_core::ProviderCapability::Responses,
+                infer_core::ProviderCapability::ImageGeneration,
+            ]),
+            model_features: BTreeSet::from(["image_generation".into()]),
+            input_modalities: BTreeSet::from([Modality::Text]),
+            execution_mode: infer_core::ExecutionMode::Unary,
+        };
+        let constraints = RequestConstraints {
+            provider_access_class: Some(ProviderAccessClass::Subscription),
+            max_cost_usd: Some(0.0),
+            fallback: Some(Fallback::None),
+            ..RequestConstraints::default()
+        };
+        let empty = BTreeSet::new();
+        let denied = plan_candidates(
+            &config,
+            infer_core::IMAGE_GENERATION_INTENT,
+            intent,
+            &config.profiles["balanced"],
+            CandidatePlanningContext {
+                constraints: &constraints,
+                execution_requirements: &requirements,
+                reasoning_effort: None,
+                allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
+                allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                unavailable_providers: &empty,
+                unavailable_deployments: &empty,
+            },
+        );
+        assert!(denied.candidates.is_empty());
+        assert!(denied.decision.candidates.iter().any(|candidate| {
+            candidate.deployment == "codex_gpt_5_6_luna"
+                && candidate
+                    .reason_codes
+                    .contains(&CandidateReasonCode::ProviderAccessNotAllowed)
+        }));
+
+        let admitted = plan_candidates(
+            &config,
+            infer_core::IMAGE_GENERATION_INTENT,
+            intent,
+            &config.profiles["balanced"],
+            CandidatePlanningContext {
+                constraints: &constraints,
+                execution_requirements: &requirements,
+                reasoning_effort: None,
+                allowed_provider_access_classes: &BTreeSet::from([
+                    ProviderAccessClass::Standard,
+                    ProviderAccessClass::Subscription,
+                ]),
+                allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                unavailable_providers: &empty,
+                unavailable_deployments: &empty,
+            },
+        );
+        assert_eq!(admitted.candidates.len(), 1);
+        assert_eq!(admitted.candidates[0].deployment_id, "codex_gpt_5_6_luna");
     }
 
     #[test]

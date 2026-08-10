@@ -400,6 +400,20 @@ SLO 和至少一个真实应用集成。不能只新增 Intent 枚举或共享 S
 - experimental schema 尚未提升为冻结 Consumer contract；真实 Consumer feedback 与跨平台
   tolerance 仍是 promotion 门槛。
 
+### Shape `image.edit` 外部依赖（Blocked，不得提前开放）
+
+Shape 已冻结生成式多输入图片编辑需求，但当前 Runtime 没有任何已验证的 raster-output
+Provider/Build/Deployment，因此本工作包只登记依赖，不创建 Intent、route、ACL 或 mock executor。
+实现时必须按 D-111 additive 发布 `0.1.0-candidate.3` 与
+`infer.image.edit@20260811.1`，使用独立 `POST /v1/images/edits` strict multipart 数据面；不能
+复用只返回文本的 `/v1/responses` 或 QwenVL understanding route。
+
+开放顺序固定为：真实执行面与 artifact/Build identity → 有界 source/mask/reference parser →
+单 raster unary 输出及 SHA-256/geometry headers → payload-free Job/Attempt provenance → cancel/late
+result、ACL 负面与真实 HTTP raster E2E。全部门槛通过后才给 `apps.shape` 增加 `image.edit`；
+cloud image input、Voice/identity 模仿、Runtime 持久化像素和 Shape Scene/Candidate ownership 均不
+随该工作包隐式开放。
+
 ### 当前模型候选（仅评测输入）
 
 | 能力 | 候选 | 进入 Deployment 前仍需确认 |
@@ -425,7 +439,9 @@ Deployment。
 
 ## 10. M7：订阅式推理桥接
 
-> 当前状态：Codex App Server 首个 experimental 纵切已实现；稳定化与第二种 bridge 待证据。
+> 当前状态：Codex App Server execution slice 已实现；Antigravity 已完成动态 inventory、静态
+> Gemini 3.6 Flash effort-variant 准入与 unary text bridge。它复用当前用户真实 CLI 会话，仍是
+> experimental，且尚未开放给任何普通 Consumer。
 
 ### 已完成的纵切
 
@@ -442,6 +458,14 @@ Deployment。
   独立 `allowed_cloud_input_modalities=image`，两类拒绝分别使用稳定 reason code；
 - 受控订阅环境的 `model/list` 与一次低投入调用已通过；fake App Server 覆盖 catalog、usage
   normalization 和无工具完成链路。
+- `antigravity-subscription` 作为第二个 cloud/subscription Provider 已接入动态 `agy models`
+  inventory；Runtime 不读取或投影 token，而由 `agy` 复用真实 HOME/Keychain 登录会话；
+- Consumer 文本与显式诊断仅存在 owner-only ephemeral workspace，prompt 不进入 argv；首版只接受
+  无工具、无 conversation、无 durable、text-in/text-out 的 unary Responses 子集；
+- Gemini 3.6 Flash low/medium/high 物理 slug 分别映射 Low、None/Medium、High effort；静态
+  Build/Deployment 不会因 inventory 新增模型而自动扩张；
+- CLI 自身仍可能维护账号级状态或 history，因此 Provider 保持 experimental、cloud/subscription，
+  不适用于 local-only/offline/sensitive workload，现有 App ACL 未自动扩展。
 
 ### 后续工作包
 
@@ -454,8 +478,13 @@ Deployment。
 4. **图片输入 soak**：已实现有界输入和独立 cloud modality ACL；继续验证真实 Consumer、URL
    取图失败分类、图片域限制与订阅额度行为；
 5. **模型准入自动审计**：catalog drift 只产生告警，新增/升级模型必须显式评测和配置变更；
-6. **第二种 bridge**：以 Claude Code server/Antigravity wrapper 之一验证 SPI 是否足够；在第二个
-   独立协议出现前不抽象通用 CLI DSL。
+6. **Antigravity soak**：受信任用户会话、无 argv prompt、ephemeral request workspace 与 effort
+   variant 映射已经冻结；继续验证 inventory absence、取消/迟到结果、quota/rate-limit、退出码分类、
+   CLI history 行为和真实 Consumer ACL，证据稳定后再从 experimental 晋级；
+7. **Antigravity streaming/image**：真实签入环境先冻结 append-only delta 与 headless attachment
+   wire，再决定是否声明 server_stream/image；在此之前不得因底层模型能力推断 Runtime 能力；
+8. **第三种 bridge**：只有 Claude 等第三协议出现且重复模式成立后才提取更多共性；仍不抽象通用
+   CLI DSL。
 
 ### 退出门槛
 

@@ -92,7 +92,12 @@ workspace、read-only sandbox、`approvalPolicy=never` 和禁用的 shell/web/pl
 以 `protocol` 失败。它不暴露 Codex thread、tool loop、memory、workspace mutation 或完整 agent
 能力。图片必须通过独立 cloud modality ACL，且只接受有界 JPEG/PNG data URL 或 HTTPS URL；
 持久会话、精确订阅 quota reconciliation 和第二种 CLI bridge 仍须独立扩展合同，不能从 App
-Server 已接入推导为支持。
+Server 已接入推导为支持。Antigravity 采用与 Codex subscription 相同的“受信任本机会话”模型：
+`agy` 直接复用当前用户真实 HOME/Keychain 中由 CLI 自己管理的登录态，Runtime 不读取、复制或轮换
+认证材料。Consumer payload 与显式日志仅写入一次性 owner-only workspace，prompt 不进入 argv；
+首版只准入 Gemini 3.6 Flash 的 low/medium/high 物理 slug，并确定映射到 Runtime
+`reasoning.effort`。该边界不声称隔离 CLI 自身的账号级状态或内部 history，因此只作为显式授权的
+experimental cloud/subscription unary text Provider，现有 Consumer 不会自动获得访问权。
 
 ## 3. 术语与核心对象
 
@@ -846,6 +851,20 @@ access_class = "subscription"
 command = "codex"
 placement = "cloud"
 
+# Dynamic inventory may be registered before any model is admitted. Stable
+# upstream model slugs become routable only after explicit Build/Deployment
+# configuration and evaluation.
+[providers.antigravity-subscription]
+kind = "antigravity_cli"
+access_class = "subscription"
+command = "/absolute/path/to/agy"
+placement = "cloud"
+
+[providers.antigravity-subscription.capability_profile]
+version = 1
+protocol = "antigravity_cli"
+capabilities = ["responses", "instructions", "reasoning_effort"]
+
 [intents."text.summarize"]
 input_modalities = ["text"]
 output_modalities = ["text"]
@@ -1032,7 +1051,7 @@ infer-runtime/
 - `node-agent` 在远程节点阶段再增加，不能用空 crate 预占未来；
 - 避免 `common`、`utils`、`manager` 大杂烩；共享类型先确认唯一语义 owner。
 
-该拓扑应用了 source-cohesion growth review：控制平面仍是 admission/execution 的粗粒度 owner；durable payload crypto 因独立安全生命周期提取为 crate，恢复与存储事务分别留在已有语义 owner。音频作为另一种 payload 生命周期和协议族，已分别提取到 `infer-core::audio`、`infer-provider::audio_worker` 与 API multipart owner。DeepSeek Flash 复用已经稳定的 Responses adapter；Codex App Server 因独立的进程生命周期、JSON-RPC、动态模型组和 Agent 能力收窄要求，落在 `infer-provider::codex_app_server` 独立 semantic owner，而不是继续扩大 HTTP adapter。通用 Chat Completions owner 尚无第二个独立需求验证，因此不预占模块。ONNX 的制品发布、Session 生命周期、类型化视觉合同和模型专属语义分别落在 artifact/provider/core+API/adapter owner；新增边界对应真实权限、依赖和生命周期，未把 tensor 或图片 payload 引入核心 Job。远程 node 仍推迟到真实需求出现时提取。
+该拓扑应用了 source-cohesion growth review：控制平面仍是 admission/execution 的粗粒度 owner；durable payload crypto 因独立安全生命周期提取为 crate，恢复与存储事务分别留在已有语义 owner。音频作为另一种 payload 生命周期和协议族，已分别提取到 `infer-core::audio`、`infer-provider::audio_worker` 与 API multipart owner。DeepSeek Flash 复用已经稳定的 Responses adapter；Codex App Server 因独立的进程生命周期、JSON-RPC、动态模型组和 Agent 能力收窄要求，落在 `infer-provider::codex_app_server` 独立 semantic owner，而不是继续扩大 HTTP adapter。Antigravity 复用 Provider SPI、模型组 DTO 与 subscription ACL，但其 CLI 用户会话、一次性请求 workspace、进程/NDJSON wire 和错误策略仍由 `infer-provider::antigravity_cli` 独立拥有；它明确披露真实 HOME 会话边界，不在 Runtime 内复制 credential，也不把 CLI history 冒充已隔离。第二个协议没有证明 JSON-RPC 与 CLI wire 应被抹平，因此不建立万能 Agent/CLI adapter。通用 Chat Completions owner 尚无第二个独立需求验证，因此不预占模块。ONNX 的制品发布、Session 生命周期、类型化视觉合同和模型专属语义分别落在 artifact/provider/core+API/adapter owner；新增边界对应真实权限、依赖和生命周期，未把 tensor 或图片 payload 引入核心 Job。远程 node 仍推迟到真实需求出现时提取。
 
 ## 18. 测试与验证策略
 

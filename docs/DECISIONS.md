@@ -104,12 +104,12 @@
 - **失败合同**：未知 Intent 仍是 `400 invalid_request_error`；存在但未授权的 Intent 是 `403 intent_forbidden`，不产生 Job、Attempt、reservation 或 provider side effect。配置中的未知或重复 allowlist 项 fail closed。
 - **边界**：Intent ACL、`resource_admin` 与 request override 上限正交。不引入 role/scope DSL，不允许应用直接授权 Deployment、ONNX tensor 或 provider 原生操作。
 
-### D-012：订阅式 App Server 是 cloud Provider，动态模型组必须显式准入
+### D-012：订阅式 bridge 是 cloud Provider，动态模型组必须显式准入
 
-- **状态**：Accepted for experimental Codex slice
-- **决定**：一个已登录的 Codex App Server 实例建模为一个 Provider 和一个共享
-  quota/concurrency pool；`model/list` 返回的每个可路由模型分别映射为 Model Profile → Build →
-  Deployment。reasoning effort 是 Deployment 参数，不拆成独立 Deployment。
+- **状态**：Accepted for experimental Codex and Antigravity execution
+- **决定**：一个已登录的订阅账号实例建模为一个 Provider 和一个共享 quota/concurrency pool；
+  Codex `model/list` 或 Antigravity `agy models` 返回的每个可路由模型分别映射为 Model Profile →
+  Build → Deployment。reasoning effort 是 Deployment 参数，不拆成独立 Deployment。
 - **发现/准入**：动态发现只进入 operator inventory。当前只准入 Sol/Terra/Luna；新增、隐藏、
   upgrade 或消失不会自动改路由。配置模型缺失时 Attempt fail closed，不暗中选择默认模型。
 - **placement/授权**：即使 JSON-RPC transport 在本机，推理仍发生在云端，必须标记
@@ -124,6 +124,12 @@
 - **生命周期**：首版每个 Attempt 使用空 ephemeral、read-only、no-approval 子进程，优先保证
   cancel/drop 时可终止和不复用污染状态；是否升级为持久进程取决于 interrupt/crash/concurrency
   合同证据。订阅窗口与账号级 rate-limit 仅作为后续 operator telemetry，不伪装成逐请求 USD。
+- **第二协议复审**：Antigravity 复用 Provider SPI、模型组 DTO 和 subscription ACL，但保留独立
+  CLI owner。它按受信任本机会话复用真实 HOME/Keychain，Runtime 不读取、复制或轮换认证材料；
+  prompt 经一次性 workspace 文档传递而不进入 argv。首版只准入 Gemini 3.6 Flash
+  effort-suffixed slugs，并把 Low、None/Medium、High 精确映射到对应物理 variant。CLI 自身可能
+  维护账号级状态或 history，因此该 Provider 仍是 experimental、非敏感、显式 subscription ACL
+  能力，不宣称 credential/history 隔离。
 - **ADR**：[ADR-0013](adr/0013-subscription-backed-inference-bridges.md)
 
 ### D-013：执行模式与数据模态正交；流式协议按数据平面分型
@@ -223,6 +229,15 @@
 - **数据与 durable 边界**：只接受 Consumer 已完成 orientation normalization 的 display-sized JPEG/PNG、必填 `source_revision`，并强制 `local_only`、`offline_required=true`、`fallback=none`。图片、类别、描述与关键词不进入 Job metadata、默认日志、audit details 或文本 durable spool；background 只是一种队列优先级，不是可恢复照片队列。
 - **Provider 边界**：Ollama adapter 可使用其 native image/chat transport，但公共 endpoint 不暴露该 schema。当前 provider 的结构化输出兼容性实测要求使用 revisioned prompt + 严格反序列化，而不依赖 native `format`；schema/prompt revision 与实际 Build/physical model 进入 provenance。
 - **复审门槛**：Shadow 真实照片域准确性、长时间 bulk/background 与 interactive/MLX/SigLIP 混合压力、取消/断线 soak、8B residency 与 stable contract promotion。证据不足时不建设通用 Resource Pool，也不开放视觉 durable。
+
+### D-111：生成式 raster image edit 必须等待真实执行面
+
+- **状态**：Proposed / Blocked；当前没有可输出 raster 的已验证 Provider、Build 或 Deployment
+- **边界**：`image.edit` 是独立类型化数据平面，不进入只返回文本的 Responses/VLM 合同。只有真实执行面通过端到端验证后，才可 additive 发布 `0.1.0-candidate.3`、`infer.image.edit@20260811.1` 与 `POST /v1/images/edits`；空路由、mock、文本输出或仅登记模型均不构成能力。
+- **拟定输入**：strict multipart；`model=image.edit`；必需 JPEG/PNG `source_image`（不超过 20 MiB/40 MP、orientation-normalized display pixels）与 `source_revision`；必需不超过 16 KiB UTF-8 `instruction`；可选同尺寸 PNG mask（白/1 可编辑、黑/0 保留）及 `mask_revision`；最多四个带 `role=style|identity` 和 revision 的图片引用。identity 授权事实由 Consumer 持有。
+- **拟定输出**：unary 单张 raw raster；`Content-Type`、Job id、输出 SHA-256、宽高、orientation、colorspace 通过稳定 header 返回，完整 Build/Attempt/placement/policy/fallback/cost provenance 由 Job snapshot 提供。
+- **隐私/所有权**：Runtime 不持久化 source、instruction、mask、references 或 output pixels，也不接管 Shape Scene、Candidate、Compare/Accept 或 immutable Revision。`apps.shape` 只有在真实能力就绪后才增加 Intent；local-first/local-only/offline/no-fallback/max-cost/provider class 边界保持不变，cloud image modality 必须另行授权。
+- **开放门槛**：真实 Provider/Build/Deployment、取消与迟到结果测试、digest/header 校验、ACL 正负面测试和真实 raster HTTP E2E 全部通过。门槛关闭前 Shape 保持 semantic proposal only。
 - **ADR**：[ADR-0011](adr/0011-heterogeneous-local-runtimes-and-typed-vision.md)
 
 ## 已关闭的阶段决策

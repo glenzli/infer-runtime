@@ -461,6 +461,7 @@ fn app_config(
         observer_access,
         resource_admin: false,
         allowed_intents: input.allowed_intents.clone(),
+        allowed_speech_voice_aliases: None,
         allowed_provider_access_classes: input
             .allowed_provider_access_classes
             .clone()

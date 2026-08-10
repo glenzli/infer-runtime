@@ -210,7 +210,25 @@ priority_aging_ms = 10000
 [providers.codex-subscription.capability_profile]
 version = 1
 protocol = "codex_app_server"
-capabilities = ["responses", "instructions", "streaming", "reasoning_effort"]
+capabilities = ["responses", "instructions", "streaming", "image_generation", "reasoning_effort"]
+
+# Antigravity is a second subscription bridge. It reuses the current user's
+# real CLI login session. Consumer payloads use a disposable project, but the
+# CLI may retain account-level state; keep this experimental and non-sensitive.
+# Replace `agy` with an absolute path when the daemon is GUI-owned.
+[providers.antigravity-subscription]
+kind = "antigravity_cli"
+access_class = "subscription"
+command = "agy"
+placement = "cloud"
+max_concurrency = 1
+max_queue = 16
+priority_aging_ms = 10000
+
+[providers.antigravity-subscription.capability_profile]
+version = 1
+protocol = "antigravity_cli"
+capabilities = ["responses", "instructions", "reasoning_effort"]
 
 [profiles.balanced]
 order = ["quality_fit", "deadline_fit", "queue_time", "cost", "placement"]
@@ -256,6 +274,15 @@ default_policy = "balanced"
 [intents."assistant.multimodal"]
 input_modalities = ["text", "image"]
 output_modalities = ["text"]
+default_quality_floor = "general"
+default_policy = "balanced"
+
+# First-slice hosted generation is a distinct unary text-to-image contract.
+# The request must contain exactly tools=[{type="image_generation"}].
+[intents."image.generate"]
+input_modalities = ["text"]
+output_modalities = ["image"]
+required_features = ["image_generation"]
 default_quality_floor = "general"
 default_policy = "balanced"
 
@@ -484,6 +511,10 @@ status = "provisional"
 grade = "general"
 status = "provisional"
 
+[model_profiles.codex_gpt_5_6_luna.ratings."image.generate"]
+grade = "general"
+status = "provisional"
+
 [model_profiles.codex_gpt_5_6_terra]
 family = "gpt-5.6"
 
@@ -508,6 +539,16 @@ status = "provisional"
 
 [model_profiles.codex_gpt_5_6_sol.ratings."assistant.multimodal"]
 grade = "advanced"
+status = "provisional"
+
+# Antigravity's Gemini Flash effort levels are separate physical upstream
+# slugs. Runtime keeps one semantic Model Profile and maps the requested effort
+# to one exact Build/Deployment below.
+[model_profiles.antigravity_gemini_3_6_flash]
+family = "gemini-3.6-flash"
+
+[model_profiles.antigravity_gemini_3_6_flash.ratings."assistant.general"]
+grade = "general"
 status = "provisional"
 
 [model_profiles.qwen3_asr_1_7b]
@@ -635,8 +676,8 @@ profile = "codex_gpt_5_6_luna"
 model_id = "gpt-5.6-luna"
 variant = "codex-subscription"
 input_modalities = ["text", "image"]
-output_modalities = ["text"]
-features = ["reasoning"]
+output_modalities = ["text", "image"]
+features = ["reasoning", "image_generation"]
 
 [model_builds.codex_gpt_5_6_terra_subscription]
 profile = "codex_gpt_5_6_terra"
@@ -651,6 +692,30 @@ profile = "codex_gpt_5_6_sol"
 model_id = "gpt-5.6-sol"
 variant = "codex-subscription"
 input_modalities = ["text", "image"]
+output_modalities = ["text"]
+features = ["reasoning"]
+
+[model_builds.antigravity_gemini_3_6_flash_medium]
+profile = "antigravity_gemini_3_6_flash"
+model_id = "gemini-3.6-flash-medium"
+variant = "antigravity-subscription-medium"
+input_modalities = ["text"]
+output_modalities = ["text"]
+features = ["reasoning"]
+
+[model_builds.antigravity_gemini_3_6_flash_low]
+profile = "antigravity_gemini_3_6_flash"
+model_id = "gemini-3.6-flash-low"
+variant = "antigravity-subscription-low"
+input_modalities = ["text"]
+output_modalities = ["text"]
+features = ["reasoning"]
+
+[model_builds.antigravity_gemini_3_6_flash_high]
+profile = "antigravity_gemini_3_6_flash"
+model_id = "gemini-3.6-flash-high"
+variant = "antigravity-subscription-high"
+input_modalities = ["text"]
 output_modalities = ["text"]
 features = ["reasoning"]
 
@@ -949,6 +1014,33 @@ resource_class = "standard"
 supported_efforts = ["low", "medium", "high", "xhigh", "max"]
 estimated_cost_usd = 0.0
 supported_execution_modes = ["unary", "server_stream"]
+
+# The base id is the no-override default and therefore maps to the medium
+# physical slug. Explicit low/high requests select only their matching
+# Deployment; the adapter never combines a suffixed slug with `--effort`.
+[deployments.antigravity_gemini_3_6_flash]
+provider = "antigravity-subscription"
+build = "antigravity_gemini_3_6_flash_medium"
+resource_class = "standard"
+supported_efforts = ["none", "medium"]
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary"]
+
+[deployments.antigravity_gemini_3_6_flash_low]
+provider = "antigravity-subscription"
+build = "antigravity_gemini_3_6_flash_low"
+resource_class = "standard"
+supported_efforts = ["low"]
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary"]
+
+[deployments.antigravity_gemini_3_6_flash_high]
+provider = "antigravity-subscription"
+build = "antigravity_gemini_3_6_flash_high"
+resource_class = "standard"
+supported_efforts = ["high"]
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary"]
 
 [deployments.mlx_qwen3_asr_1_7b]
 provider = "mlx-audio-local"

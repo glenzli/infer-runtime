@@ -10,8 +10,8 @@ use std::{
 
 use async_trait::async_trait;
 use infer_core::{
-    AlignmentRequest, AudioExecutionRequest, AudioFile, SpeechFormat, SpeechRequest,
-    TranscriptionRequest, VoiceCloneRequest,
+    AlignmentRequest, AudioExecutionRequest, AudioFile, SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1,
+    SpeechFormat, SpeechRequest, TranscriptionRequest, VoiceCloneRequest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -302,6 +302,13 @@ fn prepare_speech(
     request: SpeechRequest,
     temporary_files: &TempDir,
 ) -> (WorkerRequest, Option<(PathBuf, SpeechFormat)>) {
+    // Public callers use a Runtime-owned, versioned voice identity. Provider
+    // speaker names remain an adapter detail and must never become Consumer
+    // contract values.
+    let provider_voice = match request.voice.as_deref() {
+        Some(SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1) => Some("Vivian".to_owned()),
+        _ => request.voice.clone(),
+    };
     let output_path = temporary_files.path().join(format!(
         "output.{}",
         request.response_format.to_string_value()
@@ -311,7 +318,7 @@ fn prepare_speech(
             output_path: Some(output_path.to_string_lossy().into_owned()),
             text: Some(request.input),
             language: request.language,
-            voice: request.voice,
+            voice: provider_voice,
             instructions: request.instructions,
             speed: Some(request.speed),
             format: Some(request.response_format),
@@ -416,11 +423,40 @@ impl StringEnumValue for SpeechFormat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+
+    use infer_core::{ExecutionMode, SPEECH_VOICE_ZH_BRIGHT_FEMALE_LANGUAGE};
 
     #[test]
     fn uploaded_filename_cannot_escape_the_temporary_directory() {
         assert_eq!(safe_extension("../../voice.wav"), "wav");
         assert_eq!(safe_extension("voice.bad/path"), "wav");
         assert_eq!(safe_extension("voice.123456789"), "wav");
+    }
+
+    #[test]
+    fn runtime_voice_alias_maps_to_the_private_worker_speaker() {
+        let temporary_files = TempDir::new().expect("temporary directory");
+        let request = SpeechRequest {
+            model: "speech.synthesize".into(),
+            input: "bounded test input".into(),
+            voice: Some(SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1.into()),
+            instructions: None,
+            language: Some(SPEECH_VOICE_ZH_BRIGHT_FEMALE_LANGUAGE.into()),
+            speed: 1.0,
+            response_format: SpeechFormat::Wav,
+            execution_mode: ExecutionMode::Unary,
+            metadata: BTreeMap::new(),
+        };
+
+        request.validate().expect("public speech contract");
+        let (worker_request, _) = prepare_speech(
+            "request-1".into(),
+            "physical-model",
+            request,
+            &temporary_files,
+        );
+
+        assert_eq!(worker_request.voice.as_deref(), Some("Vivian"));
     }
 }

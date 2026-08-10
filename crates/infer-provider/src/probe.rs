@@ -136,6 +136,24 @@ async fn probe_capability(
             })];
             provider.execute(request).await?;
         }
+        ProviderCapability::ImageGeneration => {
+            request.input = Value::String(
+                "Generate one simple solid blue circle on a white background, with no text.".into(),
+            );
+            request.tools = vec![json!({"type": "image_generation"})];
+            let response = provider.execute(request).await?;
+            if response.pointer("/output/0/type").and_then(Value::as_str)
+                != Some("image_generation_call")
+                || response
+                    .pointer("/output/0/result")
+                    .and_then(Value::as_str)
+                    .is_none_or(str::is_empty)
+            {
+                return Err(ProviderError::Protocol(
+                    "image generation probe did not return one encoded image".into(),
+                ));
+            }
+        }
         ProviderCapability::ReasoningEffort => {
             request.reasoning = Some(ReasoningConfig {
                 // Endpoint capability and deployment effort range are
@@ -222,8 +240,19 @@ mod tests {
                     body: "temperature unsupported".into(),
                 });
             }
+            let image_generation = request.requests_image_generation();
             self.requests.lock().await.push(request);
-            Ok(json!({"id":"probe"}))
+            if image_generation {
+                Ok(json!({
+                    "id": "probe",
+                    "output": [{
+                        "type": "image_generation_call",
+                        "result": "AA=="
+                    }]
+                }))
+            } else {
+                Ok(json!({"id":"probe"}))
+            }
         }
 
         async fn execute_stream(
@@ -259,6 +288,7 @@ mod tests {
                 ProviderCapability::Instructions,
                 ProviderCapability::Streaming,
                 ProviderCapability::FunctionTools,
+                ProviderCapability::ImageGeneration,
                 ProviderCapability::ReasoningEffort,
                 ProviderCapability::Temperature,
                 ProviderCapability::TopP,
@@ -283,6 +313,11 @@ mod tests {
                 .any(|request| request.instructions.is_some())
         );
         assert!(requests.iter().any(|request| !request.tools.is_empty()));
+        assert!(
+            requests
+                .iter()
+                .any(ResponsesRequest::requests_image_generation)
+        );
         assert!(
             requests
                 .iter()

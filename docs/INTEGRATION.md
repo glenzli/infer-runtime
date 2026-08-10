@@ -196,8 +196,8 @@ curl http://127.0.0.1:8787/v1/audio/speech \
   -d '{
     "model": "speech.synthesize",
     "input": "你好，这是 infer-runtime。",
-    "voice": "vivian",
-    "language": "chinese",
+    "voice": "speech.voice.zh.bright_female.v1",
+    "language": "Chinese",
     "response_format": "wav"
   }' \
   --output speech.wav
@@ -206,6 +206,16 @@ curl http://127.0.0.1:8787/v1/audio/speech \
 上传单文件上限当前为 25 MiB。Multipart 字段拼写、重复字段和 MIME/格式错误都会严格失败。
 语音生成响应的 `x-infer-job-id` 与 `x-infer-model` header 可用于诊断；不要把音频 payload
 写入通用日志。
+
+`speech.synthesize` 的 `voice` 是 Runtime 逻辑别名，不是 provider 原生 speaker 字符串。目录
+revision `infer.speech.voice-aliases@20260811.1` 当前发布
+`speech.voice.zh.bright_female.v1`，合同用途是普通中文旁白/对话，并要求显式
+`language=Chinese`。alias 的角色、保证语言或物理映射发生语义变化时必须发布新版本；现有
+alias 不会被静默重定义。获得该 Intent 不会同时获得 VoiceDesign、VoiceClone 或录音引用能力。
+对需要稳定产品合同的 App，配置
+`allowed_speech_voice_aliases = ["speech.voice.zh.bright_female.v1"]`；该 App 传入任何 provider
+原生 speaker 字符串都会在创建 Job 前被拒绝。省略 allowlist 只用于兼容尚未迁移的 candidate.2
+调用方。
 
 ### TTS server stream（candidate.2）
 
@@ -219,8 +229,8 @@ curl --no-buffer http://127.0.0.1:8787/v1/audio/speech \
   -d '{
     "model":"speech.synthesize",
     "input":"这段音频会边生成边返回。",
-    "voice":"vivian",
-    "language":"chinese",
+    "voice":"speech.voice.zh.bright_female.v1",
+    "language":"Chinese",
     "response_format":"pcm",
     "execution_mode":"server_stream"
   }' --output speech.pcm
@@ -484,7 +494,7 @@ Provider；本机 stdio 只是 transport。一个登录会话当前发现 Sol、
 [apps.sample-advanced-consumer]
 credential = { source = "managed" }
 resource_admin = false
-allowed_intents = ["assistant.general", "reasoning.deep"]
+allowed_intents = ["assistant.general", "reasoning.deep", "image.generate"]
 allowed_provider_access_classes = ["standard", "subscription"]
 allowed_cloud_input_modalities = ["text"]
 default_policy = "quality-first"
@@ -498,8 +508,9 @@ quality_floor = ["advanced", "frontier"]
 fallback = ["none"]
 ```
 
-bridge 支持非流式或 SSE 文本输出、字符串 `instructions` 和 `reasoning.effort`；不支持 tools、
-sampling、`max_output_tokens`、普通 metadata passthrough、conversation 或 durable background：
+bridge 支持非流式或 SSE 文本输出、字符串 `instructions` 和 `reasoning.effort`；除下述独立
+`image.generate` 合同外，不支持 tools、sampling、`max_output_tokens`、普通 metadata
+passthrough、conversation 或 durable background：
 
 ```bash
 curl http://127.0.0.1:8787/v1/responses \
@@ -544,6 +555,37 @@ Responses parts；只接受 HTTPS image URL 或有界 JPEG/PNG data URL，本地
 `model/list` 对实际物理模型声明了 image input。App 缺少 cloud image egress 时，候选解释记录
 `cloud_input_modality_not_allowed`，不会启动 Codex Attempt。
 
+`image.generate` 是另一条输出图片的实验合同，不是普通 Codex tool 代理。它仍使用
+`POST /v1/responses`，首版必须且只能传一个无附加字段的
+`{"type":"image_generation"}` tool；输入只允许文本，输出恰好一张 Base64 PNG：
+
+```bash
+curl http://127.0.0.1:8787/v1/responses \
+  -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "image.generate",
+    "input": "一枚简洁的蓝色圆形图标，白色背景，不含文字。",
+    "tools": [{"type": "image_generation"}],
+    "metadata": {
+      "infer.provider_access_class": "subscription",
+      "infer.max_cost_usd": "0",
+      "infer.fallback": "none"
+    }
+  }'
+```
+
+成功响应的 `output[0].type` 是 `image_generation_call`，`result` 是原始 Base64 PNG；不要把
+该字段写入日志或 Job metadata。Runtime 在返回前验证 Base64、PNG header、20 MiB decoded
+上限、最大 4096 边长和 16,777,216 pixels；不会跟随 App Server 的 `savedPath`。该纵切只支持
+单张、unary、text-to-image；stream、durable background、图片输入/编辑、tool 参数以及任何第二
+种 tool 都会失败。调用前 adapter 还会读取 `modelProvider/capabilities/read`，当前登录/provider
+未报告 `imageGeneration=true` 时不会启动生成 turn。
+
+因为输入只有文本，`image.generate` 不需要 cloud image input egress 权限；但 App 仍必须显式
+允许该 Intent 和 `subscription` access class。现有 `symbiont-d` 是首个获得该 Intent 的普通
+Consumer，继续保持 `resource_admin=false` 与单次 `max_cost_usd=0` 上限。
+
 如果 App 没有 subscription 授权，候选解释会记录 `provider_access_not_allowed`；请求不会启动
 Codex 子进程或消费订阅。`local_only` 和 `offline_required=true` 也始终排除这组模型。
 
@@ -561,8 +603,57 @@ operator 可读取动态模型组；`admitted=false` 只表示发现，不能路
 GET /infer/v1/providers/codex-subscription/models
 ```
 
-该能力不等于完整 Codex Server 代理。Thread、工具、文件、Shell、MCP、Web、delegation 和
-memory 均不向 Consumer 暴露；adapter 一旦观察到非推理 item 会让 Attempt fail closed。
+该能力不等于完整 Codex Server 代理。Thread、任意工具、文件、Shell、MCP、Web、delegation 和
+memory 均不向 Consumer 暴露；文本模式观察到任何 tool item 都会失败，`image.generate` 模式也
+只允许一个 `imageGeneration` item。
+
+### 9.1 Antigravity CLI 第二订阅 bridge（experimental）
+
+Antigravity CLI 使用同一 Provider inventory 结构，但不是 Codex JSON-RPC 的别名。一个登录账号对应
+一个 `placement=cloud`、`access_class=subscription` Provider；`agy models` 只形成动态 operator
+inventory；只有配置中显式 Build/Deployment 的模型能成为 Consumer 候选。
+
+bridge 把 `agy` 当作受信任本机 subscription agent：CLI 直接使用当前用户真实 HOME/Keychain 登录，
+Runtime 不读取、复制、轮换或输出 token。Consumer payload 和显式诊断写入一次性 owner-only
+workspace，argv 只有固定提示；CLI 自身仍可能维护账号级状态/history，所以这不是 credential 或
+history 隔离边界。以下配置开启动态 inventory；只有额外配置的静态 Deployment 才会路由：
+
+```toml
+[providers.antigravity-subscription]
+kind = "antigravity_cli"
+access_class = "subscription"
+command = "/absolute/path/to/agy"
+placement = "cloud"
+max_concurrency = 1
+max_queue = 16
+
+[providers.antigravity-subscription.capability_profile]
+version = 1
+protocol = "antigravity_cli"
+capabilities = ["responses", "instructions", "reasoning_effort"]
+```
+
+首版 Consumer 合同是 `POST /v1/responses` 的 text-in/text-out unary 子集：允许 instructions 和
+`reasoning.effort`，禁止 tools、图片、streaming、conversation、sampling、metadata passthrough 与
+durable background。`gemini-3.6-flash-low|medium|high` 是三个物理上游 slug，分别只接受 Low、
+None/Medium、High effort。它们共享一个语义 Model Profile，新增 inventory 模型不会自动准入。
+
+Provider 可在 Console 的 Models 页面查看动态 Inventory；未登录返回 authentication unavailable，
+不是 Runtime 配置损坏：
+
+```http
+GET /infer/v1/providers/antigravity-subscription/models
+```
+
+App 必须同时显式允许目标 Intent 与 `subscription` provider access class；`local_only`、
+`offline_required=true` 或未授权 App 都不会启动 `agy`。当前不适合敏感输入；真实 tool-denial、
+cancel/late-result、quota、history 与错误分类仍处于 soak。图片和 streaming 是更后的独立门，不能
+因 Gemini 原生能力而推导为 Runtime 能力。
+
+CLI 1.1.12 的真实 `stream-json` 还会产生一个没有内容的 `step_type="unknown"` 状态/计时帧。
+Runtime 只忽略字段精确为 `conversation_id`、`duration_seconds`、`state`、`step_index`、
+`step_type`，且 conversation 与 init 一致的这一种帧。任何新增字段、类型漂移、内容、tool 或
+subagent payload 都继续失败；该例外不是对未知事件的通用兼容。
 
 ## 10. 查询和解释自己的 Job
 
@@ -597,7 +688,8 @@ operator experimental surface，不是普通 consumer 合同。
 9. 反馈只带 response/job id、字段名、status、error code、合同版本和 daemon commit，不带
    token、prompt、音频、provider key 或 provider 原始错误。
 10. 使用订阅 Provider 的 Consumer 必须显式拥有 subscription access class，并验证
-    local-only/offline 请求零触达；图片另需 cloud image egress ACL；不得发送 tools 或 durable background。
+    local-only/offline 请求零触达；图片输入另需 cloud image egress ACL。除 `image.generate` 的
+    单个精确 tool 外不得发送 tools；订阅 bridge 不得使用 durable background。
 11. 音频 streaming Consumer 必须验证 PCM descriptor、partial replacement、final、disconnect
     cancel 和 reservation 释放，并记录实际 `transcription_mode`，不得假设原生实时 ASR。
 12. Qwen 视觉 Consumer 必须验证闭集 id 不外逸、basic/general 路由、取消与 source revision

@@ -10,6 +10,8 @@ use crate::{
     string_enum,
 };
 
+pub const IMAGE_GENERATION_INTENT: &str = "image.generate";
+
 /// The explicitly supported, stateless subset of an OpenAI Responses request.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -80,6 +82,34 @@ impl ResponsesRequest {
                 "stream=true with background=true",
             ));
         }
+        let image_generation = self.requests_image_generation();
+        if self.model == IMAGE_GENERATION_INTENT && !image_generation {
+            return Err(ContractError::UnsupportedField(
+                "image.generate without the exact image_generation tool",
+            ));
+        }
+        if self.model != IMAGE_GENERATION_INTENT && image_generation {
+            return Err(ContractError::UnsupportedField(
+                "image_generation outside image.generate",
+            ));
+        }
+        if image_generation {
+            if self.stream {
+                return Err(ContractError::UnsupportedField(
+                    "stream=true with image_generation",
+                ));
+            }
+            if self.background {
+                return Err(ContractError::UnsupportedField(
+                    "background=true with image_generation",
+                ));
+            }
+            if response_input_modalities(&self.input) != BTreeSet::from([Modality::Text]) {
+                return Err(ContractError::UnsupportedField(
+                    "non-text input with image.generate",
+                ));
+            }
+        }
         RequestConstraints::from_metadata(&self.metadata).map(|_| ())
     }
 
@@ -91,6 +121,19 @@ impl ResponsesRequest {
         self.reasoning
             .as_ref()
             .and_then(|reasoning| reasoning.effort)
+    }
+
+    /// The only hosted tool currently exposed by a subscription bridge. The
+    /// exact single-field shape prevents this capability from becoming a
+    /// generic Codex tool escape hatch or silently admitting edit options.
+    pub fn requests_image_generation(&self) -> bool {
+        let [tool] = self.tools.as_slice() else {
+            return false;
+        };
+        tool.as_object().is_some_and(|object| {
+            object.len() == 1
+                && object.get("type").and_then(Value::as_str) == Some("image_generation")
+        })
     }
 
     /// Merge task-level generation defaults into an otherwise valid public
@@ -131,10 +174,19 @@ impl ResponsesRequest {
                 .insert(ProviderCapability::Streaming);
         }
         if !self.tools.is_empty() {
-            requirements
-                .provider_capabilities
-                .insert(ProviderCapability::FunctionTools);
-            requirements.model_features.insert("function_tools".into());
+            if self.requests_image_generation() {
+                requirements
+                    .provider_capabilities
+                    .insert(ProviderCapability::ImageGeneration);
+                requirements
+                    .model_features
+                    .insert("image_generation".into());
+            } else {
+                requirements
+                    .provider_capabilities
+                    .insert(ProviderCapability::FunctionTools);
+                requirements.model_features.insert("function_tools".into());
+            }
         }
         if self.reasoning.is_some() {
             requirements
@@ -400,6 +452,7 @@ string_enum!(SortKey {
 string_enum!(ProviderProtocol {
     Responses => "responses",
     CodexAppServer => "codex_app_server",
+    AntigravityCli => "antigravity_cli",
     AudioWorker => "audio_worker",
     Onnx => "onnx"
 });
@@ -408,6 +461,7 @@ string_enum!(ProviderCapability {
     Instructions => "instructions",
     Streaming => "streaming",
     FunctionTools => "function_tools",
+    ImageGeneration => "image_generation",
     ReasoningEffort => "reasoning_effort",
     Temperature => "temperature",
     TopP => "top_p",
@@ -570,6 +624,49 @@ mod tests {
             request.execution_requirements().input_modalities,
             BTreeSet::from([Modality::Text, Modality::Image])
         );
+    }
+
+    #[test]
+    fn image_generation_is_an_exact_dedicated_unary_tool_contract() {
+        let mut request = request(IMAGE_GENERATION_INTENT);
+        request.tools = vec![serde_json::json!({"type": "image_generation"})];
+        request.validate().unwrap();
+        assert!(request.requests_image_generation());
+        let requirements = request.execution_requirements();
+        assert_eq!(
+            requirements.provider_capabilities,
+            BTreeSet::from([
+                ProviderCapability::Responses,
+                ProviderCapability::ImageGeneration,
+            ])
+        );
+        assert_eq!(
+            requirements.model_features,
+            BTreeSet::from(["image_generation".into()])
+        );
+
+        let mut wrong_intent = request.clone();
+        wrong_intent.model = "assistant.general".into();
+        assert!(wrong_intent.validate().is_err());
+
+        let mut configured_tool = request.clone();
+        configured_tool.tools = vec![serde_json::json!({
+            "type": "image_generation",
+            "quality": "low"
+        })];
+        assert!(!configured_tool.requests_image_generation());
+        assert!(configured_tool.validate().is_err());
+
+        let mut streaming = request.clone();
+        streaming.stream = true;
+        assert!(streaming.validate().is_err());
+
+        let mut editing = request;
+        editing.input = serde_json::json!({
+            "type": "input_image",
+            "image_url": "data:image/png;base64,AA=="
+        });
+        assert!(editing.validate().is_err());
     }
 
     #[test]

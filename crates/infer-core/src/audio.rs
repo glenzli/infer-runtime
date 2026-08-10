@@ -8,6 +8,15 @@ use crate::{ContractError, ExecutionMode, RequestConstraints, string_enum};
 
 pub const MAX_AUDIO_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
 
+/// Versioned catalog containing the Runtime-owned logical voices accepted by
+/// `speech.synthesize`.
+pub const SPEECH_VOICE_ALIAS_CATALOG_REVISION: &str = "infer.speech.voice-aliases@20260811.1";
+
+/// Bright, synthetic Mandarin voice intended for general narration and
+/// dialogue. This is a logical contract identity, not a provider speaker name.
+pub const SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1: &str = "speech.voice.zh.bright_female.v1";
+pub const SPEECH_VOICE_ZH_BRIGHT_FEMALE_LANGUAGE: &str = "Chinese";
+
 #[derive(Debug, Clone)]
 pub struct AudioFile {
     pub filename: String,
@@ -132,6 +141,16 @@ impl SpeechRequest {
             return Err(ContractError::InvalidAudio(
                 "speech.synthesize requires voice".into(),
             ));
+        }
+        // The versioned Runtime alias has a stricter semantic contract than
+        // legacy provider speaker strings. Per-App allowlists decide whether
+        // a Consumer may use only aliases without breaking existing callers.
+        if self.voice.as_deref() == Some(SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1)
+            && self.language.as_deref() != Some(SPEECH_VOICE_ZH_BRIGHT_FEMALE_LANGUAGE)
+        {
+            return Err(ContractError::InvalidAudio(format!(
+                "{SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1} requires language={SPEECH_VOICE_ZH_BRIGHT_FEMALE_LANGUAGE}"
+            )));
         }
         if self.model == "speech.voice_design"
             && self.instructions.as_deref().is_none_or(str::is_empty)
@@ -330,9 +349,9 @@ mod tests {
         let mut request = SpeechRequest {
             model: "speech.synthesize".into(),
             input: "hello".into(),
-            voice: Some("default".into()),
+            voice: Some(SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1.into()),
             instructions: None,
-            language: None,
+            language: Some(SPEECH_VOICE_ZH_BRIGHT_FEMALE_LANGUAGE.into()),
             speed: 1.0,
             response_format: SpeechFormat::Wav,
             execution_mode: ExecutionMode::Unary,
@@ -346,6 +365,31 @@ mod tests {
         assert!(request.validate().is_ok());
 
         request.execution_mode = ExecutionMode::Duplex;
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn versioned_runtime_voice_alias_requires_its_contract_language() {
+        let mut request = SpeechRequest {
+            model: "speech.synthesize".into(),
+            input: "hello".into(),
+            voice: Some(SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1.into()),
+            instructions: None,
+            language: Some(SPEECH_VOICE_ZH_BRIGHT_FEMALE_LANGUAGE.into()),
+            speed: 1.0,
+            response_format: SpeechFormat::Wav,
+            execution_mode: ExecutionMode::Unary,
+            metadata: BTreeMap::new(),
+        };
+        assert!(request.validate().is_ok());
+
+        // Existing candidate.2 callers remain compatible until their App opts
+        // into an alias-only allowlist.
+        request.voice = Some("Vivian".into());
+        assert!(request.validate().is_ok());
+
+        request.voice = Some(SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1.into());
+        request.language = Some("English".into());
         assert!(request.validate().is_err());
     }
 }

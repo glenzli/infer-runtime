@@ -150,29 +150,62 @@ impl OperatorClient {
     }
 
     pub(crate) async fn probe_provider(&self, provider: &str) -> Result<Value, String> {
-        self.post_json(&format!("/infer/v1/providers/{provider}/probe"), None)
-            .await
+        self.post_json_with_timeout(
+            &format!("/infer/v1/providers/{provider}/probe"),
+            None,
+            Duration::from_secs(5 * 60),
+        )
+        .await
     }
 
     pub(crate) async fn provider_models(&self, provider: &str) -> Result<Value, String> {
-        self.get_json(&format!("/infer/v1/providers/{provider}/models"), true)
-            .await
+        self.get_json_with_timeout(
+            &format!("/infer/v1/providers/{provider}/models"),
+            true,
+            Duration::from_secs(30),
+        )
+        .await
     }
 
     async fn get_json(&self, path: &str, authenticated: bool) -> Result<Value, String> {
+        self.get_json_with_timeout(path, authenticated, Duration::from_secs(2))
+            .await
+    }
+
+    async fn get_json_with_timeout(
+        &self,
+        path: &str,
+        authenticated: bool,
+        request_timeout: Duration,
+    ) -> Result<Value, String> {
         let mut request = self.http.get(format!("{}{}", self.base_url, path));
         if authenticated {
             request = request.bearer_auth(&self.api_key);
         }
-        let response = request.send().await.map_err(|error| error.to_string())?;
+        let response = request
+            .timeout(request_timeout)
+            .send()
+            .await
+            .map_err(|error| error.to_string())?;
         decode_json(response).await
     }
 
     async fn post_json(&self, path: &str, body: Option<&Value>) -> Result<Value, String> {
+        self.post_json_with_timeout(path, body, Duration::from_secs(2))
+            .await
+    }
+
+    async fn post_json_with_timeout(
+        &self,
+        path: &str,
+        body: Option<&Value>,
+        request_timeout: Duration,
+    ) -> Result<Value, String> {
         let mut request = self
             .http
             .post(format!("{}{}", self.base_url, path))
-            .bearer_auth(&self.api_key);
+            .bearer_auth(&self.api_key)
+            .timeout(request_timeout);
         if let Some(body) = body {
             request = request.json(body);
         }
