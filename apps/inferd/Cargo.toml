@@ -1,0 +1,17 @@
+[package]
+name = "inferd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+clap.workspace = true
+infer-api = { path = "../../crates/infer-api" }
+infer-control = { path = "../../crates/infer-control" }
+infer-core = { path = "../../crates/infer-core" }
+infer-observer = { path = "../../crates/infer-observer" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

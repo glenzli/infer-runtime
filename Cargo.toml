@@ -1,0 +1,58 @@
+[workspace]
+members = [
+  "crates/infer-auth",
+  "crates/infer-artifact",
+  "crates/infer-core",
+  "crates/infer-payload",
+  "crates/infer-store",
+  "crates/infer-provider",
+  "crates/infer-resource",
+  "crates/infer-observer",
+  "crates/infer-control",
+  "crates/infer-api",
+  "apps/inferd",
+  "apps/infer",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/g4i/infer-runtime"
+
+[workspace.dependencies]
+anyhow = "1.0"
+async-stream = "0.3"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["multipart", "ws"] }
+base64 = "0.22"
+bytes = "1.10"
+clap = { version = "4.5", features = ["derive", "env"] }
+crossterm = "0.29"
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "stream", "rustls-tls"] }
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }
+ring = "0.17"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+rusqlite = { version = "0.40", features = ["bundled"] }
+thiserror = "2.0"
+tempfile = "3.20"
+time = { version = "0.3", features = ["formatting", "parsing"] }
+http-body-util = "0.1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+libc = "0.2"
+ndarray = "0.17"
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["api-27", "coreml", "load-dynamic", "ndarray", "std", "tracing"] }
+tokio = { version = "1.44", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = "0.7"
+tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
+toml = "0.8"
+toml_edit = "0.22"
+tower = { version = "0.5", features = ["util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.15", features = ["v4", "serde"] }
+zeroize = "1.9"

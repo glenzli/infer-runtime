@@ -1,0 +1,1027 @@
+# Portable configuration example. It demonstrates supported provider, model,
+# deployment, Intent, and App contracts; it is not an inventory of any host and
+# does not imply that the listed models are installed or recommended.
+#
+# Copy this file to config/infer.toml, then replace example paths, deployments,
+# and App grants for the local machine. config/infer.toml is intentionally
+# ignored. Managed credentials are generated on first use and never committed.
+
+[server]
+bind = "127.0.0.1:8787"
+
+# Read-only facility discovery for any local consumer that implements
+# infer-runtime.status. Infra Discovery carries only a relative owner-only Unix
+# socket offer; the managed credential below is retained only for the explicit
+# HTTP diagnostic fallback.
+[observer]
+enabled = true
+instance_id = "local"
+console_url = "http://127.0.0.1:8790/"
+http_credential_id = "infra-sentinel"
+
+[auth]
+managed_credentials_directory = ".infer-runtime/credentials"
+
+[defaults]
+policy = "balanced"
+
+# Shared, content-addressed native artifacts. Ollama and MLX retain their own
+# native caches; this store is the canonical home for verified ONNX Builds and
+# manifests managed by infer-runtime.
+[artifacts]
+root = ".infer-runtime/artifacts"
+
+[runtimes.onnx]
+library = ".infer-runtime/runtimes/onnxruntime/lib/libonnxruntime.dylib"
+version = "1.27.0"
+preferred_execution_providers = ["coreml", "cpu"]
+allow_cpu_fallback = true
+
+# SQLite stores only runtime metadata: config snapshots, Job/Attempt state,
+# reservations, and the usage ledger. It never stores API key values or
+# request/audio payloads. Relative paths resolve from the daemon's cwd.
+[persistence]
+path = ".infer-runtime/state/infer-runtime.sqlite3"
+
+# Durable Responses background mode is fail-closed and disabled by default.
+# When enabled, set INFER_BACKGROUND_KEY to 64 hexadecimal characters (32
+# random key bytes). Plaintext payloads live only in the authenticated encrypted
+# spool; SQLite stores blob references and HMAC identities. The first M4 slice
+# accepts local-only text requests, never cloud placement.
+[background]
+enabled = false
+payload_directory = ".infer-runtime/payloads"
+key_env = "INFER_BACKGROUND_KEY"
+max_payload_bytes = 4194304
+result_retention_ms = 86400000
+max_recovery_replays = 2
+
+# Quotas are opt-in. When a global/provider/App limit is absent it is
+# deliberately unlimited; configure the same four fields under one or more of
+# `[quota.global]`, `[quota.providers.<id>]`, and `[quota.apps.<id>]`:
+# max_usd, requests_per_minute, tokens_per_minute, max_concurrent_attempts.
+
+[providers.ollama-local]
+kind = "responses"
+base_url = "http://127.0.0.1:11434/v1"
+placement = "local"
+max_concurrency = 1
+max_queue = 32
+priority_aging_ms = 10000
+
+[providers.ollama-local.capability_profile]
+version = 1
+protocol = "responses"
+capabilities = ["responses", "instructions", "streaming", "reasoning_effort", "temperature", "top_p", "max_output_tokens", "truncation", "metadata"]
+
+# Native control plane for model presence only. Text execution still uses the
+# shared Responses adapter above; inventory refresh never loads or unloads.
+[providers.ollama-local.local_inventory]
+kind = "ollama_tags"
+endpoint = "http://127.0.0.1:11434"
+
+# Host-specific classification remains configurable because unified-memory
+# headroom differs materially by machine and workload. These conservative
+# defaults preserve the original behavior; the measured free-memory value is
+# always exposed separately from its classification.
+[resources.pressure]
+elevated_at_or_below_free_memory_percent = 15
+critical_at_or_below_free_memory_percent = 5
+
+# M4 pressure policy starts in recommendation-only mode. It does not invoke
+# native load/unload. A resident model also needs a fresh, deployment-specific
+# local benchmark under [resources.reload_benchmarks] before it can become a
+# target; host measurements deliberately do not belong in this example.
+[resources.eviction]
+mode = "recommend"
+automatic_eligible = false
+minimum_resident_ms = 300000
+max_benchmark_age_ms = 2592000000
+
+# Safety resolves in this order: global -> resource class -> deployment.
+# Eligibility only affects dry-run target selection today; recommendation mode
+# has no native action owner and therefore cannot unload a model.
+[resources.eviction.classes.light]
+automatic_eligible = true
+minimum_resident_ms = 300000
+
+[resources.eviction.classes.standard]
+automatic_eligible = true
+minimum_resident_ms = 600000
+
+[resources.eviction.classes.heavy]
+automatic_eligible = false
+minimum_resident_ms = 3600000
+
+[resources.eviction.classes.extreme]
+automatic_eligible = false
+minimum_resident_ms = 7200000
+
+# Background observation is implemented but deliberately inert until an
+# operator enables it in versioned config and grants a short runtime lease.
+[resources.eviction.monitor]
+enabled = false
+poll_interval_ms = 30000
+max_lease_ms = 3600000
+
+[resources.eviction.elevated]
+target_free_memory_percent = 20
+
+[resources.eviction.critical]
+target_free_memory_percent = 25
+
+[providers.mlx-audio-local]
+kind = "audio_worker"
+command = "python3"
+args = ["workers/mlx_audio_worker.py"]
+placement = "local"
+max_concurrency = 1
+max_queue = 16
+priority_aging_ms = 10000
+
+[providers.mlx-audio-local.capability_profile]
+version = 1
+protocol = "audio_worker"
+
+[providers.onnx-local]
+kind = "onnx"
+placement = "local"
+max_concurrency = 2
+max_queue = 32
+priority_aging_ms = 10000
+
+[providers.onnx-local.capability_profile]
+version = 1
+protocol = "onnx"
+
+[providers.onnx-local.local_inventory]
+kind = "onnx_sessions"
+
+# DeepSeek V4 Flash now implements the stateless Responses endpoint directly.
+# Pro stays catalogued below but receives no deployment until the same endpoint
+# is officially available for it.
+[providers.deepseek-cloud]
+kind = "responses"
+base_url = "https://api.deepseek.com"
+api_key_env = "DEEPSEEK_API_KEY"
+requires_api_key = true
+placement = "cloud"
+max_concurrency = 4
+max_queue = 64
+priority_aging_ms = 10000
+
+[providers.deepseek-cloud.capability_profile]
+version = 1
+protocol = "responses"
+capabilities = ["responses", "instructions", "streaming", "function_tools", "reasoning_effort", "temperature", "top_p", "max_output_tokens", "truncation", "metadata"]
+
+# One local Codex App Server process exposes a subscription-backed group of
+# cloud models. Local stdio is only the transport: placement remains cloud and
+# existing Consumers are denied unless their App explicitly opts into the
+# subscription access class. The adapter admits only the three Builds below;
+# other models returned by model/list remain operator-visible inventory.
+[providers.codex-subscription]
+kind = "codex_app_server"
+access_class = "subscription"
+# Replace with an absolute executable path when a GUI-owned Console does not
+# inherit the shell PATH.
+command = "codex"
+args = [
+  "app-server",
+  "--strict-config",
+  "--disable", "shell_tool",
+  "--disable", "unified_exec",
+  "--disable", "plugins",
+  "--disable", "apps",
+  "--disable", "multi_agent",
+  "--disable", "computer_use",
+  "-c", "agents.enabled=false",
+  "-c", "web_search=\"disabled\"",
+  "-c", "history.persistence=\"none\"",
+  "-c", "memories.generate_memories=false",
+  "-c", "feedback.enabled=false",
+  "--listen", "stdio://",
+]
+placement = "cloud"
+max_concurrency = 1
+max_queue = 16
+priority_aging_ms = 10000
+
+[providers.codex-subscription.capability_profile]
+version = 1
+protocol = "codex_app_server"
+capabilities = ["responses", "instructions", "streaming", "reasoning_effort"]
+
+[profiles.balanced]
+order = ["quality_fit", "deadline_fit", "queue_time", "cost", "placement"]
+
+[profiles.local-first]
+order = ["placement", "deadline_fit", "queue_time", "cost", "quality_fit"]
+
+[profiles.quality-first]
+order = ["quality", "deadline_fit", "cost", "placement"]
+
+[profiles.latency-first]
+order = ["deadline_fit", "queue_time", "placement", "quality_fit", "cost"]
+
+[profiles.cost-first]
+order = ["cost", "placement", "quality_fit"]
+
+# Intent profiles are stable runtime contracts. Application names never appear
+# here; an App maps its own actions to one of these intents.
+[intents."text.summarize"]
+input_modalities = ["text"]
+output_modalities = ["text"]
+default_quality_floor = "basic"
+default_policy = "cost-first"
+default_max_output_tokens = 256
+default_reasoning_effort = "none"
+
+[intents."text.proofread"]
+input_modalities = ["text"]
+output_modalities = ["text"]
+default_quality_floor = "basic"
+default_policy = "cost-first"
+default_max_output_tokens = 512
+default_reasoning_effort = "none"
+
+[intents."assistant.general"]
+input_modalities = ["text"]
+output_modalities = ["text"]
+default_quality_floor = "general"
+default_policy = "balanced"
+
+# Stateless image+text reasoning. Cloud image egress also requires the App's
+# independent allowed_cloud_input_modalities entitlement.
+[intents."assistant.multimodal"]
+input_modalities = ["text", "image"]
+output_modalities = ["text"]
+default_quality_floor = "general"
+default_policy = "balanced"
+
+[intents."reasoning.deep"]
+input_modalities = ["text"]
+output_modalities = ["text"]
+default_quality_floor = "advanced"
+default_policy = "quality-first"
+
+[intents."vision.understand"]
+input_modalities = ["text", "image"]
+output_modalities = ["text"]
+default_quality_floor = "basic"
+default_policy = "balanced"
+
+[intents."vision.detect_faces"]
+data_plane = "vision.face_detection"
+input_modalities = ["image"]
+output_modalities = ["json"]
+required_features = ["five_point_landmarks"]
+default_quality_floor = "basic"
+default_policy = "local-first"
+
+[intents."vision.embed_face"]
+data_plane = "vision.face_embedding"
+input_modalities = ["image"]
+output_modalities = ["json"]
+required_features = ["face_embedding_128d", "sensitive_biometric"]
+default_quality_floor = "basic"
+default_policy = "local-first"
+
+[intents."vision.embed_image"]
+data_plane = "vision.image_embedding"
+input_modalities = ["image"]
+output_modalities = ["json"]
+required_features = ["siglip2_embedding_768d", "cross_modal_retrieval"]
+default_quality_floor = "basic"
+default_policy = "local-first"
+
+[intents."vision.embed_text"]
+data_plane = "vision.text_embedding"
+input_modalities = ["text"]
+output_modalities = ["json"]
+required_features = ["siglip2_embedding_768d", "multilingual_text", "cross_modal_retrieval"]
+default_quality_floor = "basic"
+default_policy = "local-first"
+
+[intents."audio.transcribe"]
+data_plane = "audio.transcription"
+input_modalities = ["audio"]
+output_modalities = ["text", "json"]
+required_features = ["language_detection"]
+default_quality_floor = "basic"
+default_policy = "local-first"
+
+[intents."audio.align"]
+data_plane = "audio.alignment"
+input_modalities = ["audio", "text"]
+output_modalities = ["json"]
+required_features = ["word_timestamps"]
+default_quality_floor = "basic"
+default_policy = "local-first"
+
+[intents."speech.synthesize"]
+data_plane = "audio.speech"
+input_modalities = ["text"]
+output_modalities = ["audio"]
+required_features = ["built_in_voices"]
+default_quality_floor = "basic"
+default_policy = "local-first"
+
+[intents."speech.voice_design"]
+data_plane = "audio.speech"
+input_modalities = ["text"]
+output_modalities = ["audio"]
+required_features = ["voice_design"]
+default_quality_floor = "basic"
+default_policy = "local-first"
+
+[intents."speech.voice_clone"]
+data_plane = "audio.voice_clone"
+input_modalities = ["text", "audio"]
+output_modalities = ["audio"]
+required_features = ["voice_clone"]
+default_quality_floor = "basic"
+default_policy = "local-first"
+
+[model_profiles.qwen3_5_2b]
+family = "qwen3.5"
+
+[model_profiles.qwen3_5_2b.ratings."text.summarize"]
+grade = "basic"
+status = "provisional"
+
+[model_profiles.qwen3_5_2b.ratings."text.proofread"]
+grade = "basic"
+status = "provisional"
+
+[model_profiles.qwen3_5_4b]
+family = "qwen3.5"
+
+[model_profiles.qwen3_5_4b.ratings."text.summarize"]
+grade = "basic"
+status = "provisional"
+
+[model_profiles.qwen3_5_4b.ratings."text.proofread"]
+grade = "basic"
+status = "provisional"
+
+[model_profiles.qwen3_vl_4b]
+family = "qwen3-vl"
+
+[model_profiles.qwen3_vl_4b.ratings."vision.understand"]
+grade = "basic"
+status = "provisional"
+
+[model_profiles.qwen3_vl_8b]
+family = "qwen3-vl"
+
+[model_profiles.qwen3_vl_8b.ratings."vision.understand"]
+grade = "basic"
+status = "provisional"
+
+[model_profiles.qwen3_6_35b]
+family = "qwen3.6"
+
+[model_profiles.qwen3_6_35b.ratings."assistant.general"]
+grade = "general"
+status = "provisional"
+
+[model_profiles.qwen3_6_35b.ratings."text.summarize"]
+grade = "general"
+status = "provisional"
+
+[model_profiles.qwen3_6_35b.ratings."text.proofread"]
+grade = "general"
+status = "provisional"
+
+# It can be evaluated on deep reasoning, but the provisional grade remains
+# below the intent's advanced floor, so it is not routed there by default.
+[model_profiles.qwen3_6_35b.ratings."reasoning.deep"]
+grade = "basic"
+status = "provisional"
+
+# Cloud ratings are deliberately provisional until the runtime's own
+# workload-specific evaluation suite replaces these initial registrations.
+[model_profiles.deepseek_v4_flash]
+family = "deepseek-v4"
+
+[model_profiles.deepseek_v4_flash.ratings."text.summarize"]
+grade = "general"
+status = "provisional"
+
+[model_profiles.deepseek_v4_flash.ratings."text.proofread"]
+grade = "general"
+status = "provisional"
+
+[model_profiles.deepseek_v4_flash.ratings."assistant.general"]
+grade = "general"
+status = "provisional"
+
+[model_profiles.deepseek_v4_pro]
+family = "deepseek-v4"
+
+[model_profiles.deepseek_v4_pro.ratings."text.summarize"]
+grade = "advanced"
+status = "provisional"
+
+[model_profiles.deepseek_v4_pro.ratings."text.proofread"]
+grade = "advanced"
+status = "provisional"
+
+[model_profiles.deepseek_v4_pro.ratings."assistant.general"]
+grade = "advanced"
+status = "provisional"
+
+[model_profiles.deepseek_v4_pro.ratings."reasoning.deep"]
+grade = "advanced"
+status = "provisional"
+
+# Codex subscription ratings are provisional routing policy, not vendor model
+# rankings. Luna is the general entry, Terra the advanced default, and Sol is
+# reserved for the deep-reasoning intent in this first admission set.
+[model_profiles.codex_gpt_5_6_luna]
+family = "gpt-5.6"
+
+[model_profiles.codex_gpt_5_6_luna.ratings."assistant.general"]
+grade = "general"
+status = "provisional"
+
+[model_profiles.codex_gpt_5_6_luna.ratings."assistant.multimodal"]
+grade = "general"
+status = "provisional"
+
+[model_profiles.codex_gpt_5_6_terra]
+family = "gpt-5.6"
+
+[model_profiles.codex_gpt_5_6_terra.ratings."assistant.general"]
+grade = "advanced"
+status = "provisional"
+
+[model_profiles.codex_gpt_5_6_terra.ratings."assistant.multimodal"]
+grade = "advanced"
+status = "provisional"
+
+[model_profiles.codex_gpt_5_6_terra.ratings."reasoning.deep"]
+grade = "advanced"
+status = "provisional"
+
+[model_profiles.codex_gpt_5_6_sol]
+family = "gpt-5.6"
+
+[model_profiles.codex_gpt_5_6_sol.ratings."reasoning.deep"]
+grade = "frontier"
+status = "provisional"
+
+[model_profiles.codex_gpt_5_6_sol.ratings."assistant.multimodal"]
+grade = "advanced"
+status = "provisional"
+
+[model_profiles.qwen3_asr_1_7b]
+family = "qwen3-asr"
+
+[model_profiles.qwen3_asr_1_7b.ratings."audio.transcribe"]
+grade = "general"
+status = "provisional"
+
+[model_profiles.qwen3_forced_aligner_0_6b]
+family = "qwen3-forced-aligner"
+
+[model_profiles.qwen3_forced_aligner_0_6b.ratings."audio.align"]
+grade = "general"
+status = "provisional"
+
+[model_profiles.qwen3_tts_custom_voice_1_7b]
+family = "qwen3-tts"
+
+[model_profiles.qwen3_tts_custom_voice_1_7b.ratings."speech.synthesize"]
+grade = "general"
+status = "provisional"
+
+[model_profiles.qwen3_tts_voice_design_1_7b]
+family = "qwen3-tts"
+
+[model_profiles.qwen3_tts_voice_design_1_7b.ratings."speech.voice_design"]
+grade = "general"
+status = "provisional"
+
+[model_profiles.qwen3_tts_base_1_7b]
+family = "qwen3-tts"
+
+[model_profiles.qwen3_tts_base_1_7b.ratings."speech.voice_clone"]
+grade = "general"
+status = "provisional"
+
+# This example catalogs an optional PyTorch asset but intentionally gives it no
+# deployment until an operator configures a compatible executor.
+[model_profiles.sensevoice_small]
+family = "sensevoice"
+
+[model_profiles.sensevoice_small.ratings."audio.transcribe"]
+grade = "basic"
+status = "provisional"
+
+[model_profiles.yunet_2026may]
+family = "yunet"
+
+[model_profiles.yunet_2026may.ratings."vision.detect_faces"]
+grade = "basic"
+status = "provisional"
+
+[model_profiles.sface_2021dec]
+family = "sface"
+
+[model_profiles.sface_2021dec.ratings."vision.embed_face"]
+grade = "basic"
+status = "provisional"
+
+[model_profiles.siglip2_base_patch16_224]
+family = "siglip2"
+
+[model_profiles.siglip2_base_patch16_224.ratings."vision.embed_image"]
+grade = "basic"
+status = "provisional"
+
+[model_profiles.siglip2_base_patch16_224.ratings."vision.embed_text"]
+grade = "basic"
+status = "provisional"
+
+[model_builds.qwen3_5_2b_mlx]
+profile = "qwen3_5_2b"
+model_id = "qwen3.5:2b-mlx"
+variant = "mlx"
+input_modalities = ["text"]
+output_modalities = ["text"]
+
+[model_builds.qwen3_5_4b_mlx]
+profile = "qwen3_5_4b"
+model_id = "qwen3.5:4b-mlx"
+variant = "mlx"
+input_modalities = ["text"]
+output_modalities = ["text"]
+
+[model_builds.qwen3_vl_4b]
+profile = "qwen3_vl_4b"
+model_id = "qwen3-vl:4b"
+input_modalities = ["text", "image"]
+output_modalities = ["text"]
+
+[model_builds.qwen3_vl_8b]
+profile = "qwen3_vl_8b"
+model_id = "qwen3-vl:8b"
+input_modalities = ["text", "image"]
+output_modalities = ["text"]
+
+[model_builds.qwen3_6_35b_mlx]
+profile = "qwen3_6_35b"
+model_id = "qwen3.6:35b-mlx"
+variant = "mlx"
+input_modalities = ["text"]
+output_modalities = ["text"]
+
+[model_builds.deepseek_v4_flash]
+profile = "deepseek_v4_flash"
+model_id = "deepseek-v4-flash"
+variant = "cloud"
+input_modalities = ["text"]
+output_modalities = ["text"]
+features = ["function_tools", "reasoning"]
+
+[model_builds.deepseek_v4_pro]
+profile = "deepseek_v4_pro"
+model_id = "deepseek-v4-pro"
+variant = "cloud"
+input_modalities = ["text"]
+output_modalities = ["text"]
+features = ["function_tools", "reasoning"]
+
+[model_builds.codex_gpt_5_6_luna_subscription]
+profile = "codex_gpt_5_6_luna"
+model_id = "gpt-5.6-luna"
+variant = "codex-subscription"
+input_modalities = ["text", "image"]
+output_modalities = ["text"]
+features = ["reasoning"]
+
+[model_builds.codex_gpt_5_6_terra_subscription]
+profile = "codex_gpt_5_6_terra"
+model_id = "gpt-5.6-terra"
+variant = "codex-subscription"
+input_modalities = ["text", "image"]
+output_modalities = ["text"]
+features = ["reasoning"]
+
+[model_builds.codex_gpt_5_6_sol_subscription]
+profile = "codex_gpt_5_6_sol"
+model_id = "gpt-5.6-sol"
+variant = "codex-subscription"
+input_modalities = ["text", "image"]
+output_modalities = ["text"]
+features = ["reasoning"]
+
+[model_builds.qwen3_asr_1_7b_8bit]
+profile = "qwen3_asr_1_7b"
+model_id = "models/qwen3-asr-1.7b-8bit"
+variant = "mlx-8bit"
+input_modalities = ["audio"]
+output_modalities = ["text", "json"]
+features = ["language_detection"]
+
+[model_builds.qwen3_forced_aligner_0_6b_8bit]
+profile = "qwen3_forced_aligner_0_6b"
+model_id = "models/qwen3-forced-aligner-0.6b-8bit"
+variant = "mlx-8bit"
+input_modalities = ["audio", "text"]
+output_modalities = ["json"]
+features = ["word_timestamps"]
+
+[model_builds.qwen3_tts_custom_voice_1_7b_8bit]
+profile = "qwen3_tts_custom_voice_1_7b"
+model_id = "models/qwen3-tts-1.7b-custom-voice-8bit"
+variant = "mlx-8bit"
+input_modalities = ["text"]
+output_modalities = ["audio"]
+features = ["built_in_voices"]
+
+[model_builds.qwen3_tts_voice_design_1_7b_8bit]
+profile = "qwen3_tts_voice_design_1_7b"
+model_id = "models/qwen3-tts-1.7b-voice-design-8bit"
+variant = "mlx-8bit"
+input_modalities = ["text"]
+output_modalities = ["audio"]
+features = ["voice_design"]
+
+[model_builds.qwen3_tts_base_1_7b_8bit]
+profile = "qwen3_tts_base_1_7b"
+model_id = "models/qwen3-tts-1.7b-base-8bit"
+variant = "mlx-8bit"
+input_modalities = ["text", "audio"]
+output_modalities = ["audio"]
+features = ["voice_clone"]
+
+[model_builds.sensevoice_small_pytorch]
+profile = "sensevoice_small"
+model_id = "models/sensevoice-small"
+variant = "pytorch"
+input_modalities = ["audio"]
+output_modalities = ["text", "json"]
+features = ["language_detection", "emotion_detection", "audio_event_detection", "requires_funasr"]
+
+[model_builds.yunet_2026may_onnx]
+profile = "yunet_2026may"
+model_id = "sha256:ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0"
+variant = "onnx-opset11-fp32"
+input_modalities = ["image"]
+output_modalities = ["json"]
+features = ["five_point_landmarks"]
+
+[model_builds.yunet_2026may_onnx.onnx]
+adapter = "yunet_face_detection"
+opset = 11
+inputs = [{ name = "input", dtype = "float32", shape = ["1", "3", "height", "width"] }]
+outputs = [
+  { name = "cls_8", dtype = "float32", shape = ["1", "anchors_8", "1"] },
+  { name = "cls_16", dtype = "float32", shape = ["1", "anchors_16", "1"] },
+  { name = "cls_32", dtype = "float32", shape = ["1", "anchors_32", "1"] },
+  { name = "obj_8", dtype = "float32", shape = ["1", "anchors_8", "1"] },
+  { name = "obj_16", dtype = "float32", shape = ["1", "anchors_16", "1"] },
+  { name = "obj_32", dtype = "float32", shape = ["1", "anchors_32", "1"] },
+  { name = "bbox_8", dtype = "float32", shape = ["1", "anchors_8", "4"] },
+  { name = "bbox_16", dtype = "float32", shape = ["1", "anchors_16", "4"] },
+  { name = "bbox_32", dtype = "float32", shape = ["1", "anchors_32", "4"] },
+  { name = "kps_8", dtype = "float32", shape = ["1", "anchors_8", "10"] },
+  { name = "kps_16", dtype = "float32", shape = ["1", "anchors_16", "10"] },
+  { name = "kps_32", dtype = "float32", shape = ["1", "anchors_32", "10"] },
+]
+postprocessing_identity = "opencv_yunet_decode_sqrt_score_nms_v1"
+postprocessing_parameters = { score_threshold = 0.6, nms_threshold = 0.3, top_k = 5000.0 }
+allowed_execution_providers = ["coreml", "cpu"]
+precision = "fp32"
+
+[model_builds.yunet_2026may_onnx.onnx.artifact]
+sha256 = "ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0"
+size_bytes = 229738
+source_url = "https://github.com/opencv/opencv_zoo/raw/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/face_detection_yunet_2026may.onnx"
+source_revision = "opencv-zoo@47534e27c9851bb1128ccc0102f1145e27f23f98"
+license_spdx = "MIT"
+
+[model_builds.yunet_2026may_onnx.onnx.preprocessing]
+identity = "srgb_no_exif_triangle_long_edge_1600_bgr_nchw_pad32_v1"
+orientation = "input_pixels_no_exif_transform"
+resize = "triangle_long_edge_1600_no_upscale_then_pad_bottom_right_to_32"
+color_space = "srgb"
+channel_order = "bgr"
+layout = "nchw"
+dtype = "float32"
+mean = [0.0, 0.0, 0.0]
+scale = [1.0]
+
+[model_builds.sface_2021dec_onnx]
+profile = "sface_2021dec"
+model_id = "sha256:0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+variant = "onnx-opset11-fp32"
+input_modalities = ["image"]
+output_modalities = ["json"]
+features = ["face_embedding_128d", "sensitive_biometric"]
+
+[model_builds.sface_2021dec_onnx.onnx]
+adapter = "sface_embedding"
+opset = 11
+inputs = [{ name = "data", dtype = "float32", shape = ["1", "3", "112", "112"] }]
+outputs = [{ name = "fc1", dtype = "float32", shape = ["1", "128"] }]
+postprocessing_identity = "l2_normalized_embedding_cosine_space_v1"
+allowed_execution_providers = ["coreml", "cpu"]
+precision = "fp32"
+
+[model_builds.sface_2021dec_onnx.onnx.artifact]
+sha256 = "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+size_bytes = 38696353
+source_url = "https://github.com/opencv/opencv_zoo/raw/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/face_recognition_sface_2021dec.onnx"
+source_revision = "opencv-zoo@47534e27c9851bb1128ccc0102f1145e27f23f98"
+license_spdx = "Apache-2.0"
+
+[model_builds.sface_2021dec_onnx.onnx.preprocessing]
+identity = "opencv_sface_similarity_align_112_rgb_nchw_v1"
+orientation = "input_pixels_no_exif_transform"
+resize = "five_point_similarity_transform_to_112x112_inter_linear"
+color_space = "srgb"
+channel_order = "rgb"
+layout = "nchw"
+dtype = "float32"
+mean = [0.0, 0.0, 0.0]
+scale = [1.0]
+
+[model_builds.siglip2_base_patch16_224_image_onnx_cpu_v1]
+profile = "siglip2_base_patch16_224"
+model_id = "sha256:37a4dd33a92af42f9d6ca301fa9ed71ebc28c6fd6036dbb03475c6f703ab69c6"
+variant = "fixres224-image-onnx-opset17-fp32"
+input_modalities = ["image"]
+output_modalities = ["json"]
+features = ["siglip2_embedding_768d", "cross_modal_retrieval"]
+
+[model_builds.siglip2_base_patch16_224_image_onnx_cpu_v1.onnx]
+adapter = "siglip_image_embedding"
+opset = 17
+inputs = [{ name = "pixel_values", dtype = "float32", shape = ["1", "3", "224", "224"] }]
+outputs = [{ name = "embedding", dtype = "float32", shape = ["1", "768"] }]
+postprocessing_identity = "onnx_graph_l2_eps1e-12_then_runtime_renorm_v1"
+allowed_execution_providers = ["cpu"]
+precision = "fp32"
+
+[model_builds.siglip2_base_patch16_224_image_onnx_cpu_v1.onnx.artifact]
+sha256 = "37a4dd33a92af42f9d6ca301fa9ed71ebc28c6fd6036dbb03475c6f703ab69c6"
+size_bytes = 371694512
+source_url = "https://huggingface.co/google/siglip2-base-patch16-224/tree/75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2"
+source_revision = "google/siglip2-base-patch16-224@75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2;infer-export-v1;torch-2.8.0;transformers-4.56.2;onnx-1.19.0"
+license_spdx = "Apache-2.0"
+
+[model_builds.siglip2_base_patch16_224_image_onnx_cpu_v1.onnx.preprocessing]
+identity = "srgb_orientation_normalized_resize_exact_224_catmullrom_rgb_minus1_1_v1"
+orientation = "display_pixels_orientation_normalized"
+resize = "exact_224x224_catmullrom"
+color_space = "srgb"
+channel_order = "rgb"
+layout = "nchw"
+dtype = "float32"
+mean = [0.5, 0.5, 0.5]
+scale = [0.5, 0.5, 0.5]
+
+[model_builds.siglip2_base_patch16_224_image_onnx_cpu_v1.onnx.embedding_space]
+identity = "siglip2_base_patch16_224@75de2d55:fixres224:lowercase64:l2_768_fp32:v1"
+dimensions = 768
+normalized = true
+distance_metric = "cosine"
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cpu_v1]
+profile = "siglip2_base_patch16_224"
+model_id = "sha256:59a483f782025c5724628100e4dd7b49e96fa47b8b49d963b99932d4ab83199c"
+variant = "fixres224-text-onnx-opset17-fp32"
+input_modalities = ["text"]
+output_modalities = ["json"]
+features = ["siglip2_embedding_768d", "multilingual_text", "cross_modal_retrieval"]
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cpu_v1.onnx]
+adapter = "siglip_text_embedding"
+opset = 17
+inputs = [{ name = "input_ids", dtype = "int64", shape = ["1", "64"] }]
+outputs = [{ name = "embedding", dtype = "float32", shape = ["1", "768"] }]
+postprocessing_identity = "onnx_graph_l2_eps1e-12_then_runtime_renorm_v1"
+allowed_execution_providers = ["cpu"]
+precision = "fp32"
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cpu_v1.onnx.artifact]
+sha256 = "59a483f782025c5724628100e4dd7b49e96fa47b8b49d963b99932d4ab83199c"
+size_bytes = 1129352203
+source_url = "https://huggingface.co/google/siglip2-base-patch16-224/tree/75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2"
+source_revision = "google/siglip2-base-patch16-224@75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2;infer-export-v1;torch-2.8.0;transformers-4.56.2;onnx-1.19.0"
+license_spdx = "Apache-2.0"
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cpu_v1.onnx.auxiliary_artifacts.tokenizer]
+sha256 = "cb9140fae3ac5122c972d37adf83e1248471a38147ad76f8215c8872c6fd8322"
+size_bytes = 34363039
+source_url = "https://huggingface.co/google/siglip2-base-patch16-224/resolve/75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2/tokenizer.json"
+source_revision = "google/siglip2-base-patch16-224@75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2"
+license_spdx = "Apache-2.0"
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cpu_v1.onnx.text_preprocessing]
+identity = "gemma_tokenizer_cb9140fa_lowercase_eos_pad_right_truncate64_v1"
+tokenizer_artifact = "tokenizer"
+lowercase = true
+padding = "max_length"
+truncation = true
+max_length = 64
+pad_token_id = 0
+eos_token_id = 1
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cpu_v1.onnx.embedding_space]
+identity = "siglip2_base_patch16_224@75de2d55:fixres224:lowercase64:l2_768_fp32:v1"
+dimensions = 768
+normalized = true
+distance_metric = "cosine"
+
+[deployments.ollama_qwen3_5_2b]
+provider = "ollama-local"
+build = "qwen3_5_2b_mlx"
+resource_class = "light"
+supported_efforts = ["none"]
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "server_stream"]
+
+[deployments.ollama_qwen3_5_4b]
+provider = "ollama-local"
+build = "qwen3_5_4b_mlx"
+resource_class = "standard"
+supported_efforts = ["none"]
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "server_stream"]
+
+[deployments.ollama_qwen3_vl_4b]
+provider = "ollama-local"
+build = "qwen3_vl_4b"
+resource_class = "standard"
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "server_stream"]
+
+[deployments.ollama_qwen3_vl_8b]
+provider = "ollama-local"
+build = "qwen3_vl_8b"
+resource_class = "heavy"
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "server_stream"]
+
+[deployments.ollama_qwen3_6_35b]
+provider = "ollama-local"
+build = "qwen3_6_35b_mlx"
+resource_class = "heavy"
+supported_efforts = ["none"]
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "server_stream"]
+
+# These are conservative per-request admission estimates, not token billing.
+# M3 replaces them with token-aware reservations and settlement from provider
+# usage; a request with a lower `infer.max_cost_usd` will stay local.
+[deployments.deepseek_v4_flash]
+provider = "deepseek-cloud"
+build = "deepseek_v4_flash"
+resource_class = "standard"
+supported_efforts = ["none", "low", "medium", "high", "xhigh", "max"]
+estimated_cost_usd = 0.05
+supported_execution_modes = ["unary", "server_stream"]
+
+# These Deployments share one Provider scheduler and subscription quota pool.
+# `ultra` is upstream inventory only for now because it is outside the public
+# infer-runtime ReasoningEffort contract.
+[deployments.codex_gpt_5_6_luna]
+provider = "codex-subscription"
+build = "codex_gpt_5_6_luna_subscription"
+resource_class = "standard"
+supported_efforts = ["low", "medium", "high", "xhigh", "max"]
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "server_stream"]
+
+[deployments.codex_gpt_5_6_terra]
+provider = "codex-subscription"
+build = "codex_gpt_5_6_terra_subscription"
+resource_class = "standard"
+supported_efforts = ["low", "medium", "high", "xhigh", "max"]
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "server_stream"]
+
+[deployments.codex_gpt_5_6_sol]
+provider = "codex-subscription"
+build = "codex_gpt_5_6_sol_subscription"
+resource_class = "standard"
+supported_efforts = ["low", "medium", "high", "xhigh", "max"]
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "server_stream"]
+
+[deployments.mlx_qwen3_asr_1_7b]
+provider = "mlx-audio-local"
+build = "qwen3_asr_1_7b_8bit"
+resource_class = "standard"
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "duplex"]
+
+[deployments.mlx_qwen3_forced_aligner_0_6b]
+provider = "mlx-audio-local"
+build = "qwen3_forced_aligner_0_6b_8bit"
+resource_class = "standard"
+estimated_cost_usd = 0.0
+
+[deployments.mlx_qwen3_tts_custom_voice_1_7b]
+provider = "mlx-audio-local"
+build = "qwen3_tts_custom_voice_1_7b_8bit"
+resource_class = "heavy"
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "server_stream"]
+
+[deployments.mlx_qwen3_tts_voice_design_1_7b]
+provider = "mlx-audio-local"
+build = "qwen3_tts_voice_design_1_7b_8bit"
+resource_class = "heavy"
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "server_stream"]
+
+[deployments.mlx_qwen3_tts_base_1_7b]
+provider = "mlx-audio-local"
+build = "qwen3_tts_base_1_7b_8bit"
+resource_class = "heavy"
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "server_stream"]
+
+[deployments.onnx_yunet_2026may]
+provider = "onnx-local"
+build = "yunet_2026may_onnx"
+resource_class = "light"
+estimated_cost_usd = 0.0
+
+[deployments.onnx_sface_2021dec]
+provider = "onnx-local"
+build = "sface_2021dec_onnx"
+resource_class = "light"
+estimated_cost_usd = 0.0
+
+[deployments.onnx_siglip2_base_patch16_224_image]
+provider = "onnx-local"
+build = "siglip2_base_patch16_224_image_onnx_cpu_v1"
+resource_class = "heavy"
+estimated_cost_usd = 0.0
+
+[deployments.onnx_siglip2_base_patch16_224_text]
+provider = "onnx-local"
+build = "siglip2_base_patch16_224_text_onnx_cpu_v1"
+resource_class = "heavy"
+estimated_cost_usd = 0.0
+
+# Protected local administrator identity. `allowed_intents` is intentionally
+# omitted here: unlike an ordinary legacy Consumer, local-operator must follow
+# the complete configured Intent registry so newly added operator diagnostics
+# do not require a second permission-list update. Never share this credential
+# with a product Consumer.
+[apps.local-operator]
+credential = { source = "managed" }
+resource_admin = true
+allowed_provider_access_classes = ["standard", "subscription"]
+allowed_cloud_input_modalities = ["text", "image"]
+max_pending_jobs = 16
+default_policy = "balanced"
+allowed_policies = ["balanced", "local-first", "quality-first", "latency-first", "cost-first"]
+
+[apps.local-operator.request_overrides]
+priority = ["interactive", "normal", "background"]
+placement = ["local_only", "private", "anywhere", "cloud_only"]
+prefer = ["local", "trusted_node", "cloud"]
+offline_required = true
+quality_floor = ["basic", "general", "advanced", "frontier"]
+latency = ["interactive", "balanced", "throughput"]
+fallback = ["none", "equivalent", "allow_lower_quality"]
+max_cost_usd = { min = 0.0, max = 5.0 }
+
+# Infra Sentinel can read only the redacted observer snapshot. HTTP auth
+# rejects this credential from inference, Job, operator and resource routes.
+[apps.infra-sentinel]
+credential = { source = "managed" }
+observer_access = "summary"
+resource_admin = false
+allowed_intents = []
+max_pending_jobs = 1
+
+# Ordinary Consumers receive their own least-privilege identity. This example
+# is illustrative: replace its ID, Intent ACL, and request constraints rather
+# than treating it as a preconfigured tenant.
+[apps.example-local-consumer]
+credential = { source = "managed" }
+resource_admin = false
+allowed_intents = ["audio.transcribe", "audio.align", "text.summarize"]
+max_pending_jobs = 16
+default_policy = "local-first"
+allowed_policies = ["local-first"]
+
+[apps.example-local-consumer.request_overrides]
+priority = ["interactive", "background"]
+placement = ["local_only"]
+prefer = ["local"]
+offline_required = true
+quality_floor = ["basic", "general"]
+latency = ["interactive", "balanced", "throughput"]
+fallback = ["none"]
+max_cost_usd = { min = 0.0, max = 0.0 }

@@ -1,0 +1,8 @@
+{
+  "model": "text.summarize",
+  "input": "A long passage to summarize.",
+  "metadata": {
+    "infer.placement": "local_only",
+    "infer.priority": "normal"
+  }
+}

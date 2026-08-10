@@ -1,0 +1,32 @@
+[package]
+name = "infer-control"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+infer-auth = { path = "../infer-auth" }
+async-stream.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+infer-artifact = { path = "../infer-artifact" }
+infer-core = { path = "../infer-core" }
+infer-observer = { path = "../infer-observer" }
+infer-payload = { path = "../infer-payload" }
+infer-provider = { path = "../infer-provider" }
+infer-resource = { path = "../infer-resource" }
+infer-store = { path = "../infer-store" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+rusqlite.workspace = true
+tempfile.workspace = true
+toml.workspace = true

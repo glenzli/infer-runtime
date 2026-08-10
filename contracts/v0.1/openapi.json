@@ -1,0 +1,785 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "infer-runtime consumer API",
+    "version": "0.1.0-candidate.2",
+    "description": "Candidate contract for application integration. This revision is immutable; later candidate revisions are additive unless accompanied by migration notes. Operator resource and provider administration routes are intentionally excluded."
+  },
+  "servers": [
+    { "url": "http://127.0.0.1:8787" }
+  ],
+  "security": [
+    { "bearerAuth": [] }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Runtime process is reachable",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Health" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/infer/v1/contract": {
+      "get": {
+        "operationId": "getContractManifest",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Active external contract identity",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ContractManifest" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/infer/v1/openapi.json": {
+      "get": {
+        "operationId": "getOpenApi",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "This OpenAPI document",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/responses": {
+      "post": {
+        "operationId": "createResponse",
+        "description": "Submit the supported stateless subset of an OpenAI Responses request. The model field is an infer-runtime intent, not a physical deployment ID.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ResponsesRequest" },
+              "examples": {
+                "minimal": { "$ref": "#/components/examples/ResponsesRequest" }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Completed response, or an SSE stream when stream=true",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ResponseObject" }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "SSE event/data frames. Provider event types are forwarded after response identity normalization; runtime-generated failures use event: error."
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Durable local background job accepted",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BackgroundResponse" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/responses/{response_id}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/ResponseId" }
+      ],
+      "get": {
+        "operationId": "getResponse",
+        "description": "Get a durable background response owned by the authenticated application.",
+        "responses": {
+          "200": {
+            "description": "Current or completed background response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BackgroundResponse" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/responses/{response_id}/cancel": {
+      "parameters": [
+        { "$ref": "#/components/parameters/ResponseId" }
+      ],
+      "post": {
+        "operationId": "cancelResponse",
+        "description": "Request cancellation of a durable background response.",
+        "responses": {
+          "200": {
+            "description": "Background response after cancellation",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BackgroundResponse" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/audio/transcriptions": {
+      "post": {
+        "operationId": "createTranscription",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/TranscriptionForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transcription result; text/plain is used when response_format=text",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AudioJsonResult" }
+              },
+              "text/plain": { "schema": { "type": "string" } }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/audio/transcriptions/stream": {
+      "get": {
+        "operationId": "openTranscriptionStream",
+        "summary": "Open an experimental duplex PCM transcription session",
+        "description": "Upgrade to WebSocket. The first text frame is session.configure, binary frames carry pcm_s16le audio, and input_audio.commit/input_audio.finish produce revisable transcript events. The current MLX adapter discloses transcription_mode=commit_redecode rather than claiming native incremental ASR.",
+        "x-infer-stability": "experimental",
+        "x-infer-websocket": {
+          "clientMessages": ["session.configure", "binary pcm_s16le", "input_audio.commit", "input_audio.finish", "session.cancel"],
+          "serverMessages": ["session.created", "transcript.partial", "transcript.final", "session.completed", "error"]
+        },
+        "responses": {
+          "101": { "description": "WebSocket protocol switch" },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/audio/alignments": {
+      "post": {
+        "operationId": "createAlignment",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/AlignmentForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Forced-alignment result",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AudioJsonResult" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/audio/speech": {
+      "post": {
+        "operationId": "createSpeech",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SpeechRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generated audio. x-infer-job-id and x-infer-model identify the execution.",
+            "headers": {
+              "x-infer-job-id": { "$ref": "#/components/headers/InferJobId" },
+              "x-infer-model": { "$ref": "#/components/headers/InferModel" },
+              "x-infer-audio-format": { "$ref": "#/components/headers/InferAudioFormat" },
+              "x-infer-sample-rate-hz": { "$ref": "#/components/headers/InferSampleRate" },
+              "x-infer-channels": { "$ref": "#/components/headers/InferChannels" }
+            },
+            "content": {
+              "audio/wav": { "schema": { "type": "string", "format": "binary" } },
+              "audio/mpeg": { "schema": { "type": "string", "format": "binary" } },
+              "audio/flac": { "schema": { "type": "string", "format": "binary" } },
+              "audio/ogg": { "schema": { "type": "string", "format": "binary" } },
+              "application/octet-stream": { "schema": { "type": "string", "format": "binary" } }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/audio/voice-clones": {
+      "post": {
+        "operationId": "createVoiceClone",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/VoiceCloneForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generated audio. x-infer-job-id and x-infer-model identify the execution.",
+            "headers": {
+              "x-infer-job-id": { "$ref": "#/components/headers/InferJobId" },
+              "x-infer-model": { "$ref": "#/components/headers/InferModel" }
+            },
+            "content": {
+              "audio/wav": { "schema": { "type": "string", "format": "binary" } },
+              "audio/mpeg": { "schema": { "type": "string", "format": "binary" } },
+              "audio/flac": { "schema": { "type": "string", "format": "binary" } },
+              "audio/ogg": { "schema": { "type": "string", "format": "binary" } },
+              "application/octet-stream": { "schema": { "type": "string", "format": "binary" } }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/jobs": {
+      "get": {
+        "operationId": "listJobs",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100 } },
+          { "name": "cursor", "in": "query", "description": "Opaque continuation cursor", "schema": { "type": "string" } },
+          { "name": "priority", "in": "query", "schema": { "$ref": "#/components/schemas/Priority" } },
+          { "name": "state", "in": "query", "schema": { "$ref": "#/components/schemas/JobState" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Application-scoped job page",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JobListPage" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/jobs/{response_id}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/ResponseId" }
+      ],
+      "get": {
+        "operationId": "getJob",
+        "responses": {
+          "200": {
+            "description": "Full application-scoped job snapshot",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JobSnapshot" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/jobs/{response_id}/cancel": {
+      "parameters": [
+        { "$ref": "#/components/parameters/ResponseId" }
+      ],
+      "post": {
+        "operationId": "cancelJob",
+        "responses": {
+          "200": {
+            "description": "Cancellation was accepted",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CancelResult" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/explain/{response_id}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/ResponseId" }
+      ],
+      "get": {
+        "operationId": "explainJob",
+        "responses": {
+          "200": {
+            "description": "Admission-time routing and attempt evidence",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ExplainResult" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Application credential configured in infer-runtime"
+      }
+    },
+    "parameters": {
+      "ResponseId": {
+        "name": "response_id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "minLength": 1 }
+      }
+    },
+    "headers": {
+      "InferJobId": {
+        "description": "Runtime job/response identity",
+        "schema": { "type": "string" }
+      },
+      "InferModel": {
+        "description": "Logical intent requested by the caller",
+        "schema": { "type": "string" }
+      },
+      "InferAudioFormat": {
+        "description": "Streamed sample representation; currently pcm_s16le",
+        "schema": { "type": "string" }
+      },
+      "InferSampleRate": {
+        "description": "Audio sample rate fixed before the first body byte",
+        "schema": { "type": "integer" }
+      },
+      "InferChannels": {
+        "description": "Audio channel count fixed before the first body byte",
+        "schema": { "type": "integer" }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Stable error envelope; code is machine-actionable and message is diagnostic text",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "examples": {
+              "invalidRequest": { "$ref": "#/components/examples/Error" }
+            }
+          }
+        }
+      }
+    },
+    "examples": {
+      "ResponsesRequest": {
+        "value": {
+          "model": "text.summarize",
+          "input": "Summarize this text.",
+          "metadata": {
+            "infer.placement": "local_only",
+            "infer.priority": "normal"
+          }
+        }
+      },
+      "Error": {
+        "value": {
+          "error": {
+            "message": "request body does not match the documented schema",
+            "type": "invalid_request_error",
+            "code": "invalid_request_error"
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status", "service"],
+        "properties": {
+          "status": { "const": "ok" },
+          "service": { "const": "inferd" }
+        }
+      },
+      "ContractManifest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["contract_version", "stability", "compatibility", "openapi_url", "consumer_routes", "experimental_routes", "operator_routes"],
+        "properties": {
+          "contract_version": { "const": "0.1.0-candidate.2" },
+          "stability": { "const": "candidate" },
+          "compatibility": { "type": "string" },
+          "openapi_url": { "const": "/infer/v1/openapi.json" },
+          "consumer_routes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["method", "path"],
+              "properties": {
+                "method": { "type": "string" },
+                "path": { "type": "string" }
+              }
+            }
+          },
+          "experimental_routes": {
+            "type": "array",
+            "description": "Discoverable routes whose wire shape is not part of the candidate compatibility promise",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["method", "path"],
+              "properties": {
+                "method": { "type": "string" },
+                "path": { "type": "string" }
+              }
+            }
+          },
+          "operator_routes": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["stability", "note"],
+            "properties": {
+              "stability": { "const": "experimental" },
+              "note": { "type": "string" }
+            }
+          }
+        }
+      },
+      "ResponsesRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["model", "input"],
+        "properties": {
+          "model": { "type": "string", "minLength": 1, "description": "Stable intent profile, never a physical deployment ID" },
+          "input": {},
+          "instructions": {},
+          "stream": { "type": "boolean", "default": false },
+          "background": { "type": "boolean", "default": false },
+          "metadata": { "$ref": "#/components/schemas/Metadata" },
+          "tools": { "type": "array", "items": {} },
+          "reasoning": { "$ref": "#/components/schemas/Reasoning" },
+          "temperature": { "type": ["number", "null"] },
+          "top_p": { "type": ["number", "null"] },
+          "max_output_tokens": { "type": ["integer", "null"], "minimum": 0, "maximum": 4294967295 },
+          "truncation": { "type": ["string", "null"] },
+          "store": { "enum": [false, null], "description": "Only false or null is accepted" },
+          "previous_response_id": { "type": "null", "description": "Stateful chaining is not supported" },
+          "conversation": { "type": "null", "description": "Conversation state is not supported" }
+        }
+      },
+      "Metadata": {
+        "type": "object",
+        "default": {},
+        "additionalProperties": { "type": "string" },
+        "description": "Application metadata plus documented infer.* routing constraints. Unknown reserved infer.* keys are rejected."
+      },
+      "Reasoning": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "effort": {
+            "type": ["string", "null"],
+            "enum": ["none", "low", "medium", "high", "xhigh", "max", null]
+          }
+        }
+      },
+      "ResponseObject": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "object", "created_at", "model"],
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "const": "response" },
+          "created_at": { "type": "integer" },
+          "model": { "type": "string", "description": "Logical intent, not physical deployment" },
+          "status": { "type": "string" },
+          "output": { "type": "array" },
+          "parallel_tool_calls": { "type": "boolean" },
+          "tool_choice": {},
+          "tools": { "type": "array" }
+        }
+      },
+      "BackgroundResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ResponseObject" },
+          {
+            "type": "object",
+            "required": ["background", "status", "output"],
+            "properties": {
+              "background": { "const": true },
+              "status": { "enum": ["queued", "in_progress", "completed", "failed", "cancelled", "incomplete"] },
+              "output": { "type": "array" },
+              "error": { "type": ["object", "null"] }
+            }
+          }
+        ]
+      },
+      "TranscriptionForm": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": { "^infer\\.": { "type": "string" } },
+        "required": ["model", "file"],
+        "properties": {
+          "model": { "const": "audio.transcribe" },
+          "file": { "type": "string", "format": "binary" },
+          "language": { "type": "string" },
+          "prompt": { "type": "string" },
+          "response_format": { "enum": ["json", "text", "verbose_json"] },
+          "temperature": { "type": "number", "minimum": 0 },
+          "metadata": { "type": "string", "description": "JSON object whose values are strings" }
+        }
+      },
+      "AlignmentForm": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": { "^infer\\.": { "type": "string" } },
+        "required": ["model", "file", "text"],
+        "properties": {
+          "model": { "const": "audio.align" },
+          "file": { "type": "string", "format": "binary" },
+          "text": { "type": "string", "minLength": 1 },
+          "language": { "type": "string" },
+          "metadata": { "type": "string", "description": "JSON object whose values are strings" }
+        }
+      },
+      "SpeechRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["model", "input"],
+        "properties": {
+          "model": { "enum": ["speech.synthesize", "speech.voice_design"] },
+          "input": { "type": "string", "minLength": 1 },
+          "voice": { "type": ["string", "null"] },
+          "instructions": { "type": ["string", "null"] },
+          "language": { "type": ["string", "null"] },
+          "speed": { "type": "number", "minimum": 0.25, "maximum": 4, "default": 1 },
+          "response_format": { "$ref": "#/components/schemas/SpeechFormat" },
+          "execution_mode": {
+            "enum": ["unary", "server_stream"],
+            "default": "unary",
+            "description": "server_stream requires response_format=pcm and returns append-only PCM chunks"
+          },
+          "metadata": { "$ref": "#/components/schemas/Metadata" }
+        }
+      },
+      "TranscriptionSessionConfigure": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "session"],
+        "properties": {
+          "type": { "const": "session.configure" },
+          "session": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["model", "input_audio_format", "sample_rate_hz", "channels"],
+            "properties": {
+              "model": { "const": "audio.transcribe" },
+              "input_audio_format": { "const": "pcm_s16le" },
+              "sample_rate_hz": { "type": "integer", "minimum": 8000, "maximum": 48000 },
+              "channels": { "type": "integer", "minimum": 1, "maximum": 2 },
+              "language": { "type": ["string", "null"] },
+              "prompt": { "type": ["string", "null"] },
+              "temperature": { "type": ["number", "null"], "minimum": 0 },
+              "metadata": { "$ref": "#/components/schemas/Metadata" }
+            }
+          }
+        }
+      },
+      "VoiceCloneForm": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": { "^infer\\.": { "type": "string" } },
+        "required": ["model", "input", "reference_audio", "reference_text"],
+        "properties": {
+          "model": { "const": "speech.voice_clone" },
+          "input": { "type": "string", "minLength": 1 },
+          "reference_audio": { "type": "string", "format": "binary" },
+          "reference_text": { "type": "string", "minLength": 1 },
+          "language": { "type": "string" },
+          "response_format": { "$ref": "#/components/schemas/SpeechFormat" },
+          "metadata": { "type": "string", "description": "JSON object whose values are strings" }
+        }
+      },
+      "SpeechFormat": {
+        "type": "string",
+        "enum": ["wav", "mp3", "flac", "opus", "pcm"],
+        "default": "wav"
+      },
+      "AudioJsonResult": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "model"],
+        "properties": {
+          "id": { "type": "string" },
+          "model": { "type": "string", "description": "Logical intent" }
+        }
+      },
+      "Priority": {
+        "type": "string",
+        "enum": ["interactive", "normal", "background"]
+      },
+      "JobState": {
+        "type": "string",
+        "enum": ["queued", "running", "succeeded", "failed", "cancelled", "expired"]
+      },
+      "JobListItem": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "app_id", "intent", "provider", "deployment", "state", "priority", "created_at_ms", "updated_at_ms"],
+        "properties": {
+          "id": { "type": "string" },
+          "app_id": { "type": "string" },
+          "intent": { "type": "string" },
+          "provider": { "type": "string" },
+          "deployment": { "type": "string" },
+          "state": { "$ref": "#/components/schemas/JobState" },
+          "priority": { "$ref": "#/components/schemas/Priority" },
+          "created_at_ms": { "type": "integer" },
+          "updated_at_ms": { "type": "integer" }
+        }
+      },
+      "JobListPage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["jobs"],
+        "properties": {
+          "jobs": { "type": "array", "items": { "$ref": "#/components/schemas/JobListItem" } },
+          "next_cursor": { "type": "string", "description": "Opaque continuation cursor" }
+        }
+      },
+      "JobSnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "app_id", "intent", "provider", "deployment", "model_profile", "model_build", "physical_model", "placement", "quality_grade", "rating_status", "resource_class", "state", "policy", "priority", "constraints", "routing", "attempts", "error"],
+        "properties": {
+          "id": { "type": "string" },
+          "app_id": { "type": "string" },
+          "intent": { "type": "string" },
+          "provider": { "type": "string" },
+          "deployment": { "type": "string" },
+          "model_profile": { "type": "string" },
+          "model_build": { "type": "string" },
+          "physical_model": { "type": "string" },
+          "placement": { "enum": ["local", "trusted_node", "cloud"] },
+          "quality_grade": { "enum": ["basic", "general", "advanced", "frontier"] },
+          "rating_status": { "enum": ["provisional", "benchmarked"] },
+          "resource_class": { "enum": ["light", "standard", "heavy", "extreme"] },
+          "state": { "$ref": "#/components/schemas/JobState" },
+          "policy": { "type": "string" },
+          "priority": { "$ref": "#/components/schemas/Priority" },
+          "constraints": { "type": "object", "additionalProperties": true },
+          "routing": { "$ref": "#/components/schemas/RoutingDecision" },
+          "attempts": { "type": "array", "items": { "$ref": "#/components/schemas/Attempt" } },
+          "error": { "type": ["string", "null"] }
+        }
+      },
+      "RoutingDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["quality_floor", "candidates"],
+        "properties": {
+          "quality_floor": { "enum": ["basic", "general", "advanced", "frontier"] },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["deployment", "provider", "status"],
+              "properties": {
+                "deployment": { "type": "string" },
+                "provider": { "type": "string" },
+                "status": { "enum": ["eligible", "fallback_eligible", "rejected"] },
+                "rank": { "type": "integer", "minimum": 0 },
+                "reason_codes": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          }
+        }
+      },
+      "Attempt": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["number", "provider", "deployment", "outcome", "trigger"],
+        "properties": {
+          "number": { "type": "integer", "minimum": 0 },
+          "provider": { "type": "string" },
+          "deployment": { "type": "string" },
+          "outcome": { "enum": ["running", "succeeded", "failed", "interrupted"] },
+          "trigger": { "enum": ["initial", "retry", "fallback", "recovery"] },
+          "error_kind": { "type": "string" },
+          "error": { "type": "string" }
+        }
+      },
+      "CancelResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "cancelled"],
+        "properties": {
+          "id": { "type": "string" },
+          "cancelled": { "const": true }
+        }
+      },
+      "ExplainResult": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["response_id", "intent", "routing", "attempts", "state"],
+        "properties": {
+          "response_id": { "type": "string" },
+          "intent": { "type": "string" },
+          "routing": { "$ref": "#/components/schemas/RoutingDecision" },
+          "attempts": { "type": "array", "items": { "$ref": "#/components/schemas/Attempt" } },
+          "state": { "$ref": "#/components/schemas/JobState" }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["message", "type", "code"],
+            "properties": {
+              "message": { "type": "string", "description": "Diagnostic text; not a stable machine discriminator" },
+              "type": { "const": "invalid_request_error" },
+              "code": { "type": "string", "description": "Stable machine-actionable error code" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

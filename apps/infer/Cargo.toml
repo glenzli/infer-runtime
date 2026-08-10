@@ -1,0 +1,28 @@
+[package]
+name = "infer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+clap.workspace = true
+crossterm.workspace = true
+futures-util.workspace = true
+infer-auth = { path = "../../crates/infer-auth" }
+infer-artifact = { path = "../../crates/infer-artifact" }
+infer-core = { path = "../../crates/infer-core" }
+ratatui.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+toml.workspace = true
+toml_edit.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+tempfile.workspace = true
+tower.workspace = true

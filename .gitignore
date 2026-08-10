@@ -1,0 +1,44 @@
+.DS_Store
+/target/
+/.env
+/.env.*
+!/.env.example
+
+# Machine-local runtime configuration and state. The checked-in counterpart is
+# config/infer.example.toml; config/infer.toml is never a repository artifact.
+/config/infer.toml
+/.infer-runtime/
+infer-runtime*.sqlite3
+infer-runtime*.sqlite3-shm
+infer-runtime*.sqlite3-wal
+/infer-runtime-payloads/
+
+# Local captures, benchmarks, inventory notes, and operator logs.
+/docs/images/local/
+*.log
+
+# Credentials and private keys must not enter Git, regardless of where a local
+# tool creates them.
+*.token
+*.pem
+*.key
+*.p12
+
+# Model weights and native runtime binaries belong to provider caches or the
+# managed artifact store, never the source repository.
+/models/
+/artifacts/
+/runtimes/
+*.onnx
+*.safetensors
+*.gguf
+*.pt
+*.pth
+*.ckpt
+*.dylib
+*.so
+*.dll
+
+/.agent-coordination/
+__pycache__/
+*.pyc
