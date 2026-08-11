@@ -3,7 +3,7 @@
 本文面向调用 `infer-runtime` 的应用开发者。它说明如何登记一个 App、取得调用凭证、发送
 第一条文本或音频请求，以及在反馈测试中保留哪些诊断信息。
 
-当前外部合同版本为 `0.1.0-candidate.2`。接入前先阅读
+当前外部合同版本为 `0.1.0-candidate.3`。接入前先阅读
 [consumer contract](../contracts/v0.1/README.md)；机器可读字段、枚举和响应以
 [OpenAPI](../contracts/v0.1/openapi.json) 为准。本文是 onboarding，不替代版本化合同。
 
@@ -19,7 +19,7 @@
 Provider key 只由 daemon 在服务端读取，不得交给 consumer。
 
 正式本机接入应按 [Consumer Discovery](CONSUMER_DISCOVERY.md) 选择
-`infer-runtime.consumer@0.1.0-candidate.2` offer。显式 endpoint 配置可覆盖 Discovery，供开发与
+`infer-runtime.consumer@0.1.0-candidate.3` offer。显式 endpoint 配置可覆盖 Discovery，供开发与
 诊断使用；固定端口只是现有 Consumer 的迁移 fallback，不应继续成为新接入的硬编码依赖。
 
 ## 2. 为 consumer 登记独立 App
@@ -166,10 +166,11 @@ POST /v1/responses/{response_id}/cancel
 ## 5. 接入本地音频能力
 
 音频与文本共享鉴权、Job、排队、取消和审计控制面，但不强行套入 Responses JSON。它按任务
-使用四个类型化 endpoint：
+使用五类任务级 endpoint：
 
 | Intent | Endpoint | 请求形态 | 结果 |
 | --- | --- | --- | --- |
+| `audio.detect_events` | `POST /v1/audio/event-detections` | multipart | 多标签时间事件 + coverage/speech/ontology/policy/provenance |
 | `audio.transcribe` | `POST /v1/audio/transcriptions` | multipart | JSON 或 text |
 | `audio.transcribe`（实验流） | `GET /v1/audio/transcriptions/stream` | WebSocket PCM + control JSON | revisioned partial/final JSON |
 | `audio.align` | `POST /v1/audio/alignments` | multipart | JSON timestamps |
@@ -186,6 +187,66 @@ curl http://127.0.0.1:8787/v1/audio/transcriptions \
   -F language=Chinese \
   -F response_format=verbose_json
 ```
+
+### Echo：无可用转写文字时检测真实声音
+
+Echo 的 Runtime App owner 应把 `audio.detect_events` 合并进既有 allowlist；不要用下面清单覆盖
+产品仍在使用的其他 Intent。该路径没有资源管理权限，也不能申请 cloud 或 fallback：
+
+```toml
+[apps.echo]
+credential = { source = "managed" }
+resource_admin = false
+allowed_intents = ["audio.detect_events", "audio.transcribe", "audio.align", "text.summarize"]
+max_pending_jobs = 16
+default_policy = "local-first"
+allowed_policies = ["local-first"]
+
+[apps.echo.request_overrides]
+priority = ["interactive", "background"]
+placement = ["local_only"]
+prefer = ["local"]
+offline_required = true
+quality_floor = ["basic", "general"]
+latency = ["interactive", "balanced", "throughput"]
+fallback = ["none"]
+max_cost_usd = { min = 0.0, max = 0.0 }
+```
+
+保存 App 配置后必须显式重启 daemon，使运行中 ACL/credential table 生效。Echo 调用的是稳定任务
+Intent，不传 YAMNet 路径或 deployment：
+
+```bash
+curl http://127.0.0.1:8787/v1/audio/event-detections \
+  -H "Authorization: Bearer $ECHO_INFER_TOKEN" \
+  -F model=audio.detect_events \
+  -F file=@sample.wav
+```
+
+请求只接受 `model`、`file`、可选 JSON-string `metadata`/独立 `infer.*`；重复、未知或错误文件字段
+返回 400。Runtime 无论调用方是否填写 metadata 都固定 local-only、offline、no-fallback，单文件仍
+受 25 MiB 上限约束。响应的稳定业务字段如下：
+
+| 字段 | 语义 |
+| --- | --- |
+| `id` / `model` / `object` | Job ID、`audio.detect_events`、`audio.event_detection` |
+| `events[]` | 可重叠的 `class_id`（AudioSet MID）、展示 `label`、start/end 秒和 score |
+| `coverage` | input/analyzed 时间、比例、窗口数、0.96 秒窗口与 0.48 秒 hop |
+| `speech_presence` | `present` / `absent` / `unknown` 及 speech-family 最大模型 score |
+| `ontology` | AudioSet/class-map revision、MID namespace、class count、digest、license |
+| `policy` | score kind、事件/人声阈值、3-frame median 平滑和每窗口上限 |
+| `provenance` | 精确 YAMNet archive、license、TensorFlow、ffmpeg 与 preprocessing identity |
+
+`events` 是逐短窗口多标签结果经相邻窗口合并，不是整段 Top-1。`speech_presence=absent` 只在
+完整 coverage 且模型 score 低于版本化阈值时出现；无 transcript、空 transcript 或 ASR 失败
+都不能把它改写为 absent。Echo 遇到 `unknown` 必须保留未知语义。
+
+最小接线顺序由 Echo 音频理解 owner 维护：先用现有 `audio.transcribe` 处理同一份本地 file；由
+Echo 自己判断文字是否足以支撑业务。没有可用文字时，再以完全相同的音频制品调用
+`audio.detect_events`。Echo 分类/目录 owner 按稳定 `class_id` 映射自己的 taxonomy，并保存
+Runtime Job ID、coverage、ontology revision 与 policy revision；展示标签只用于 UI，不作为持久
+主键。若后续为了延迟选择并行调用两条 Intent，合并规则仍相同，且不得用任一路径的“无结果”
+替代另一条路径的否定证据。
 
 TTS 示例：
 
@@ -265,7 +326,7 @@ partial，只有 final 可按终态保存。
 
 ## 6. 试用实验性本地人脸检测与 SFace 向量
 
-ONNX P0 提供一个刻意收窄的实验路由。它不属于 `0.1.0-candidate.2` stable Consumer routes，外部接入时
+ONNX P0 提供一个刻意收窄的实验路由。它不属于 `0.1.0-candidate.3` stable Consumer routes，外部接入时
 必须单独固定 daemon commit，并接受在 stable promotion 前可能调整 schema：
 
 | 项目 | 当前 wire contract |
@@ -590,7 +651,8 @@ operator experimental surface，不是普通 consumer 合同。
 3. 非流式、SSE、客户端取消各通过一次；
 4. 400、401、409、429、503、504 能按 status + `error.code` 处理；
 5. 隐私敏感任务显式发送 `local_only`，并验证无 cloud fallback；
-6. 音频 consumer 验证文件上限、输出格式、取消和迟到结果；
+6. 音频 consumer 验证文件上限、输出格式、取消和迟到结果；事件检测另验证多标签时间窗口、
+   coverage、ontology/policy revision、`present|absent|unknown`，不得从空 transcript 推断 absent；
 7. 视觉实验 consumer 另行固定 daemon commit，验证 source/query revision 仲裁、embedding
    space、CPU/EP provenance、取消与 20 MiB/40M 双重上限，不把它当作 v0.1 stable contract；
 8. 语义索引只比较完全相同 `embedding.space` 的向量，Build/space 改变时重建；

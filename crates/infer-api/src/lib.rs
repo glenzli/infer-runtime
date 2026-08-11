@@ -11,6 +11,8 @@ mod contract_tests;
 #[cfg(test)]
 mod observer_tests;
 #[cfg(test)]
+mod real_audio_event_tests;
+#[cfg(test)]
 mod real_vision_tests;
 
 use std::{
@@ -39,8 +41,8 @@ use infer_control::{
     MaintenanceLeaseRevokeRequest, Runtime, RuntimeError,
 };
 use infer_core::{
-    AlignmentRequest, AudioExecutionRequest, AudioFile, JobPageCursor, JobState,
-    MAX_AUDIO_UPLOAD_BYTES, Priority, ResponsesRequest, SpeechFormat, SpeechRequest,
+    AlignmentRequest, AudioExecutionRequest, AudioFile, EventDetectionRequest, JobPageCursor,
+    JobState, MAX_AUDIO_UPLOAD_BYTES, Priority, ResponsesRequest, SpeechFormat, SpeechRequest,
     TranscriptionFormat, TranscriptionRequest, VoiceCloneRequest,
 };
 use infer_payload::PayloadError;
@@ -68,6 +70,7 @@ pub fn router(runtime: Arc<Runtime>) -> Router {
         .route("/v1/responses/{response_id}", get(get_response))
         .route("/v1/responses/{response_id}/cancel", post(cancel_response))
         .route("/v1/audio/transcriptions", post(create_transcription))
+        .route("/v1/audio/event-detections", post(create_event_detection))
         .route(
             "/v1/audio/transcriptions/stream",
             get(audio_streaming::open_transcription_stream),
@@ -338,6 +341,48 @@ async fn create_alignment(
     }
 }
 
+async fn create_event_detection(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    multipart: Multipart,
+) -> Result<Response<Body>, ApiError> {
+    let app_id = authenticate(&state, &headers)?;
+    let form = AudioMultipart::parse(multipart, AudioMultipartContract::EventDetection).await?;
+    let request = EventDetectionRequest {
+        model: form.required_text("model")?,
+        file: form.required_file()?,
+        metadata: fail_closed_event_metadata(form.metadata)?,
+    };
+    let result = state
+        .runtime
+        .execute_audio(&app_id, AudioExecutionRequest::EventDetection(request))
+        .await?;
+    match result.output {
+        AudioExecutionOutput::Json(value) => json_response(value),
+        AudioExecutionOutput::Audio { .. } => {
+            Err(ApiError::internal("sound-event executor returned audio"))
+        }
+    }
+}
+
+fn fail_closed_event_metadata(
+    mut metadata: BTreeMap<String, String>,
+) -> Result<BTreeMap<String, String>, ApiError> {
+    for (key, required) in [
+        ("infer.placement", "local_only"),
+        ("infer.offline_required", "true"),
+        ("infer.fallback", "none"),
+    ] {
+        if metadata.get(key).is_some_and(|actual| actual != required) {
+            return Err(ApiError::bad_request(format!(
+                "{key} is fixed to {required} for sound-event detection"
+            )));
+        }
+        metadata.insert(key.into(), required.into());
+    }
+    Ok(metadata)
+}
+
 async fn create_speech(
     State(state): State<ApiState>,
     headers: HeaderMap,
@@ -466,13 +511,14 @@ struct AudioMultipart {
 enum AudioMultipartContract {
     Transcription,
     Alignment,
+    EventDetection,
     VoiceClone,
 }
 
 impl AudioMultipartContract {
     fn file_field(self) -> &'static str {
         match self {
-            Self::Transcription | Self::Alignment => "file",
+            Self::Transcription | Self::Alignment | Self::EventDetection => "file",
             Self::VoiceClone => "reference_audio",
         }
     }
@@ -484,6 +530,7 @@ impl AudioMultipartContract {
                 "model" | "language" | "prompt" | "response_format" | "temperature"
             ),
             Self::Alignment => matches!(name, "model" | "text" | "language"),
+            Self::EventDetection => name == "model",
             Self::VoiceClone => matches!(
                 name,
                 "model" | "input" | "reference_text" | "language" | "response_format"

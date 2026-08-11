@@ -1,8 +1,8 @@
 # v0.1 外部合同审计
 
-日期：2026-08-10
+日期：2026-08-11
 
-基线：`0.1.0-candidate.2`（`candidate.1` 保持冻结）
+基线：`0.1.0-candidate.3`（`candidate.1`、`candidate.2` 保持冻结）
 结论：consumer surface 已形成可供外部应用开始反馈测试的版本化 candidate；正式发布仍由
 长期运行、真实 consumer 和 SLO 证据决定。
 
@@ -11,7 +11,7 @@
 | 范围 | 语义 owner | Wire/制品 owner | 稳定性 |
 | --- | --- | --- | --- |
 | Responses 请求、Intent 约束 | `infer-core::request` | `infer-api` + `contracts/v0.1` | candidate |
-| 音频任务合同 | `infer-core::audio` + `infer-core::streaming` | `infer-api` multipart/JSON/chunked PCM；duplex WebSocket experimental | candidate + experimental |
+| 音频任务合同 | `infer-core::audio` + `audio_event` + `streaming` | `infer-api` multipart/JSON/chunked PCM；duplex WebSocket experimental | candidate + experimental |
 | Job/Attempt/Candidate projection | `infer-core::job` | `/infer/v1/jobs`、`explain` | candidate |
 | HTTP auth、状态码、error envelope | `infer-api::contract` | OpenAPI + route tests | candidate |
 | Runtime TOML | `infer-core::config` | `config/infer.example.toml` + config tests; ignored `config/infer.toml` at runtime | strict operator contract |
@@ -47,16 +47,23 @@ server-stream 描述和 experimental duplex ASR 路由，同时在 Responses 后
 text/image + SSE。ONNX/视觉 typed slices 只列在 manifest `experimental_routes`，不进入 stable
 consumer routes；远程节点与 operator resource schema 同样没有进入。
 
+candidate.3 additive 增加 `audio.detect_events` / `/v1/audio/event-detections`。公开结果固定
+多标签时间事件、AudioSet MID、coverage、三态 speech evidence、ontology、policy 与模型
+provenance；YAMNet Provider 输出还必须与选中 Build 的 artifact/license/runtime/policy identity
+精确一致。该路径复用 App Intent ACL、Job/Attempt、25 MiB 临时 payload 和 local-only fail-closed
+纪律，且没有把 CLAP embedding 或窄域 SenseVoice 标签误登记为通用检测。
+
 ## 自动化证据
 
 - OpenAPI 必须能被 JSON parser 读取，`info.version` 必须与代码常量一致；
 - manifest 中每条 consumer route 必须出现在 OpenAPI；
 - fixtures 必须保持合法 JSON；
 - route-level tests 覆盖 manifest/OpenAPI、JSON unknown field、speech JSON、multipart unknown/wrong
-  file、unknown Job query 和统一鉴权错误；
+  file、sound-event ACL/fail-closed、payload-free Job provenance、unknown Job query 和统一鉴权错误；
 - typed fake worker tests 覆盖 TTS chunk、ASR revision、Codex image staging 与文本 delta；
 - core tests 覆盖 Responses/Speech 严格字段与 reasoning extension 保留；
 - config tests 覆盖根与嵌套 unknown key，完整 checked-in registry 仍必须通过；
+- 可选真实 acceptance 通过 HTTP → admission → Job/Attempt → YAMNet worker 验证 521 类多标签结果；
 - workspace format、Clippy 与 tests 是每次 candidate 变更的最低门槛。
 
 ## 尚未关闭但不阻塞反馈测试

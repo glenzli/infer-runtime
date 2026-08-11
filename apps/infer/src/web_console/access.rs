@@ -741,6 +741,7 @@ mod tests {
                 .as_ref()
                 .unwrap(),
             &vec![
+                "audio.detect_events".to_owned(),
                 "audio.transcribe".to_owned(),
                 "audio.align".to_owned(),
                 "text.summarize".to_owned(),

@@ -146,7 +146,7 @@
 - **状态**：Accepted
 - **决定**：`infer-runtime` 的同一 registration 除只读状态外，发布独立的
   `infer-runtime.consumer` offer；protocol version 精确等于冻结 Consumer contract，当前为
-  `0.1.0-candidate.2`。Infer 自有 `infer-runtime.http-loopback` binding 只接受 canonical numeric
+  `0.1.0-candidate.3`。Infer 自有 `infer-runtime.http-loopback` binding 只接受 canonical numeric
   loopback URL。
 - **安全边界**：Discovery 不包含 App id、token、credential id、ACL 或 Provider secret。Consumer
   发现地址后仍必须使用自己的 bearer 身份，并校验 owner、lease、generation、协议、binding 和
@@ -154,6 +154,20 @@
 - **迁移**：显式 endpoint override 优先，固定 `127.0.0.1:8787` 只作迁移 fallback。Echo、Shadow、
   Symbiont-d 保留各自现有 token/ACL，不共享 `local-operator`。
 - **ADR**：[ADR-0015](adr/0015-consumer-infra-discovery.md)
+
+### D-015：通用声音事件使用 `audio.detect_events` 与精确 YAMNet Deployment
+
+- **状态**：Accepted for `0.1.0-candidate.3`
+- **合同**：文件音频使用 `POST /v1/audio/event-detections`；返回多标签时间事件、AudioSet MID、
+  展示标签、score、coverage、`present|absent|unknown` speech evidence、ontology/policy/model
+  provenance。空 transcript 永远不是 speech absent 证据。
+- **Build/执行**：首个 Deployment 固定官方 `google/yamnet/1` archive/class-map digest、
+  TensorFlow 2.20、ffmpeg 16 kHz mono 预处理、0.96 秒窗口/0.48 秒 hop、3-frame median、0.10
+  事件阈值和有界相邻窗口合并；Runtime 在成功前对 Provider 输出与 Build identity 做 fail-closed
+  对照。
+- **边界**：SenseVoice 只可作窄域补充，不宣称广谱；CLAP/audio↔text embedding 留作独立后续
+  Intent，因为检索相似度不是校准事件检测或否定证据。
+- **ADR**：[ADR-0016](adr/0016-task-oriented-sound-event-detection.md)
 
 ## Non-blocking / 后续阶段再定
 

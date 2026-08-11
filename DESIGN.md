@@ -171,6 +171,7 @@ Server 已接入推导为支持。
 | Text | Responses `input`/`instructions` | Responses object / SSE events | MVP |
 | Embedding | text/batch | vectors | 后续 |
 | File transcription | multipart audio + language/prompt | text / transcript segments | 已实现 |
+| Sound event detection | multipart file audio | overlapping multi-label time events、coverage、speech evidence、ontology/policy/provenance | 已实现 YAMNet local slice |
 | Duplex transcription | WebSocket configure + PCM chunks/commit | revisioned partial/final transcript | 实验，已实现 commit-redecode slice |
 | Forced alignment | multipart audio + transcript | token timestamp spans | 已实现 |
 | Speech | text、voice/instructions + execution mode | bounded audio file / append-only PCM chunks | 已实现 unary；streaming 实验 |
@@ -250,6 +251,7 @@ text.proofread
 assistant.general
 reasoning.deep
 audio.transcribe
+audio.detect_events
 audio.align
 speech.analyze
 speech.synthesize
@@ -287,6 +289,11 @@ orientation/resize/crop/color/layout/mean/std/dtype、对齐模板与输出归�
 redistribution facts；需要 tokenizer/vocabulary 的 Build 必须继续把其 digest 纳入 identity。
 对 embedding 模型，这些字段共同决定
 embedding-space identity；不同 space/revision 的向量不得进入同一比较或索引域。
+
+声音事件 Build 同样不能只登记模型家族或下载 URL。它固定模型 archive 与成员 digest、runtime、
+decoder/preprocessing、ontology/class-map digest 与 license、窗口/hop、score kind、阈值、平滑、
+输出上限和 speech evidence 阈值。Provider 结果必须在 Job 成功前与所选 Build 精确比对；配置存在
+不代表 artifact 已安装，worker serving 时不联网补齐缺失制品。
 
 ### 6.3 Constraints
 
@@ -361,14 +368,26 @@ infer.deadline_ms     positive integer string
 | Intent | HTTP 数据面 | 当前 build |
 | --- | --- | --- |
 | `audio.transcribe` | `POST /v1/audio/transcriptions` multipart | Qwen3-ASR 1.7B 8-bit |
+| `audio.detect_events` | `POST /v1/audio/event-detections` multipart | YAMNet TF Hub v1 / TensorFlow 2.20 |
 | `audio.align` | `POST /v1/audio/alignments` multipart | Qwen3-ForcedAligner 0.6B 8-bit |
 | `speech.synthesize` | `POST /v1/audio/speech` JSON | Qwen3-TTS CustomVoice 1.7B 8-bit |
 | `speech.voice_design` | `POST /v1/audio/speech` JSON | Qwen3-TTS VoiceDesign 1.7B 8-bit |
 | `speech.voice_clone` | `POST /v1/audio/voice-clones` multipart | Qwen3-TTS Base 1.7B 8-bit |
 
-文件上传上限为 25 MiB。payload 只在 API 请求和单次 executor 临时目录中存在，不进入 Job metadata；临时目录拥有输入、参考音频和输出的完整生命周期，执行完成即删除。MLX worker 是常驻进程，但默认仅缓存一个已加载模型，切换 build 时显式释放旧模型与 MLX cache，以控制统一内存压力。
+文件上传上限为 25 MiB。payload 只在 API 请求和单次 executor 临时目录中存在，不进入 Job metadata；临时目录拥有输入、参考音频和输出的完整生命周期，执行完成即删除。MLX worker 是常驻进程，但默认仅缓存一个已加载模型，切换 build 时显式释放旧模型与 MLX cache，以控制统一内存压力。YAMNet 使用独立 TensorFlow worker 与进程生命周期，不把 TensorFlow/model cache 责任塞进 MLX owner。
 
 本地 worker 使用 JSON-lines 作为进程内协议，request id 用于隔离 deadline/cancel 后的迟到结果。具体模型路径、Python 环境和运行位置属于 Deployment/Provider 配置，不泄露到公开音频 API。
+
+`audio.detect_events` 是通用任务名，不绑定 Echo、YAMNet 或 AudioSet。首个 policy 对 YAMNet 的
+0.96 秒窗口/0.48 秒 hop 做逐窗多标签推理，用 3-frame centered median 平滑，并合并同类相邻
+窗口；禁止用整段 Top-1 冒充检测。公开 `class_id` 是 AudioSet MID，不是 0..520 index；响应携带
+coverage、ontology/policy revision 和 artifact/runtime provenance。`speech_presence=absent` 只允许
+在完整 coverage 且 speech-family 模型证据低于版本化阈值时返回；无 transcript 永远不是 absent
+证据，覆盖不完整或阈值间区域返回 `unknown`。
+
+SenseVoice 的 Speech/BGM/掌声/笑声/哭声/喷嚏/呼吸/咳嗽只可作为未来窄域补充，不能宣称广谱。
+CLAP/audio↔text embedding 明确留给独立后续 Intent：检索相似度没有本合同的阈值校准、时间事件
+和否定证据语义，不能复用 `audio.detect_events`。
 
 执行模式与数据模态正交：`unary` 返回完整结果，`server_stream` 只由 provider 向 Consumer
 增量输出，`duplex` 在一个受调度 session 内双向交换。`POST /v1/audio/speech` 在
@@ -1086,8 +1105,8 @@ infer-runtime/
 
 - `/v1/responses` 兼容 profile、控制 API 和错误码显式版本化；
 - consumer contract 以 `contracts/v0.1/openapi.json`、golden fixtures 和 daemon 的
-  `/infer/v1/contract` 为共同身份；`0.1.0-candidate.1` 已冻结，当前
-  `0.1.0-candidate.2` 也交给外部 consumer 后不可原地修改；
+  `/infer/v1/contract` 为共同身份；`0.1.0-candidate.1` 与 `candidate.2` 已冻结，当前
+  `0.1.0-candidate.3` 也交给外部 consumer 后不可原地修改；
 - Responses、文件音频、app-scoped Job 控制属于 candidate consumer surface；metrics、provider
   probe 和 resource lifecycle/eviction 属于 experimental operator surface，不共享稳定性承诺；
 - capability schema 可新增可选字段，破坏性变更使用新版本；
@@ -1099,10 +1118,10 @@ infer-runtime/
 
 MVP **包含**：单机 `inferd`、无状态 provider execution 的 OpenAI Responses API 兼容文本协议、Ollama、本地 MLX 文件音频协议族、Intent/Model/Build/Deployment registry、流式文本、排队、三档优先级、policy 路由、受约束 fallback、基础 quota、取消、指标和 CLI 管理面。M4 在其上增加 runtime-managed、local-only 的 Responses background 生命周期，不把 durability 下推给 provider。
 
-冻结的 v0.1 stable Consumer contract **不包含**：远程 Node、GPU 级抢占、通用模型下载、自动 benchmark 路由、低延迟原生增量 ASR、Vision/Embedding 稳定数据面、ONNX stable contract、Agent、第三方动态插件 ABI、HA、多用户/组织权限。candidate.2 新增 PCM TTS server-stream，并把 commit-redecode ASR duplex 明确列为 experimental route；这不等于承诺原生实时转写。ONNX P0 与 Web Console 同样作为 experimental surface 独立演进，不回填或扩大 v0.1 stable 范围。
+冻结的 v0.1 stable Consumer contract **不包含**：远程 Node、GPU 级抢占、通用模型下载、自动 benchmark 路由、低延迟原生增量 ASR、Vision/Embedding 稳定数据面、ONNX stable contract、Agent、第三方动态插件 ABI、HA、多用户/组织权限。candidate.2 新增 PCM TTS server-stream，并把 commit-redecode ASR duplex 明确列为 experimental route；candidate.3 additive 增加本地文件声音事件检测。这些都不等于承诺原生实时转写、CLAP 检索或通用音频 embedding。ONNX P0 与 Web Console 同样作为 experimental surface 独立演进，不回填或扩大 v0.1 stable 范围。
 
 ## 21. 决策状态
 
 启动实现所需的 `D-001` 至 `D-013` 以及 M4 payload ownership `D-105` 已接受，详见 [docs/DECISIONS.md](docs/DECISIONS.md) 及对应 ADR。D-012/D-013 只接受 experimental Codex text/image + SSE 和类型化音频 streaming 的收窄 slice，不接受 Agent surface、万能流协议或其他 CLI 的推定兼容。`D-101` 至 `D-104` 属于远程节点、跨节点大 payload、第三方扩展与 benchmark 后续阶段。`D-106` 至 `D-110` 已接受收窄的 ONNX foundation、同步 local-only face/SigLIP 与 QwenVL typed slices；视觉 durable、Windows tolerance、照片域质量与通用 Resource Pool 仍保留独立门槛。
 
-本设计基线已进入实现：Git/Cargo workspace、Responses 垂直链路、本地文件音频垂直链路、受 Candidate Plan 约束的有界 retry/fallback、短期 provider 熔断、versioned capability profile/显式 probe、per-App admission、SQLite 持久化/预算，以及 M4 的 Ollama/ONNX inventory、Attempt reservation、显式生命周期控制与加密 local background restart recovery 均可运行。ONNX 另有内容寻址 artifact store、YuNet/SFace/SigLIP Builds、Session Registry 和四条可路由的 experimental typed data planes；Ollama QwenVL 另有有界描述/关键词与闭集分类复核两条 typed data planes；Codex App Server 另有动态模型组、subscription + cloud modality ACL、图像输入与文本 SSE；音频另有 PCM TTS server-stream 与 commit-redecode ASR duplex experimental slices。CI、自动资源长期启用、视觉/音频 stable promotion、Codex quota reconciliation、照片域质量、background batch/音频/cloud 幂等与远程节点仍待完成。
+本设计基线已进入实现：Git/Cargo workspace、Responses 垂直链路、本地文件音频垂直链路、受 Candidate Plan 约束的有界 retry/fallback、短期 provider 熔断、versioned capability profile/显式 probe、per-App admission、SQLite 持久化/预算，以及 M4 的 Ollama/ONNX inventory、Attempt reservation、显式生命周期控制与加密 local background restart recovery 均可运行。ONNX 另有内容寻址 artifact store、YuNet/SFace/SigLIP Builds、Session Registry 和四条可路由的 experimental typed data planes；Ollama QwenVL 另有有界描述/关键词与闭集分类复核两条 typed data planes；Codex App Server 另有动态模型组、subscription + cloud modality ACL、图像输入与文本 SSE；音频另有 YAMNet 多标签声音事件 Consumer slice、PCM TTS server-stream 与 commit-redecode ASR duplex experimental slices。CI、自动资源长期启用、视觉/音频质量 promotion、Codex quota reconciliation、照片/真实声音域质量、background batch/音频/cloud 幂等与远程节点仍待完成。

@@ -2,7 +2,7 @@
 
 use serde::Serialize;
 
-pub const CONTRACT_VERSION: &str = "0.1.0-candidate.2";
+pub const CONTRACT_VERSION: &str = "0.1.0-candidate.3";
 pub const CONTRACT_STABILITY: &str = "candidate";
 pub const OPENAPI_PATH: &str = "/infer/v1/openapi.json";
 pub const OPENAPI_JSON: &str = include_str!("../../../contracts/v0.1/openapi.json");
@@ -33,6 +33,10 @@ pub const CONSUMER_ROUTES: &[ContractRoute] = &[
     ContractRoute {
         method: "POST",
         path: "/v1/audio/transcriptions",
+    },
+    ContractRoute {
+        method: "POST",
+        path: "/v1/audio/event-detections",
     },
     ContractRoute {
         method: "POST",
@@ -167,8 +171,8 @@ impl PublicErrorEnvelope {
 #[cfg(test)]
 mod tests {
     use infer_core::{
-        JobListPage, JobState, Placement, Priority, QualityGrade, RatingStatus, ResourceClass,
-        ResponsesRequest,
+        AudioCoverageStatus, EventDetectionResult, JobListPage, JobState, Placement, Priority,
+        QualityGrade, RatingStatus, ResourceClass, ResponsesRequest, SpeechPresenceStatus,
     };
     use serde_json::Value;
 
@@ -226,6 +230,12 @@ mod tests {
                 "job-list",
                 include_str!("../../../contracts/v0.1/fixtures/job-list.json"),
             ),
+            (
+                "audio-event-detection-response",
+                include_str!(
+                    "../../../contracts/v0.1/fixtures/audio-event-detection-response.json"
+                ),
+            ),
         ] {
             serde_json::from_str::<Value>(fixture)
                 .unwrap_or_else(|error| panic!("{name} fixture is invalid: {error}"));
@@ -243,6 +253,20 @@ mod tests {
             "../../../contracts/v0.1/fixtures/job-list.json"
         ))
         .expect("Job list fixture follows the typed projection");
+        let event_fixture: Value = serde_json::from_str(include_str!(
+            "../../../contracts/v0.1/fixtures/audio-event-detection-response.json"
+        ))
+        .expect("audio event fixture is JSON");
+        let event_result: EventDetectionResult = serde_json::from_value({
+            let mut provider_result = event_fixture.as_object().unwrap().clone();
+            provider_result.remove("id");
+            provider_result.remove("model");
+            Value::Object(provider_result)
+        })
+        .expect("audio event fixture follows the typed provider result");
+        event_result
+            .validate()
+            .expect("audio event fixture is semantically valid");
 
         let document: Value = serde_json::from_str(OPENAPI_JSON).unwrap();
         assert_enum(
@@ -288,6 +312,23 @@ mod tests {
                 ResourceClass::Standard,
                 ResourceClass::Heavy,
                 ResourceClass::Extreme,
+            ],
+        );
+        assert_enum(
+            &document["components"]["schemas"]["EventDetectionResponse"]["properties"]["speech_presence"]
+                ["properties"]["status"]["enum"],
+            &[
+                SpeechPresenceStatus::Present,
+                SpeechPresenceStatus::Absent,
+                SpeechPresenceStatus::Unknown,
+            ],
+        );
+        assert_enum(
+            &document["components"]["schemas"]["AudioAnalysisCoverage"]["properties"]["status"]["enum"],
+            &[
+                AudioCoverageStatus::Full,
+                AudioCoverageStatus::Partial,
+                AudioCoverageStatus::None,
             ],
         );
     }

@@ -10,7 +10,7 @@ daemon 在哪里”；App 身份、Bearer 凭证、Intent ACL 和请求合同仍
 | Discovery schema | `infra.discovery.registration@20260810.1` |
 | service kind | `infer-runtime` |
 | Consumer protocol | `infer-runtime.consumer` |
-| Consumer protocol version | `0.1.0-candidate.2` |
+| Consumer protocol version | `0.1.0-candidate.3` |
 | binding | `infer-runtime.http-loopback` |
 | endpoint | canonical numeric loopback URL，例如 `http://127.0.0.1:8787` |
 
@@ -42,7 +42,7 @@ Consumer binding 只接受 `http://`、数值型 loopback 地址和显式非零�
     },
     {
       "protocol": "infer-runtime.consumer",
-      "protocol_versions": ["0.1.0-candidate.2"],
+      "protocol_versions": ["0.1.0-candidate.3"],
       "binding": "infer-runtime.http-loopback",
       "endpoint": "http://127.0.0.1:8787"
     }
@@ -55,7 +55,7 @@ Consumer binding 只接受 `http://`、数值型 loopback 地址和显式非零�
 1. 显式的开发/诊断 endpoint override 优先；生产本机默认不要写死端口。
 2. 按 Infra Discovery 规则选择当前用户拥有、未过期且 schema/version 合法的
    `kind=infer-runtime` registration。
-3. 精确选择 `infer-runtime.consumer@0.1.0-candidate.2` +
+3. 精确选择 `infer-runtime.consumer@0.1.0-candidate.3` +
    `infer-runtime.http-loopback` offer，并再次校验 endpoint。
 4. 缓存 `instance_id`、`generation` 和 lease；generation 改变、lease 到期或连接失败时重新发现，
    不在旧 endpoint 上无限重试。

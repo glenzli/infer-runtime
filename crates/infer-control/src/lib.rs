@@ -29,10 +29,10 @@ use infer_artifact::{ArtifactError, ArtifactStore};
 use infer_auth::{AppCredentials, CredentialError};
 use infer_core::{
     AppConfig, AttemptOutcome, AttemptSnapshot, AttemptTrigger, AudioExecutionRequest,
-    ContractError, DurablePayloadRef, ExecutionMode, ExecutionRequirements, Fallback,
-    IntentProfile, JobListPage, JobPageCursor, JobSnapshot, JobState, LocalInventoryKind, Modality,
-    Priority, ProviderConfig, ProviderProtocol, QuotaConfig, RequestConstraints, ResponsesRequest,
-    RuntimeConfig,
+    ContractError, DurablePayloadRef, EventDetectionResult, ExecutionMode, ExecutionRequirements,
+    Fallback, IntentProfile, JobListPage, JobPageCursor, JobSnapshot, JobState, LocalInventoryKind,
+    Modality, Priority, ProviderConfig, ProviderProtocol, QuotaConfig, RequestConstraints,
+    ResponsesRequest, RuntimeConfig,
 };
 use infer_payload::PayloadError;
 use infer_provider::{
@@ -583,6 +583,21 @@ impl Runtime {
         Arc::get_mut(&mut runtime)
             .expect("newly constructed Runtime has one owner")
             .image_understanding_executors = executors;
+        runtime
+    }
+
+    /// Constructor for typed file-audio provider contract tests and embedded
+    /// integrations. Executor ids must match configured Provider ids.
+    pub fn with_audio_executors(
+        config: RuntimeConfig,
+        providers: BTreeMap<String, DynProvider>,
+        credentials: AppCredentials,
+        executors: BTreeMap<String, DynAudioExecutor>,
+    ) -> Arc<Self> {
+        let mut runtime = Self::with_providers_and_credentials(config, providers, credentials);
+        Arc::get_mut(&mut runtime)
+            .expect("newly constructed Runtime has one owner")
+            .audio_executors = executors;
         runtime
     }
 
@@ -1177,6 +1192,7 @@ impl Runtime {
         request.validate()?;
         let logical_model = request.model().to_owned();
         let constraints = request.constraints()?;
+        let is_event_detection = matches!(&request, AudioExecutionRequest::EventDetection(_));
         let (expected_data_plane, input_modalities) = match &request {
             AudioExecutionRequest::Transcription(_) => {
                 ("audio.transcription", BTreeSet::from([Modality::Audio]))
@@ -1185,6 +1201,9 @@ impl Runtime {
                 "audio.alignment",
                 BTreeSet::from([Modality::Audio, Modality::Text]),
             ),
+            AudioExecutionRequest::EventDetection(_) => {
+                ("audio.event_detection", BTreeSet::from([Modality::Audio]))
+            }
             AudioExecutionRequest::Speech(_) => ("audio.speech", BTreeSet::from([Modality::Text])),
             AudioExecutionRequest::VoiceClone(_) => (
                 "audio.voice_clone",
@@ -1229,6 +1248,20 @@ impl Runtime {
                 _ = prepared.cancellation.cancelled() => Err(RuntimeError::Cancelled),
                 result = upstream => result.map_err(RuntimeError::Provider),
             },
+        };
+        let result = match result {
+            Ok(output) if is_event_detection => {
+                let validation = match &output {
+                    AudioExecutionOutput::Json(value) => {
+                        self.validate_event_detection_output(&prepared, value)
+                    }
+                    AudioExecutionOutput::Audio { .. } => Err(ProviderError::Protocol(
+                        "sound-event executor returned audio".into(),
+                    )),
+                };
+                validation.map(|()| output).map_err(RuntimeError::Provider)
+            }
+            other => other,
         };
         match result {
             Ok(mut output) => {
@@ -1490,6 +1523,61 @@ impl Runtime {
             .get(id)
             .cloned()
             .ok_or_else(|| RuntimeError::ProviderUnavailable(id.to_owned()))
+    }
+
+    fn validate_event_detection_output(
+        &self,
+        prepared: &PreparedRun,
+        value: &Value,
+    ) -> Result<(), ProviderError> {
+        let result: EventDetectionResult = serde_json::from_value(value.clone())?;
+        result
+            .validate()
+            .map_err(|error| ProviderError::Protocol(error.to_string()))?;
+        let deployment = self
+            .config
+            .deployments
+            .get(&prepared.deployment_id)
+            .ok_or_else(|| ProviderError::Protocol("selected Deployment disappeared".into()))?;
+        let build = self
+            .config
+            .model_builds
+            .get(&deployment.build)
+            .ok_or_else(|| ProviderError::Protocol("selected Model Build disappeared".into()))?;
+        let manifest = build.audio_event.as_ref().ok_or_else(|| {
+            ProviderError::Protocol("selected Build has no audio-event identity".into())
+        })?;
+        let matches = result.provenance.model == manifest.artifact.source_revision
+            && result.provenance.model_archive_sha256 == manifest.artifact.sha256
+            && result.provenance.model_license_spdx == manifest.artifact.license_spdx
+            && result.provenance.training_data_license_spdx == manifest.training_data_license_spdx
+            && result.provenance.runtime == manifest.runtime
+            && result.provenance.runtime_version == manifest.runtime_version
+            && result.provenance.preprocessing_identity == manifest.preprocessing_identity
+            && result.ontology.revision == manifest.ontology_revision
+            && result.ontology.class_id_namespace == manifest.class_id_namespace
+            && result.ontology.class_count == manifest.class_count
+            && result.ontology.artifact_sha256 == manifest.ontology.sha256
+            && result.ontology.license_spdx == manifest.ontology.license_spdx
+            && result.policy.revision == manifest.policy_revision
+            && result.policy.score_kind == manifest.score_kind
+            && (result.policy.event_score_threshold - manifest.event_score_threshold).abs()
+                <= f64::EPSILON
+            && result.policy.smoothing.window_frames == manifest.smoothing_window_frames
+            && result.policy.max_classes_per_window == manifest.max_classes_per_window
+            && (result.policy.speech_present_threshold - manifest.speech_present_threshold).abs()
+                <= f64::EPSILON
+            && (result.policy.speech_absent_threshold - manifest.speech_absent_threshold).abs()
+                <= f64::EPSILON
+            && (result.coverage.window_seconds - manifest.window_seconds).abs() <= f64::EPSILON
+            && (result.coverage.hop_seconds - manifest.hop_seconds).abs() <= f64::EPSILON
+            && result.coverage.input_duration_seconds <= manifest.max_audio_seconds as f64 + 1e-6;
+        if !matches {
+            return Err(ProviderError::Protocol(
+                "sound-event result identity does not match the selected Build".into(),
+            ));
+        }
+        Ok(())
     }
     async fn acquire(&self, prepared: &PreparedRun) -> Result<ScheduledPermit, RuntimeError> {
         let scheduler = self

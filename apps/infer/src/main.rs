@@ -104,6 +104,13 @@ enum Command {
         #[arg(long)]
         language: Option<String>,
     },
+    /// Detect overlapping, time-bounded sound events in a file audio input.
+    DetectEvents {
+        #[arg(long, default_value = "audio.detect_events")]
+        route: String,
+        #[arg(long)]
+        file: PathBuf,
+    },
     /// Call the experimental typed face-detection protocol.
     DetectFaces {
         #[arg(long, default_value = "vision.detect_faces")]
@@ -399,6 +406,21 @@ async fn main() -> anyhow::Result<()> {
                 "{}",
                 client
                     .post(format!("{base}/v1/audio/transcriptions"))
+                    .bearer_auth(&api_key)
+                    .multipart(form)
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .text()
+                    .await?
+            );
+        }
+        Command::DetectEvents { route, file } => {
+            let form = audio_form(route, &file, "file").await?;
+            println!(
+                "{}",
+                client
+                    .post(format!("{base}/v1/audio/event-detections"))
                     .bearer_auth(&api_key)
                     .multipart(form)
                     .send()

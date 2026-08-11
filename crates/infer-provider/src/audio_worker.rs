@@ -1,4 +1,4 @@
-//! Persistent JSON-lines bridge to local MLX audio execution.
+//! Persistent JSON-lines bridge to typed local file-audio workers.
 
 mod streaming;
 
@@ -10,8 +10,8 @@ use std::{
 
 use async_trait::async_trait;
 use infer_core::{
-    AlignmentRequest, AudioExecutionRequest, AudioFile, SpeechFormat, SpeechRequest,
-    TranscriptionRequest, VoiceCloneRequest,
+    AlignmentRequest, AudioExecutionRequest, AudioFile, EventDetectionRequest,
+    EventDetectionResult, SpeechFormat, SpeechRequest, TranscriptionRequest, VoiceCloneRequest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -221,7 +221,14 @@ impl AudioExecutor for AudioWorkerExecutor {
             ));
         }
         let prepared = prepare_worker_request(physical_model, request).await?;
-        let result = self.round_trip(&prepared.request).await?;
+        let mut result = self.round_trip(&prepared.request).await?;
+        if prepared.request.operation == "detect_events" {
+            let typed: EventDetectionResult = serde_json::from_value(result)?;
+            typed
+                .validate()
+                .map_err(|error| ProviderError::Protocol(error.to_string()))?;
+            result = serde_json::to_value(typed)?;
+        }
         if let Some((path, format)) = prepared.audio_output {
             let bytes = fs::read(path).await?;
             Ok(AudioExecutionOutput::Audio {
@@ -247,6 +254,9 @@ async fn prepare_worker_request(
         AudioExecutionRequest::Alignment(request) => {
             prepare_alignment(request_id, physical_model, request, &temporary_files).await?
         }
+        AudioExecutionRequest::EventDetection(request) => {
+            prepare_event_detection(request_id, physical_model, request, &temporary_files).await?
+        }
         AudioExecutionRequest::Speech(request) => {
             prepare_speech(request_id, physical_model, request, &temporary_files)
         }
@@ -259,6 +269,19 @@ async fn prepare_worker_request(
         _temporary_files: temporary_files,
         audio_output,
     })
+}
+
+async fn prepare_event_detection(
+    request_id: String,
+    model: &str,
+    request: EventDetectionRequest,
+    temporary_files: &TempDir,
+) -> Result<(WorkerRequest, Option<(PathBuf, SpeechFormat)>), ProviderError> {
+    let audio_path = write_audio_file(temporary_files, "input", &request.file).await?;
+    Ok((
+        worker_request(request_id, "detect_events", model, Some(audio_path)),
+        None,
+    ))
 }
 
 async fn prepare_transcription(
@@ -422,5 +445,27 @@ mod tests {
         assert_eq!(safe_extension("../../voice.wav"), "wav");
         assert_eq!(safe_extension("voice.bad/path"), "wav");
         assert_eq!(safe_extension("voice.123456789"), "wav");
+    }
+
+    #[tokio::test]
+    async fn event_detection_uses_the_existing_scoped_payload_file_protocol() {
+        let request = AudioExecutionRequest::EventDetection(EventDetectionRequest {
+            model: "audio.detect_events".into(),
+            file: AudioFile {
+                filename: "kitchen.wav".into(),
+                content_type: Some("audio/wav".into()),
+                bytes: b"bounded-audio".to_vec(),
+            },
+            metadata: Default::default(),
+        });
+        let prepared = prepare_worker_request("/verified/yamnet", request)
+            .await
+            .unwrap();
+        assert_eq!(prepared.request.operation, "detect_events");
+        assert_eq!(prepared.request.model, "/verified/yamnet");
+        let path = prepared.request.audio_path.as_ref().unwrap();
+        assert!(Path::new(path).starts_with(prepared._temporary_files.path()));
+        assert_eq!(tokio::fs::read(path).await.unwrap(), b"bounded-audio");
+        assert!(prepared.audio_output.is_none());
     }
 }

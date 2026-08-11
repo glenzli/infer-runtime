@@ -1,6 +1,6 @@
 # infer-runtime v0.1 consumer contract
 
-当前可供外部应用反馈测试的合同版本是 `0.1.0-candidate.2`；`candidate.1` 保持冻结。它不是正式发布标签，但已经有
+当前可供外部应用反馈测试的合同版本是 `0.1.0-candidate.3`；`candidate.1`、`candidate.2` 保持冻结。它不是正式发布标签，但已经有
 固定的路由、请求字段、最小响应字段、错误 envelope、示例和运行时身份。机器可读规范见
 [openapi.json](openapi.json)，示例见 [fixtures](fixtures)。第一次接入请从
 [外部应用接入指南](../../docs/INTEGRATION.md) 开始；本文件仍是兼容边界的权威说明。
@@ -23,7 +23,7 @@ curl http://127.0.0.1:8787/infer/v1/openapi.json
 | --- | --- |
 | 文本 | `POST /v1/responses`；非流式 JSON、SSE、受限 local background |
 | Background | `GET /v1/responses/{response_id}`、`POST /v1/responses/{response_id}/cancel` |
-| 文件音频 | transcription、alignment、speech、voice clone 四类 task-oriented endpoint |
+| 文件音频 | sound event detection、transcription、alignment、speech、voice clone 五类 task-oriented endpoint |
 | 流式音频 | speech 可选 chunked PCM server stream；duplex transcription 当前为 experimental WebSocket |
 | Job 控制 | app-scoped list/get/cancel/explain |
 | 基础状态 | `/health`、合同 manifest 与 OpenAPI |
@@ -43,7 +43,7 @@ route 的请求仍严格拒绝未知字段。
 
 ## 兼容策略
 
-- `0.1.0-candidate.1` 与当前 `0.1.0-candidate.2` 一旦交给 consumer 就视为不可变；规范、fixture 或 wire 行为变化必须产生新的 candidate revision。
+- `0.1.0-candidate.1`、`candidate.2` 与当前 `candidate.3` 一旦交给 consumer 就视为不可变；规范、fixture 或 wire 行为变化必须产生新的 candidate revision。
 - 新 candidate 默认只允许增加可选字段、响应字段或新 endpoint。Consumer 必须忽略响应中的未知字段。
 - 若反馈期确实证明需要破坏性修正，必须提升 revision、写明 migration，并与已登记 consumer 协调；不得静默修改原 revision。
 - 正式 `v0.1.0` 后，破坏公开 wire 的变化进入新的 API/合同版本。Provider SPI、CLI 文本输出和 operator experimental 路由不受此承诺约束。
@@ -98,15 +98,19 @@ OpenAPI 调用，等第二个真实 consumer 证明重复需求后再决定是�
 Multipart 端点按任务分别接受字段，拼写错误、重复字段、错误的文件字段都会确定返回 400：
 
 - transcription：`model`、`file`、`language`、`prompt`、`response_format`、`temperature`；
+- sound event detection：`model=audio.detect_events`、`file`；Runtime 固定 local-only/offline/no-fallback；
 - alignment：`model`、`file`、`text`、`language`；
 - voice clone：`model`、`input`、`reference_audio`、`reference_text`、`language`、`response_format`；
-- 三者都可额外使用一个 JSON-string `metadata` 字段或独立 `infer.*` 字段，但同名 key 不得冲突；
+- 四类 multipart endpoint 都可额外使用一个 JSON-string `metadata` 字段或独立 `infer.*` 字段，但同名 key 不得冲突；
 - speech 使用严格 JSON，字段见 OpenAPI；所有上传仍受 25 MiB 单文件上限约束。
 - speech 的 `execution_mode=server_stream` 只与 `response_format=pcm` 组合，body 是 append-only
   `pcm_s16le`；采样率、声道与 Job 身份由响应 header 给出。
 - duplex transcription 使用 `GET /v1/audio/transcriptions/stream` WebSocket；binary frame 是 PCM，
   JSON partial 按单调 `revision` 完整替换。当前 `commit_redecode` 是实验 transport，不承诺原生
   增量 ASR 的固定低延迟。
+- event detection 返回重叠、时间有界的多标签事件，而非整段 Top-1；`policy` 与 `ontology`
+  精确标识阈值/平滑/class map。`speech_presence=absent` 只表示完整覆盖下的低模型证据，绝不由
+  transcript 缺失推出；调用方必须保留 `unknown`。
 
 ## 反馈测试最小清单
 

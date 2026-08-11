@@ -34,3 +34,9 @@ Infer Runtime 的 Consumer 目前普遍把 `127.0.0.1:8787` 当作默认地址�
 - Consumer 必须验证 registration owner/lease/protocol/version/binding/endpoint，禁用 HTTP proxy
   与 redirect，并在 generation 变化后重新发现。
 - 本决定不改变 `0.1.0-candidate.2` 的 HTTP path、payload、错误 envelope 或兼容承诺。
+
+## 后续 revision
+
+`0.1.0-candidate.3` additive 增加声音事件 Consumer route 后，publisher 随运行时合同常量发布
+candidate.3 offer；candidate.2 offer 与 wire 保持冻结。Discovery 的 owner、lease、binding、
+credential 和 endpoint 安全语义没有改变。

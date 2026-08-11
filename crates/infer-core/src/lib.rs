@@ -4,6 +4,7 @@
 //! and constraints, static registry/configuration, and observable Job state.
 
 mod audio;
+mod audio_event;
 mod config;
 mod image_understanding;
 mod job;
@@ -15,6 +16,7 @@ mod vision;
 use thiserror::Error;
 
 pub use audio::*;
+pub use audio_event::*;
 pub use config::*;
 pub use image_understanding::*;
 pub use job::*;

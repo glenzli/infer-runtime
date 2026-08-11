@@ -254,6 +254,62 @@ Silicon 主机上使用真实 `memory_pressure` 采样和临时提高的分类/�
 动作机制未打通。生产启用前仍应检查 recommendation，并在维护窗口观察 audit 与 Job
 失败率。
 
+## YAMNet 通用声音事件 Deployment
+
+示例配置中的 `yamnet-local` 是真实 `audio_worker` Deployment，但 Runtime 不会在 serving 路径
+下载模型或 Python 包。先在仓库根目录创建独立、被 Git 忽略的 runtime：
+
+```bash
+python3 -m venv runtimes/yamnet-tf-2.20
+runtimes/yamnet-tf-2.20/bin/python -m pip install \
+  --requirement tools/requirements-yamnet-runtime.txt
+ffmpeg -version
+```
+
+当前 Build 精确要求 TensorFlow 2.20.0 与系统 ffmpeg。Apple Silicon 已实跑该组合；其他平台仍需
+执行同一 acceptance，不能仅因 wheel 能安装就登记为可用。下载官方 TF Hub v1 archive 到临时
+位置，再用仓库工具验证 archive 大小/digest、拒绝 symlink/path traversal/未知成员、验证四个
+成员 digest 并原子发布：
+
+```bash
+curl -L 'https://tfhub.dev/google/yamnet/1?tf-hub-format=compressed' \
+  --output /private/tmp/yamnet_tfhub_v1.tar
+python3 tools/install_yamnet.py \
+  --archive /private/tmp/yamnet_tfhub_v1.tar \
+  --output-directory models/yamnet-tfhub-v1
+runtimes/yamnet-tf-2.20/bin/python workers/yamnet_audio_worker.py \
+  --verify-model models/yamnet-tfhub-v1
+```
+
+期望 archive 是 14,242,921 bytes，SHA-256 为
+`b80da2a1a56926fb0767205051a200dd7b3beaf3ea1ea126c42a53943996e5e0`；class map digest 为
+`cdf24d193e196d9e95912a2667051ae203e92a2ba09449218ccb40ef787c6df2`。安装器重复运行时只验证
+既有目录，不覆盖身份不符的文件。模型目录、venv 和下载 archive 都是本机运行制品，不得提交。
+
+复制示例配置后，确认 provider command、Build model path 与上面一致，再启动 daemon。真实调用：
+
+```bash
+target/debug/infer --app-id echo detect-events --file sample.wav
+```
+
+worker 首次请求会加载 SavedModel，随后复用同一个常驻进程；切换到其他音频 Provider 不会让它
+冒充 MLX cache owner。输入由 API 复制到单次 executor 临时目录，执行后删除；ffmpeg stderr、
+音频路径、文件内容和响应 body 不进入 daemon 普通请求日志。解码错误只向 Consumer 返回通用
+错误，Job/Attempt 保留 payload-free provider/deployment/error kind。
+
+可选真实 acceptance 直接走 HTTP、Echo ACL、routing、Job/Attempt 与 worker：
+
+```bash
+INFER_YAMNET_PYTHON="$PWD/runtimes/yamnet-tf-2.20/bin/python" \
+INFER_YAMNET_MODEL="$PWD/models/yamnet-tfhub-v1" \
+cargo test -p infer-api \
+  real_yamnet_http_acceptance_records_echo_job_provenance --lib -- --ignored
+```
+
+该测试生成本地白噪声 WAV，不下载数据，要求结果有多个 AudioSet MID、完整 coverage、低人声证据，
+并检查 Echo Job 的 Profile/Build/Deployment/Provider/Attempt。它是平台 acceptance，不替代 Echo
+真实雨、列车、鸟、车辆、家居、工具、音乐与混合人声质量集。
+
 ## ONNX Runtime、公共制品目录与导入
 
 ONNX 使用版本化 runtime library 与内容寻址的公共制品根；配置给出绝对路径，避免 daemon

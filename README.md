@@ -12,8 +12,8 @@ Provider 与 Deployment，并统一处理排队、配额、模型驻留、取消
 
 | 能力 | 当前实现 | 稳定性 |
 | --- | --- | --- |
-| 文本推理 | Responses-shaped unary/SSE、本地加密 background；可连接本地、云端和订阅式 Provider | `0.1.0-candidate.2`；订阅桥仍 experimental |
-| 本地音频 | 转写、强制对齐、语音合成、声音设计与声音克隆等 typed 能力 | 文件接口可接入；流式 TTS/ASR 仍 experimental |
+| 文本推理 | Responses-shaped unary/SSE、本地加密 background；可连接本地、云端和订阅式 Provider | `0.1.0-candidate.3`；订阅桥仍 experimental |
+| 本地音频 | 通用声音事件、转写、强制对齐、语音合成、声音设计与声音克隆等 typed 能力 | 文件接口可接入；流式 TTS/ASR 仍 experimental |
 | 本地视觉 | ONNX Runtime Session Registry；人脸检测/向量与图文语义向量等 typed 能力 | 收窄的 experimental slices |
 | 路由与执行 | Intent → Model Profile → Build → Deployment；优先队列、deadline、cancel、retry/fallback、熔断 | M1/M2 已闭环 |
 | 预算与恢复 | App/provider/global quota、reservation、usage ledger、SQLite migration、local background recovery | M3 已闭环 |
@@ -91,7 +91,7 @@ credential 不会下发到页面。
 
 ```text
 protocol  = infer-runtime.consumer
-version   = 0.1.0-candidate.2
+version   = 0.1.0-candidate.3
 binding   = infer-runtime.http-loopback
 ```
 
@@ -157,7 +157,7 @@ curl "$INFER_BASE_URL/infer/v1/openapi.json"
 
 ## 当前阶段
 
-当前实现是可供本机 Consumer 反馈测试的 `0.1.0-candidate.2`，不是正式 v0.1 发布版。
+当前实现是可供本机 Consumer 反馈测试的 `0.1.0-candidate.3`，不是正式 v0.1 发布版。
 M1–M4 的核心纵向切片已经闭环；完整 traces、24 小时混合 soak、更多连续 Consumer 使用与正式
 发布门槛仍在推进。ONNX 视觉、流式音频和 Codex subscription bridge 保持 experimental，不会
 借由配置存在就自动升级为稳定合同。

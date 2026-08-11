@@ -613,6 +613,36 @@ pub struct ModelBuildConfig {
     /// tensor API: typed adapters remain the sole consumer-facing boundary.
     #[serde(default)]
     pub onnx: Option<OnnxModelBuildConfig>,
+    /// Present only for policy-versioned sound-event Builds. The
+    /// executor owns model loading; Runtime owns the immutable artifact,
+    /// ontology, temporal policy, and license identity used for admission and
+    /// provenance validation.
+    #[serde(default)]
+    pub audio_event: Option<AudioEventModelBuildConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AudioEventModelBuildConfig {
+    pub artifact: ArtifactIdentityConfig,
+    pub ontology: ArtifactIdentityConfig,
+    pub runtime: String,
+    pub runtime_version: String,
+    pub preprocessing_identity: String,
+    pub policy_revision: String,
+    pub score_kind: String,
+    pub ontology_revision: String,
+    pub class_id_namespace: String,
+    pub class_count: usize,
+    pub window_seconds: f64,
+    pub hop_seconds: f64,
+    pub event_score_threshold: f64,
+    pub smoothing_window_frames: usize,
+    pub max_classes_per_window: usize,
+    pub speech_present_threshold: f64,
+    pub speech_absent_threshold: f64,
+    pub max_audio_seconds: u64,
+    pub training_data_license_spdx: String,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize, PartialEq)]
@@ -1155,6 +1185,7 @@ impl RuntimeConfig {
                     "responses"
                         | "audio.transcription"
                         | "audio.alignment"
+                        | "audio.event_detection"
                         | "audio.speech"
                         | "audio.voice_clone"
                         | "vision.face_detection"
@@ -1218,6 +1249,47 @@ impl RuntimeConfig {
             }
             if build.model_id.trim().is_empty() {
                 return Err(configuration(format!("model build {id} needs model_id")));
+            }
+            if build.onnx.is_some() && build.audio_event.is_some() {
+                return Err(configuration(format!(
+                    "model build {id} cannot combine ONNX and audio-event execution manifests"
+                )));
+            }
+            if let Some(audio_event) = &build.audio_event {
+                let identities = [&audio_event.artifact, &audio_event.ontology];
+                if identities.iter().any(|artifact| {
+                    artifact.size_bytes == 0
+                        || artifact.sha256.len() != 64
+                        || !artifact.sha256.bytes().all(|byte| byte.is_ascii_hexdigit())
+                        || artifact.source_url.trim().is_empty()
+                        || artifact.source_revision.trim().is_empty()
+                        || artifact.license_spdx.trim().is_empty()
+                }) || audio_event.runtime.trim().is_empty()
+                    || audio_event.runtime_version.trim().is_empty()
+                    || audio_event.preprocessing_identity.trim().is_empty()
+                    || audio_event.policy_revision.trim().is_empty()
+                    || audio_event.score_kind != "raw_sigmoid"
+                    || audio_event.ontology_revision.trim().is_empty()
+                    || audio_event.class_id_namespace.trim().is_empty()
+                    || audio_event.class_count == 0
+                    || !audio_event.window_seconds.is_finite()
+                    || audio_event.window_seconds <= 0.0
+                    || !audio_event.hop_seconds.is_finite()
+                    || audio_event.hop_seconds <= 0.0
+                    || !unit_interval(audio_event.event_score_threshold)
+                    || audio_event.smoothing_window_frames == 0
+                    || audio_event.smoothing_window_frames.is_multiple_of(2)
+                    || audio_event.max_classes_per_window == 0
+                    || !unit_interval(audio_event.speech_present_threshold)
+                    || !unit_interval(audio_event.speech_absent_threshold)
+                    || audio_event.speech_absent_threshold >= audio_event.speech_present_threshold
+                    || audio_event.max_audio_seconds == 0
+                    || audio_event.training_data_license_spdx.trim().is_empty()
+                {
+                    return Err(configuration(format!(
+                        "audio-event model build {id} needs complete artifact, ontology, temporal-policy, runtime, and license identity"
+                    )));
+                }
             }
             if let Some(onnx) = &build.onnx {
                 if onnx.opset == 0
@@ -1366,6 +1438,26 @@ impl RuntimeConfig {
                 ))
             })?;
             let model = &self.model_profiles[&build.profile];
+            let serves_audio_event = model
+                .ratings
+                .keys()
+                .any(|intent_id| self.intents[intent_id].data_plane == "audio.event_detection");
+            if serves_audio_event && build.audio_event.is_none() {
+                return Err(configuration(format!(
+                    "audio-event deployment {id} requires a Build audio_event identity"
+                )));
+            }
+            if build.audio_event.is_some()
+                && model
+                    .ratings
+                    .keys()
+                    .any(|intent_id| self.intents[intent_id].data_plane != "audio.event_detection")
+            {
+                return Err(configuration(format!(
+                    "audio-event Build {} cannot claim a different data plane",
+                    deployment.build
+                )));
+            }
             for intent_id in model.ratings.keys() {
                 let data_plane = self.intents[intent_id].data_plane.as_str();
                 let compatible = match provider.kind.as_str() {
@@ -1399,6 +1491,12 @@ impl RuntimeConfig {
             if provider.kind != "onnx" && build.onnx.is_some() {
                 return Err(configuration(format!(
                     "ONNX model build {} must be deployed by an ONNX provider",
+                    deployment.build
+                )));
+            }
+            if build.audio_event.is_some() && provider.kind != "audio_worker" {
+                return Err(configuration(format!(
+                    "audio-event model build {} must be deployed by an audio worker provider",
                     deployment.build
                 )));
             }
@@ -1648,6 +1746,10 @@ fn configuration(message: impl Into<String>) -> ContractError {
     ContractError::Configuration(message.into())
 }
 
+fn unit_interval(value: f64) -> bool {
+    value.is_finite() && (0.0..=1.0).contains(&value)
+}
+
 fn validate_quota_limit(name: &str, limit: &QuotaLimitConfig) -> Result<(), ContractError> {
     if limit
         .max_usd
@@ -1686,6 +1788,37 @@ mod tests {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
         RuntimeConfig::load(path).expect("example registry must remain valid");
+    }
+
+    #[test]
+    fn audio_event_registry_fails_closed_on_identity_or_data_plane_drift() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let mut config = RuntimeConfig::load(path).unwrap();
+        config
+            .model_builds
+            .get_mut("yamnet_tfhub_v1_tensorflow_2_20")
+            .unwrap()
+            .audio_event
+            .as_mut()
+            .unwrap()
+            .ontology
+            .sha256 = "not-a-digest".into();
+        assert!(config.validate().is_err());
+
+        let mut config = RuntimeConfig::load(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml"),
+        )
+        .unwrap();
+        let transcription_rating =
+            config.model_profiles["qwen3_asr_1_7b"].ratings["audio.transcribe"].clone();
+        config
+            .model_profiles
+            .get_mut("yamnet_tfhub_v1")
+            .unwrap()
+            .ratings
+            .insert("audio.transcribe".into(), transcription_rating);
+        assert!(config.validate().is_err());
     }
 
     #[test]

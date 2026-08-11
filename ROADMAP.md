@@ -2,7 +2,7 @@
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | M1、M2 已完成，M3 核心闭环完成，M4 退出门槛完成；`0.1.0-candidate.1` 已冻结，当前 `0.1.0-candidate.2` 供外部反馈并继续收口 observability/24h soak/真实 consumer 门槛；M6 的 ONNX foundation、同步人脸、SigLIP 图文向量与 QwenVL typed understanding 已作为发布外 experimental slices 落地，不扩大 v0.1 |
+| 状态 | M1、M2 已完成，M3 核心闭环完成，M4 退出门槛完成；`0.1.0-candidate.1`、`candidate.2` 已冻结，当前 `0.1.0-candidate.3` additive 增加 YAMNet 文件声音事件并供外部反馈，继续收口 observability/24h soak/真实 consumer 门槛；M6 的 ONNX foundation、同步人脸、SigLIP 图文向量与 QwenVL typed understanding 已作为发布外 experimental slices 落地，不扩大 v0.1 |
 | 规划方式 | 以可演示的纵向能力和退出门槛推进，不以日期代替完成定义 |
 | 首个发布目标 | 单机文本 + 本地文件音频推理控制平面 MVP |
 
@@ -60,7 +60,7 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
 
 - 已完成：Git 仓库、Cargo workspace、领域合同、Responses compatibility profile、fake provider、配置和本地 daemon/CLI 基线；
 - 已完成：严格 lint、workspace 测试、本机 loopback API 冒烟，以及 CLI fixture → Ollama 的一次真实 Responses 调用；
-- 已完成：`0.1.0-candidate.1` 冻结基线及 additive `0.1.0-candidate.2` OpenAPI、golden fixtures、运行时 contract manifest、严格 JSON/multipart/query/config 失败纪律和 route-level contract tests；
+- 已完成：`0.1.0-candidate.1` 冻结基线、additive `candidate.2` 与 `candidate.3` OpenAPI、golden fixtures、运行时 contract manifest、严格 JSON/multipart/query/config 失败纪律和 route-level contract tests；
 - 待完成：CI 和自动化端到端 acceptance scenario。
 
 ### 工作包
@@ -91,7 +91,7 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
 
 - 已完成：Intent 解析、按 workload 的 Model Profile/Build/Deployment registry、无状态 Responses 请求验证、Ollama adapter、有界优先队列、deadline、Job 状态、取消、控制面查询/取消/解释/metrics；
 - 已完成：Intent 不泄漏为物理模型名、质量下限与 placement 正交过滤、应用别名拒绝、`infer.*` metadata 不转发上游、SSE 身份归一化测试；
-- 已完成：独立音频核心契约、25 MiB 有界 multipart、常驻且单模型驻留的 MLX worker、音频 CLI，以及 ASR/强制对齐/三种 TTS build 的受控端到端验证；
+- 已完成：独立音频核心契约、25 MiB 有界 multipart、常驻 MLX worker、YAMNet TensorFlow worker、音频 CLI，以及广谱声音事件/ASR/强制对齐/三种 TTS build 的受控端到端验证；
 - 待完成：取消对真实慢流的自动化测试，以及 M0 的 CI 和完整 acceptance scenario。
 
 ### 工作包
@@ -99,7 +99,7 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
 - `InferenceJob`、`Attempt` 和状态机；
 - Responses-compatible submit/stream 与控制 API get/cancel；
 - 有界 FIFO 队列和单 provider concurrency；
-- 文本 Responses Intents，以及 `audio.transcribe`、`audio.align`、`speech.synthesize`、`speech.voice_design`、`speech.voice_clone` 文件音频 Intents；
+- 文本 Responses Intents，以及 `audio.detect_events`、`audio.transcribe`、`audio.align`、`speech.synthesize`、`speech.voice_design`、`speech.voice_clone` 文件音频 Intents；
 - 静态 registry、共享 Responses adapter 与 Ollama capability profile；
 - Job Coordinator 和 provider error normalization；
 - CLI：`status`、`jobs`、`models/deployments`；
@@ -177,7 +177,7 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
 
 ### 当前反馈阶段
 
-- 已冻结 `0.1.0-candidate.1` consumer route/schema/error 合同；candidate.2 以 additive 字段/路由扩展并继续把 operator resource/provider 管理面明确留在 experimental；
+- 已冻结 `0.1.0-candidate.1` 与 `candidate.2` consumer route/schema/error 合同；candidate.3 additive 增加通用声音事件 route/schema，并继续把 operator resource/provider 管理面明确留在 experimental；
 - 已完成本地浏览器 `infer console` 接入期管理面：可 attach 或会话内启停 daemon，异步投影
   Jobs/provider（含 MLX audio）/resources，提供滚动 Statistics、可过滤/搜索日志、Job explain/
   cancel、显式 lifecycle load/unload/probe/refresh 和严格配置校验/原子保存；runtime credential
@@ -193,6 +193,11 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
   最小权限保持不变。重启认证表后的真实 `audio.transcribe -> audio.align` 已通过，两个 Job
   均为 `app_id=echo`、local MLX deployment 和单次成功 Attempt，合同、provider、deployment 与
   model build 证据已写入 Echo Catalog。该证据开启 consumer 反馈期，但尚不替代连续 SLO/soak 门槛；
+- Runtime 端 `audio.detect_events` 已以 YAMNet TF Hub v1 的真实本地 Deployment 闭环：短窗口
+  多标签、相邻合并、AudioSet MID、coverage、三态 speech evidence、版本化 policy/ontology、
+  App ACL、Job provenance、artifact installer 与 Apple Silicon HTTP acceptance 均已有证据。
+  Echo 仍需在自己的音频理解/分类 owner 中完成调用与 taxonomy 映射，空 transcript 不得变成
+  speech absent；
 - 下一步由首个真实 consumer 按 contract manifest 登记版本，覆盖非流式、SSE、取消、错误和 explain；
 - 反馈导致的任何 wire 变化都提升 candidate revision，原 revision 不原地修改；
 - 正式发布不抢跑，继续等待 24 小时混合 soak、SLO、trace 与连续使用证据；常驻系统服务、
@@ -475,7 +480,11 @@ Deployment。
 4. 自动化通用 SDK fixture → `text.summarize` → Ollama acceptance；
 5. 自动化 TTS → ASR → alignment 本机可选 acceptance；
 6. 增加完整 explain reason trace；
-7. 定义 SenseVoice/FunASR executor 是否进入支持矩阵。
+7. 只在窄域质量集证明价值后，决定 SenseVoice/FunASR 是否作为 speech/BGM/人体声音补充；不得
+   替代 YAMNet 广谱 ontology 或冒充通用分类；
+8. 若出现 audio↔text 检索 Consumer，单独设计 CLAP/其他 embedding Intent、space identity、
+   artifact/license、质量评估与持久化迁移。检索 similarity 不复用 `audio.detect_events` 的
+   校准事件或否定证据语义。
 
 建议每个 issue 指明唯一 primary owner、输入/输出合同、失败语义和验收测试，避免“实现 scheduler”这类不可关闭的大任务。
 
@@ -514,6 +523,7 @@ Deployment。
 | 本地模型反复装卸 | 交替任务导致延迟和硬件抖动 | 最小驻留、load cost、hysteresis、仿真测试 |
 | 多个本地 runtime 形成多个资源 owner | Shadow/ONNX、Ollama、MLX 同时认为容量可用 | 统一 admission/lifecycle reservation；D-107 用混合负载决定是否引入 Resource Pool |
 | embedding identity 漂移后仍混用向量 | 模型/预处理升级后近邻结果异常 | Build 绑定 artifact/preprocess/space identity，不同 space 禁止直接比较 |
+| 广谱声音 raw score 被当作事实或空 transcript 被当作无人声 | Echo 产生错误否定/分类 | coverage + `present/absent/unknown`、版本化阈值、真实域评测；空 transcript 不参与 evidence |
 | 人脸/图片 payload 泄漏 | embedding 或 crop 出现在 Job metadata/log/云请求 | D-108、SensitiveBiometric、local-only、payload-free metadata 与 fake cloud 零触达测试 |
 | Execution Provider fallback 不透明 | 配置显示 CoreML/WinML，实际落到其他 backend | Attempt 记录 actual backend/precision/reason，按平台 tolerance 与 decision stability 验收 |
 | 指标高基数或泄露 prompt | 观测成本增长、敏感数据进入日志 | 固定 labels，ID 进 trace，默认 metadata-only |
