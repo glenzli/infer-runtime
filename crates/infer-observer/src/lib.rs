@@ -1,6 +1,6 @@
 //! Infer Runtime's read-only status protocol and Infra Discovery publisher.
 //!
-//! Discovery owns only service offers and lease publication. The status
+//! Discovery owns only service offers and process-generation publication. The status
 //! protocol independently owns request framing and the redacted snapshot.
 
 mod consumer_offer;
@@ -15,9 +15,8 @@ pub use consumer_offer::{
 };
 pub use discovery::{
     DISCOVERY_SCHEMA, DISCOVERY_SCHEMA_VERSION, DiscoveryError, DiscoveryOffer,
-    DiscoveryRegistration, DiscoveryRuntime, DiscoveryService, REGISTRATION_RENEW_INTERVAL,
-    REGISTRATION_TTL, RegistrationLease, RegistrationSpec, UNIX_SOCKET_OPAQUE_MAX_BYTES,
-    unique_status_socket_endpoint,
+    DiscoveryRegistration, DiscoveryRuntime, DiscoveryService, RegistrationPublication,
+    RegistrationSpec, UNIX_SOCKET_OPAQUE_MAX_BYTES, unique_status_socket_endpoint,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

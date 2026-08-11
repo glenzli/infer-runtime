@@ -95,9 +95,9 @@ version   = 0.1.0-candidate.3
 binding   = infer-runtime.http-loopback
 ```
 
-Discovery manifest 只发布 service identity、generation、lease 和 canonical loopback endpoint，
-不包含 App ID、token 或 ACL。显式 endpoint override 可用于开发；固定 `127.0.0.1:8787` 只应作为
-迁移 fallback。
+Discovery manifest 只发布 service identity、每次启动都会变化的 generation 和 endpoint offer，
+不包含 lease、heartbeat、App ID、token 或 ACL。manifest 只是候选入口；Consumer 必须以实际连接
+判断可用性。显式 endpoint override 可用于开发；固定 `127.0.0.1:8787` 只应作为迁移 fallback。
 
 ### 2. 创建最小权限 App
 

@@ -8,8 +8,9 @@ Protocol version: `20260810.1`
 
 This document owns Infer Runtime's read-only local status request, response,
 framing, errors, and completion semantics. It is independent of Infra Discovery.
-The discovery publisher conforms to `infra.discovery.registration@20260810.1`
-as frozen at infra-protocol commit `555f024`.
+The discovery publisher conforms to `infra.discovery.registration@20260812.1`
+as frozen at
+[infra-protocol commit `e4589d1`](https://github.com/glenzli/infra-protocol/commit/e4589d1c110f3668509ad1e20a3a102735ddf6c5).
 
 ## Unix stream contract
 
@@ -101,7 +102,7 @@ Schema: `infer-runtime.status.snapshot`
 ```
 
 `service.kind`, `service.instance_id`, and `service.generation` must exactly
-match the selected live discovery registration. A new process start always
+match the selected discovery registration. A new process start always
 uses a new generation. `sequence` is monotonic only within that generation.
 
 `status.state` is one of `starting`, `healthy`, `degraded`, `unavailable`, or
@@ -158,32 +159,29 @@ On Unix the layout is:
     └── ir-<process-unique>.sock
 ```
 
-The manifest contains only `service`, `lease`, and protocol `offers`. The Unix
+The manifest contains only `service` and protocol `offers`. The Unix
 endpoint is relative to the runtime root. Directories are owner-only mode
 `0700`, manifests and sockets are mode `0600`, and manifest replacement is
-atomic. The publisher normally renews every 15 seconds with a 45-second TTL.
+atomic. The publisher writes once after every advertised endpoint is ready; it
+does not renew, heartbeat, or periodically rewrite an unchanged declaration.
 
 Infer Runtime holds an exclusive per-service publication authority before its
 first manifest write. During handoff, the predecessor stops all writes and
-releases that authority before the successor publishes. An old unexpired
-manifest may then be atomically replaced by the successor's new generation.
-Shutdown never unlinks the stable manifest; it is left to expire naturally.
-Only the process-unique socket is removed after it closes.
+releases that authority before the successor publishes. The successor
+atomically replaces the stable manifest with its new generation. Shutdown
+never unlinks the stable manifest. Only the process-unique socket is removed
+after it closes. Manifest presence or modification time is never liveness.
 
 Example offer:
 
 ```json
 {
   "schema": "infra.discovery.registration",
-  "schema_version": "20260810.1",
+  "schema_version": "20260812.1",
   "service": {
     "kind": "infer-runtime",
     "instance_id": "local",
     "generation": "gen_0123456789abcdef0123456789abcdef"
-  },
-  "lease": {
-    "renewed_at": "2026-08-10T12:00:00Z",
-    "expires_at": "2026-08-10T12:00:45Z"
   },
   "offers": [
     {

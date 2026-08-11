@@ -152,8 +152,9 @@
   保持冻结，candidate.3 迁移后为 `0.1.0-candidate.3`。Infer 自有 `infer-runtime.http-loopback` binding 只接受 canonical numeric
   loopback URL。
 - **安全边界**：Discovery 不包含 App id、token、credential id、ACL 或 Provider secret。Consumer
-  发现地址后仍必须使用自己的 bearer 身份，并校验 owner、lease、generation、协议、binding 和
-  endpoint；HTTP client 禁止代理和 redirect。
+  发现地址后仍必须使用自己的 bearer 身份，并校验 owner、generation、协议、binding 和 endpoint；
+  manifest 没有 lease、heartbeat 或存活承诺，连接失败必须重读 registration。HTTP client 禁止代理
+  和 redirect。
 - **迁移**：显式 endpoint override 优先，固定 `127.0.0.1:8787` 只作迁移 fallback。Echo、Shadow、
   Symbiont-d 保留各自现有 token/ACL，不共享 `local-operator`。
 - **ADR**：[ADR-0015](adr/0015-consumer-infra-discovery.md)

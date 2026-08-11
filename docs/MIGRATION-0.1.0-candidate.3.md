@@ -2,14 +2,16 @@
 
 `candidate.3` 是一次刻意的、范围受限的 breaking candidate revision。它只重整 Intent、能力等级、
 reasoning effort 和相关 provenance 名称；HTTP endpoint、Bearer credential、App identity、Provider
-access class、placement、payload schema 和 Infra Discovery schema 均不改变。
+access class、placement 和 payload schema 均不改变。Consumer contract revision 与 Infra
+Discovery document version 独立；当前 publisher 已迁移到 `infra.discovery.registration@20260812.1`。
 
 不要把旧值静默按同名解释。尤其旧 `advanced` 是新 `expert`，而新 `advanced` 是 candidate.3
 新增的中间能力层。
 
 ## 不变的合同
 
-- Consumer base URL 仍由 `infra.discovery.registration@20260810.1` 发现；
+- Consumer base URL 由 `infra.discovery.registration@20260812.1` 发现；manifest 无 lease，连接失败
+  时重读 generation 与 offer；
 - binding 仍是 `infer-runtime.http-loopback`，endpoint 仍为 canonical numeric loopback origin；
 - HTTP 路径和顶层请求 envelope 不变；`model`、`infer.*` metadata 和 provenance 名称按下文替换；
 - 每个 App 继续使用原 managed bearer token，不需要创建、轮换或迁移 secret；
@@ -213,7 +215,7 @@ candidate.3：
 
 最小验收应覆盖：
 
-- candidate.3 Discovery 命中且 generation/lease 重发现正常；
+- candidate.3 Discovery 命中；连接失败会重读 registration，generation/offer 变化会触发重选；
 - 旧 Intent 和 `infer.quality_floor` 明确失败，而不是误路由；
 - `language.respond` 无 tools 时不产生 tool call；
 - `reasoning.solve` 的 capability floor 与 effort 分别生效；

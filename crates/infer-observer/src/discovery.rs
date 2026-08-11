@@ -3,26 +3,18 @@ use std::{
     env, fs,
     io::Write,
     path::{Path, PathBuf},
-    sync::Arc,
-    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
-use tokio::{task::JoinHandle, time::MissedTickBehavior};
-use tokio_util::sync::CancellationToken;
-use tracing::warn;
 use uuid::Uuid;
 
 use crate::{STATUS_PROTOCOL, STATUS_PROTOCOL_VERSION};
 
 pub const DISCOVERY_SCHEMA: &str = "infra.discovery.registration";
-pub const DISCOVERY_SCHEMA_VERSION: &str = "20260810.1";
+pub const DISCOVERY_SCHEMA_VERSION: &str = "20260812.1";
 pub const UNIX_SOCKET_BINDING: &str = "infra.local.unix-socket";
 pub const UNIX_SOCKET_OPAQUE_MAX_BYTES: usize = 16;
-pub const REGISTRATION_RENEW_INTERVAL: Duration = Duration::from_secs(15);
-pub const REGISTRATION_TTL: Duration = Duration::from_secs(45);
 
 const MAX_MANIFEST_BYTES: usize = 64 * 1024;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -88,13 +80,6 @@ pub struct DiscoveryService {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct DiscoveryLease {
-    pub renewed_at: String,
-    pub expires_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct DiscoveryOffer {
     pub protocol: String,
     pub protocol_versions: Vec<String>,
@@ -119,7 +104,6 @@ pub struct DiscoveryRegistration {
     pub schema: String,
     pub schema_version: String,
     pub service: DiscoveryService,
-    pub lease: DiscoveryLease,
     pub offers: Vec<DiscoveryOffer>,
 }
 
@@ -187,66 +171,28 @@ pub struct RegistrationSpec {
     pub offers: Vec<DiscoveryOffer>,
 }
 
-pub struct RegistrationLease {
+pub struct RegistrationPublication {
     path: PathBuf,
-    cancellation: CancellationToken,
-    task: Option<JoinHandle<()>>,
-    _authority: Arc<PublicationAuthority>,
+    _authority: PublicationAuthority,
 }
 
-impl RegistrationLease {
-    pub async fn start(spec: RegistrationSpec) -> Result<Self, DiscoveryError> {
-        Self::start_with_timing(spec, REGISTRATION_RENEW_INTERVAL, REGISTRATION_TTL).await
-    }
-
-    #[doc(hidden)]
-    pub async fn start_with_timing(
-        spec: RegistrationSpec,
-        renew_interval: Duration,
-        ttl: Duration,
-    ) -> Result<Self, DiscoveryError> {
-        validate_spec(&spec, ttl)?;
+impl RegistrationPublication {
+    /// Publishes one immutable declaration for this process generation.
+    ///
+    /// The caller must bind every advertised endpoint before calling this
+    /// function and retain the returned publication authority for as long as
+    /// it may serve the stable service identity. The stable manifest is left
+    /// in place when this value is dropped; a successor atomically replaces it.
+    pub fn publish(spec: RegistrationSpec) -> Result<Self, DiscoveryError> {
+        validate_spec(&spec)?;
         let path = spec.runtime.registrations.join(format!(
             "{}--{}.json",
             spec.service.kind, spec.service.instance_id
         ));
-        let authority = Arc::new(PublicationAuthority::acquire(
-            &spec.runtime.registrations,
-            &spec.service,
-        )?);
-        write_manifest(&path, &spec, ttl)?;
-
-        let spec = Arc::new(spec);
-        let cancellation = CancellationToken::new();
-        let task_cancellation = cancellation.clone();
-        let task_path = path.clone();
-        let task_generation = spec.service.generation.clone();
-        let task_authority = Arc::clone(&authority);
-        let task = tokio::spawn(async move {
-            let _authority = task_authority;
-            let mut interval = tokio::time::interval(renew_interval);
-            interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-            interval.tick().await;
-            loop {
-                tokio::select! {
-                    _ = task_cancellation.cancelled() => break,
-                    _ = interval.tick() => {
-                        if !still_owned_by(&task_path, &task_generation) {
-                            warn!(path = %task_path.display(), "discovery manifest generation changed; stopping renewals");
-                            break;
-                        }
-                        if let Err(error) = write_manifest(&task_path, &spec, ttl) {
-                            warn!(%error, "discovery registration lease renewal failed");
-                            break;
-                        }
-                    }
-                }
-            }
-        });
+        let authority = PublicationAuthority::acquire(&spec.runtime.registrations, &spec.service)?;
+        write_manifest(&path, &spec)?;
         Ok(Self {
             path,
-            cancellation,
-            task: Some(task),
             _authority: authority,
         })
     }
@@ -255,21 +201,8 @@ impl RegistrationLease {
         &self.path
     }
 
-    /// Stops all future manifest writes. The stable manifest is deliberately
-    /// left in place so consumers can let its lease expire naturally.
-    pub async fn shutdown(mut self) -> Result<(), DiscoveryError> {
-        self.cancellation.cancel();
-        if let Some(task) = self.task.take() {
-            let _ = task.await;
-        }
-        Ok(())
-    }
-}
-
-impl Drop for RegistrationLease {
-    fn drop(&mut self) {
-        self.cancellation.cancel();
-    }
+    /// Releases publication authority without changing the stable manifest.
+    pub fn shutdown(self) {}
 }
 
 struct PublicationAuthority {
@@ -353,7 +286,7 @@ pub fn unique_status_socket_endpoint(generation: &str) -> Result<String, Discove
     Ok(format!("sockets/ir-{}.sock", &random[..12]))
 }
 
-fn validate_spec(spec: &RegistrationSpec, ttl: Duration) -> Result<(), DiscoveryError> {
+fn validate_spec(spec: &RegistrationSpec) -> Result<(), DiscoveryError> {
     if !valid_service_kind(&spec.service.kind) {
         return Err(DiscoveryError::InvalidComponent(spec.service.kind.clone()));
     }
@@ -361,11 +294,6 @@ fn validate_spec(spec: &RegistrationSpec, ttl: Duration) -> Result<(), Discovery
         if !valid_file_token(value, 96) {
             return Err(DiscoveryError::InvalidComponent(value.clone()));
         }
-    }
-    if ttl.is_zero() || ttl > Duration::from_secs(120) {
-        return Err(DiscoveryError::InvalidOffer(
-            "lease TTL must be between 1 nanosecond and 120 seconds".into(),
-        ));
     }
     if spec.offers.is_empty() || spec.offers.len() > 64 {
         return Err(DiscoveryError::InvalidOffer(
@@ -459,31 +387,17 @@ fn valid_contract_version(value: &str) -> bool {
         })
 }
 
-fn manifest(spec: &RegistrationSpec, ttl: Duration) -> DiscoveryRegistration {
-    let renewed = OffsetDateTime::now_utc();
-    let expires = renewed + ttl;
+fn manifest(spec: &RegistrationSpec) -> DiscoveryRegistration {
     DiscoveryRegistration {
         schema: DISCOVERY_SCHEMA.into(),
         schema_version: DISCOVERY_SCHEMA_VERSION.into(),
         service: spec.service.clone(),
-        lease: DiscoveryLease {
-            renewed_at: renewed
-                .format(&Rfc3339)
-                .expect("registration renewal time is representable"),
-            expires_at: expires
-                .format(&Rfc3339)
-                .expect("registration expiry time is representable"),
-        },
         offers: spec.offers.clone(),
     }
 }
 
-fn write_manifest(
-    path: &Path,
-    spec: &RegistrationSpec,
-    ttl: Duration,
-) -> Result<(), DiscoveryError> {
-    let mut bytes = serde_json::to_vec_pretty(&manifest(spec, ttl))?;
+fn write_manifest(path: &Path, spec: &RegistrationSpec) -> Result<(), DiscoveryError> {
+    let mut bytes = serde_json::to_vec_pretty(&manifest(spec))?;
     bytes.push(b'\n');
     if bytes.len() > MAX_MANIFEST_BYTES {
         return Err(DiscoveryError::ManifestTooLarge(path.to_owned()));
@@ -577,6 +491,7 @@ fn validate_manifest_file(path: &Path) -> Result<(), DiscoveryError> {
     Ok(())
 }
 
+#[cfg(test)]
 fn read_manifest(path: &Path) -> Result<Option<DiscoveryRegistration>, DiscoveryError> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -601,13 +516,6 @@ fn read_manifest(path: &Path) -> Result<Option<DiscoveryRegistration>, Discovery
     serde_json::from_slice(&bytes)
         .map(Some)
         .map_err(|error| DiscoveryError::InvalidManifest(path.to_owned(), error.to_string()))
-}
-
-fn still_owned_by(path: &Path, generation: &str) -> bool {
-    read_manifest(path)
-        .ok()
-        .flatten()
-        .is_some_and(|manifest| manifest.service.generation == generation)
 }
 
 fn prepare_owned_directory(directory: &Path) -> Result<(), DiscoveryError> {
@@ -834,21 +742,15 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn manifest_is_canonical_atomic_owner_only_renewed_and_left_to_expire() {
+    #[test]
+    fn manifest_is_canonical_atomic_owner_only_published_once_and_retained() {
         let temporary = tempdir().unwrap();
         let runtime = DiscoveryRuntime::prepare(temporary.path().join("infra-protocol")).unwrap();
-        let lease = RegistrationLease::start_with_timing(
-            spec(runtime, "gen_first"),
-            Duration::from_millis(20),
-            Duration::from_millis(80),
-        )
-        .await
-        .unwrap();
-        let path = lease.path().to_owned();
+        let publication = RegistrationPublication::publish(spec(runtime, "gen_first")).unwrap();
+        let path = publication.path().to_owned();
         assert_eq!(path.file_name().unwrap(), "infer-runtime--local.json");
-        let initial = read_manifest(&path).unwrap().unwrap();
-        tokio::time::sleep(Duration::from_millis(55)).await;
+        let initial_bytes = fs::read(&path).unwrap();
+        std::thread::sleep(Duration::from_millis(55));
         let manifest = read_manifest(&path).unwrap().unwrap();
         assert_eq!(manifest.schema, DISCOVERY_SCHEMA);
         assert_eq!(manifest.schema_version, DISCOVERY_SCHEMA_VERSION);
@@ -858,9 +760,11 @@ mod tests {
         assert_eq!(manifest.offers[0].binding, UNIX_SOCKET_BINDING);
         assert!(manifest.offers[0].endpoint.starts_with("sockets/"));
         assert!(!Path::new(&manifest.offers[0].endpoint).is_absolute());
-        assert_ne!(initial.lease.renewed_at, manifest.lease.renewed_at);
+        assert_eq!(fs::read(&path).unwrap(), initial_bytes);
         let encoded = serde_json::to_value(&manifest).unwrap();
-        for legacy in ["process", "observer", "links", "security", "sequence"] {
+        for legacy in [
+            "lease", "process", "observer", "links", "security", "sequence",
+        ] {
             assert!(
                 encoded.get(legacy).is_none(),
                 "legacy field {legacy} leaked"
@@ -898,10 +802,10 @@ mod tests {
                 0o700
             );
         }
-        lease.shutdown().await.unwrap();
+        publication.shutdown();
         assert!(
             path.exists(),
-            "manifest must expire naturally, not be unlinked"
+            "stable manifest must be retained for atomic successor replacement"
         );
         assert!(fs::read_dir(path.parent().unwrap()).unwrap().all(|entry| {
             !entry
@@ -912,48 +816,36 @@ mod tests {
         }));
     }
 
-    #[tokio::test]
-    async fn exclusive_publisher_handoff_replaces_live_manifest_only_after_release() {
+    #[test]
+    fn exclusive_publisher_handoff_replaces_stable_manifest_only_after_release() {
         let temporary = tempdir().unwrap();
         let root = temporary.path().join("infra-protocol");
-        let first = RegistrationLease::start_with_timing(
-            spec(
-                DiscoveryRuntime::prepare(root.clone()).unwrap(),
-                "gen_first",
-            ),
-            Duration::from_secs(60),
-            Duration::from_secs(120),
-        )
-        .await
+        let first = RegistrationPublication::publish(spec(
+            DiscoveryRuntime::prepare(root.clone()).unwrap(),
+            "gen_first",
+        ))
         .unwrap();
-        let denied = RegistrationLease::start_with_timing(
-            spec(
-                DiscoveryRuntime::prepare(root.clone()).unwrap(),
-                "gen_second",
-            ),
-            Duration::from_secs(60),
-            Duration::from_secs(120),
-        )
-        .await;
+        let denied = RegistrationPublication::publish(spec(
+            DiscoveryRuntime::prepare(root.clone()).unwrap(),
+            "gen_second",
+        ));
         assert!(matches!(
             denied,
             Err(DiscoveryError::PublicationAuthorityHeld(_))
         ));
 
         let path = first.path().to_owned();
-        first.shutdown().await.unwrap();
-        let second = RegistrationLease::start_with_timing(
-            spec(DiscoveryRuntime::prepare(root).unwrap(), "gen_second"),
-            Duration::from_secs(60),
-            Duration::from_secs(120),
-        )
-        .await
+        first.shutdown();
+        let second = RegistrationPublication::publish(spec(
+            DiscoveryRuntime::prepare(root).unwrap(),
+            "gen_second",
+        ))
         .unwrap();
         assert_eq!(
             read_manifest(&path).unwrap().unwrap().service.generation,
             "gen_second"
         );
-        second.shutdown().await.unwrap();
+        second.shutdown();
     }
 
     #[cfg(unix)]
@@ -1056,11 +948,15 @@ mod tests {
     fn registration_rejects_unknown_fields_and_invalid_relative_endpoint() {
         let json = r#"{
             "schema":"infra.discovery.registration",
-            "schema_version":"20260810.1",
+            "schema_version":"20260812.1",
             "service":{"kind":"infer-runtime","instance_id":"local","generation":"gen_a"},
             "lease":{"renewed_at":"2026-08-10T00:00:00Z","expires_at":"2026-08-10T00:00:45Z"},
-            "offers":[],
-            "legacy":true
+            "offers":[{
+                "protocol":"infer-runtime.status",
+                "protocol_versions":["20260810.1"],
+                "binding":"infra.local.unix-socket",
+                "endpoint":"sockets/ir-test.sock"
+            }]
         }"#;
         assert!(serde_json::from_str::<DiscoveryRegistration>(json).is_err());
 

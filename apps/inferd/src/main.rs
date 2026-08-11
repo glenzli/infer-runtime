@@ -12,7 +12,7 @@ use clap::Parser;
 use infer_control::Runtime;
 use infer_core::RuntimeConfig;
 use infer_observer::{
-    DiscoveryOffer, DiscoveryRuntime, DiscoveryService, RegistrationLease, RegistrationSpec,
+    DiscoveryOffer, DiscoveryRuntime, DiscoveryService, RegistrationPublication, RegistrationSpec,
     SnapshotProvider, UnixJsonObserverServer, consumer_http_offer,
 };
 use sha2::{Digest, Sha256};
@@ -109,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .await
         .context("start infer-runtime.status Unix socket")?;
-        let registration = RegistrationLease::start(RegistrationSpec {
+        let registration = RegistrationPublication::publish(RegistrationSpec {
             runtime: discovery_runtime,
             service: DiscoveryService::from(&identity.service),
             offers: vec![
@@ -118,8 +118,7 @@ async fn main() -> anyhow::Result<()> {
                     .context("build Infer Runtime Consumer discovery offer")?,
             ],
         })
-        .await
-        .context("start Infra Discovery registration lease")?;
+        .context("publish Infra Discovery registration")?;
         (Some(observer_socket), Some(registration))
     } else {
         (None, None)
@@ -133,10 +132,7 @@ async fn main() -> anyhow::Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await;
     if let Some(registration) = registration {
-        registration
-            .shutdown()
-            .await
-            .context("stop Infra Discovery registration lease")?;
+        registration.shutdown();
     }
     if let Some(observer_socket) = observer_socket {
         observer_socket
