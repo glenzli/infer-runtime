@@ -64,6 +64,7 @@ pub(crate) struct LogLine {
 impl LogLine {
     fn new(source: LogSource, text: impl Into<String>) -> Self {
         let text = text.into();
+        let text = strip_ansi_control_sequences(&text);
         Self {
             recorded_at_unix_ms: unix_ms(),
             level: classify_level(source, &text),
@@ -75,6 +76,64 @@ impl LogLine {
     pub(crate) fn console_audit(text: impl Into<String>) -> Self {
         Self::new(LogSource::System, text)
     }
+}
+
+/// Remove terminal-only CSI and OSC sequences before logs enter a UI buffer.
+///
+/// `inferd` and provider tools may emit colored output even when stdout is a
+/// pipe. The browser Console must receive plain text, and must never turn OSC
+/// hyperlinks or other terminal controls into an implicit rendering surface.
+fn strip_ansi_control_sequences(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut plain = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes[index] != 0x1b {
+            plain.push(bytes[index]);
+            index += 1;
+            continue;
+        }
+
+        index += 1;
+        let Some(next) = bytes.get(index).copied() else {
+            break;
+        };
+        match next {
+            b'[' => {
+                // Control Sequence Introducer: parameters/intermediates end at
+                // the first final byte in 0x40..=0x7e (SGR ends with `m`).
+                index += 1;
+                while let Some(byte) = bytes.get(index).copied() {
+                    index += 1;
+                    if (0x40..=0x7e).contains(&byte) {
+                        break;
+                    }
+                }
+            }
+            b']' => {
+                // Operating System Command: consume through BEL or ST. This
+                // includes terminal hyperlink sequences.
+                index += 1;
+                while let Some(byte) = bytes.get(index).copied() {
+                    index += 1;
+                    if byte == 0x07 {
+                        break;
+                    }
+                    if byte == 0x1b && bytes.get(index) == Some(&b'\\') {
+                        index += 1;
+                        break;
+                    }
+                }
+            }
+            _ => {
+                // Other ESC sequences are two-byte terminal controls.
+                index += 1;
+            }
+        }
+    }
+
+    String::from_utf8(plain).expect("stripping ASCII controls preserves UTF-8")
 }
 
 pub(crate) struct DaemonSupervisor {
@@ -342,7 +401,10 @@ mod tests {
 
     use tokio::sync::mpsc;
 
-    use super::{LogLevel, LogLine, LogSource, classify_level, resolve_daemon_binary, try_log};
+    use super::{
+        LogLevel, LogLine, LogSource, classify_level, resolve_daemon_binary,
+        strip_ansi_control_sequences, try_log,
+    };
 
     #[test]
     fn daemon_resolution_always_produces_a_nonempty_path() {
@@ -366,6 +428,28 @@ mod tests {
         assert_eq!(
             classify_level(LogSource::Stderr, "request failed"),
             LogLevel::Error
+        );
+    }
+
+    #[test]
+    fn console_log_lines_strip_terminal_styles_before_classification() {
+        let line = LogLine::new(
+            LogSource::Stdout,
+            "\u{1b}[2m2026-08-11T16:28:34Z\u{1b}[0m \u{1b}[31mERROR\u{1b}[0m 请求失败",
+        );
+
+        assert_eq!(line.level, LogLevel::Error);
+        assert_eq!(line.text, "2026-08-11T16:28:34Z ERROR 请求失败");
+        assert!(!line.text.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn console_log_lines_remove_terminal_hyperlinks() {
+        assert_eq!(
+            strip_ansi_control_sequences(
+                "\u{1b}]8;;https://example.invalid\u{7}documentation\u{1b}]8;;\u{1b}\\",
+            ),
+            "documentation"
         );
     }
 
