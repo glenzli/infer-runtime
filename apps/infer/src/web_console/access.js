@@ -12,7 +12,7 @@
       placement: ["local_only"],
       prefer: ["local"],
       offline: true,
-      quality_floor: ["basic", "general", "advanced"],
+      capability_floor: ["foundational", "capable", "advanced", "expert"],
       latency: ["interactive", "balanced", "throughput"],
       fallback: ["none"],
       maxCost: 0,
@@ -24,21 +24,21 @@
       placement: ["local_only", "private", "anywhere"],
       prefer: ["local", "cloud"],
       offline: true,
-      quality_floor: ["basic", "general", "advanced"],
+      capability_floor: ["foundational", "capable", "advanced", "expert"],
       latency: ["interactive", "balanced", "throughput"],
       fallback: ["none", "equivalent"],
       maxCost: 1,
     },
     hybrid: {
       defaultPolicy: "balanced",
-      policies: ["balanced", "local-first", "quality-first", "latency-first", "cost-first"],
+      policies: ["balanced", "local-first", "capability-first", "latency-first", "cost-first"],
       priority: ["interactive", "normal", "background"],
       placement: ["local_only", "private", "anywhere", "cloud_only"],
       prefer: ["local", "trusted_node", "cloud"],
       offline: true,
-      quality_floor: ["basic", "general", "advanced", "frontier"],
+      capability_floor: ["foundational", "capable", "advanced", "expert", "exceptional"],
       latency: ["interactive", "balanced", "throughput"],
-      fallback: ["none", "equivalent", "allow_lower_quality"],
+      fallback: ["none", "equivalent", "allow_lower_capability"],
       maxCost: 5,
     },
   };
@@ -93,6 +93,9 @@
     const providerAccess = app.allowed_provider_access_classes?.length
       ? app.allowed_provider_access_classes.join(", ")
       : "standard";
+    const builtinTools = app.allowed_builtin_tools?.length
+      ? app.allowed_builtin_tools.join(", ")
+      : "禁止 Hosted tools";
     const cloudInputs = app.allowed_cloud_input_modalities?.length
       ? app.allowed_cloud_input_modalities.join(", ")
       : "禁止向云端发送 payload";
@@ -120,6 +123,7 @@
       </dl>
       <div class="access-policy"><span>Allowed intents</span><code>${escapeHtml(intents)}</code></div>
       <div class="access-policy"><span>Provider access</span><code>${escapeHtml(providerAccess)}</code></div>
+      <div class="access-policy"><span>Hosted tools</span><code>${escapeHtml(builtinTools)}</code></div>
       <div class="access-policy"><span>Cloud input egress</span><code>${escapeHtml(cloudInputs)}</code></div>
       <div class="access-policy"><span>Allowed policies</span><code>${escapeHtml(policy)}</code></div>
       <div class="access-policy"><span>Request constraints</span><code>${escapeHtml(permission)}</code></div>
@@ -130,7 +134,7 @@
   function summarizePermission(overrides) {
     const parts = [];
     if (overrides.placement?.length) parts.push(`placement: ${overrides.placement.join("/")}`);
-    if (overrides.quality_floor?.length) parts.push(`quality: ${overrides.quality_floor.join("/")}`);
+    if (overrides.capability_floor?.length) parts.push(`capability: ${overrides.capability_floor.join("/")}`);
     if (overrides.fallback?.length) parts.push(`fallback: ${overrides.fallback.join("/")}`);
     if (overrides.offline_required) parts.push("offline_required");
     const maxCost = overrides.max_cost_usd?.max;
@@ -149,6 +153,7 @@
     document.getElementById("access-max-pending").value = "16";
     document.getElementById("access-preset").value = "local-private";
     document.getElementById("access-subscription-providers").checked = false;
+    document.getElementById("access-web-search").checked = false;
     document.getElementById("access-cloud-images").checked = false;
     renderIntentOptions();
     setPermission("intents", []);
@@ -171,13 +176,15 @@
     document.getElementById("access-default-policy").value = app.default_policy || "balanced";
     setPermission("intents", app.allowed_intents ?? state.intents);
     setPermission("policies", app.allowed_policies || []);
-    for (const name of ["priority", "placement", "prefer", "quality_floor", "latency", "fallback"]) {
+    for (const name of ["priority", "placement", "prefer", "capability_floor", "latency", "fallback"]) {
       setPermission(name, app.request_overrides?.[name] || []);
     }
     document.getElementById("access-offline").checked = Boolean(app.request_overrides?.offline_required);
     document.getElementById("access-max-cost").value = String(app.request_overrides?.max_cost_usd?.max ?? 0);
     document.getElementById("access-subscription-providers").checked =
       app.allowed_provider_access_classes?.includes("subscription") || false;
+    document.getElementById("access-web-search").checked =
+      app.allowed_builtin_tools?.includes("web_search") || false;
     document.getElementById("access-cloud-images").checked =
       app.allowed_cloud_input_modalities?.includes("image") || false;
     document.getElementById("access-preset").value = "custom";
@@ -189,12 +196,13 @@
     if (!preset) return;
     document.getElementById("access-default-policy").value = preset.defaultPolicy;
     setPermission("policies", preset.policies);
-    for (const permission of ["priority", "placement", "prefer", "quality_floor", "latency", "fallback"]) {
+    for (const permission of ["priority", "placement", "prefer", "capability_floor", "latency", "fallback"]) {
       setPermission(permission, preset[permission]);
     }
     document.getElementById("access-offline").checked = preset.offline;
     document.getElementById("access-max-cost").value = String(preset.maxCost);
     document.getElementById("access-subscription-providers").checked = false;
+    document.getElementById("access-web-search").checked = false;
     document.getElementById("access-cloud-images").checked = false;
   }
 
@@ -230,6 +238,9 @@
       allowed_provider_access_classes: document.getElementById("access-subscription-providers").checked
         ? ["standard", "subscription"]
         : ["standard"],
+      allowed_builtin_tools: document.getElementById("access-web-search").checked
+        ? ["web_search"]
+        : [],
       allowed_cloud_input_modalities: document.getElementById("access-cloud-images").checked
         ? ["text", "image"]
         : ["text"],
@@ -241,7 +252,7 @@
         placement: permissionValues("placement"),
         prefer: permissionValues("prefer"),
         offline_required: document.getElementById("access-offline").checked,
-        quality_floor: permissionValues("quality_floor"),
+        capability_floor: permissionValues("capability_floor"),
         latency: permissionValues("latency"),
         max_cost_usd: { min: 0, max: maxCost },
         fallback: permissionValues("fallback"),
@@ -328,10 +339,14 @@
   providerAccessControl.className = "field field-checkbox";
   providerAccessControl.innerHTML = '<input id="access-subscription-providers" type="checkbox"><span>允许使用订阅式云模型（Codex 等）</span>';
   document.getElementById("access-offline").closest(".form-grid").prepend(providerAccessControl);
+  const webSearchControl = document.createElement("label");
+  webSearchControl.className = "field field-checkbox";
+  webSearchControl.innerHTML = '<input id="access-web-search" type="checkbox"><span>允许 Hosted Web Search（独立于模型权限）</span>';
+  providerAccessControl.after(webSearchControl);
   const cloudImageControl = document.createElement("label");
   cloudImageControl.className = "field field-checkbox";
   cloudImageControl.innerHTML = '<input id="access-cloud-images" type="checkbox"><span>允许图片发送到云端推理</span>';
-  providerAccessControl.after(cloudImageControl);
+  webSearchControl.after(cloudImageControl);
 
   document.getElementById("access-create").addEventListener("click", openCreate);
   document.getElementById("access-dialog-close").addEventListener("click", () => document.getElementById("access-dialog").close());

@@ -2,7 +2,7 @@
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | M1、M2 已完成，M3 核心闭环完成，M4 退出门槛完成；`0.1.0-candidate.1` 已冻结，当前 `0.1.0-candidate.2` 供外部反馈并继续收口 observability/24h soak/真实 consumer 门槛；M6 的 ONNX foundation、同步人脸、SigLIP 图文向量与 QwenVL typed understanding 已作为发布外 experimental slices 落地，不扩大 v0.1 |
+| 状态 | M1、M2 已完成，M3 核心闭环完成，M4 退出门槛完成；`candidate.1`、`candidate.2` 已冻结，当前 `0.1.0-candidate.3` 以显式 migration 收敛 Intent/capability taxonomy，随后继续 observability/24h soak/真实 consumer 门槛；M6 的 ONNX foundation、同步人脸、SigLIP 图文向量与 QwenVL typed understanding 已作为发布外 experimental slices 落地，不扩大 v0.1 |
 | 规划方式 | 以可演示的纵向能力和退出门槛推进，不以日期代替完成定义 |
 | 首个发布目标 | 单机文本 + 本地文件音频推理控制平面 MVP |
 
@@ -11,7 +11,7 @@
 - 每个阶段都形成可运行、可测试的闭环；
 - 先证明 Job 生命周期和调度正确，再增加 provider 数量；
 - 先用 fake provider 覆盖失败语义，再连接真实付费服务；
-- 任何阶段不得绕过 placement/data policy、quality floor、budget 和 cancellation 不变量；
+- 任何阶段不得绕过 placement/data policy、capability floor、budget 和 cancellation 不变量；
 - 远程节点和剩余多模态在基础 MVP 稳定后进入；已有本地权重驱动文件音频协议族提前形成纵向切片；
 - 新 consumer/provider 提案可以提前完成架构评审，但不得借规划扩大或推迟当前 v0.1；
 - milestone 只有在退出门槛全部满足时结束。
@@ -47,7 +47,8 @@ DINO/SigLIP、视觉 background 或 M5 capacity schema 任一出现时，两条�
 避免形成两套 Node 资源模型。
 
 M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer 基础设施需求提前落地，
-提供 text/image 输入与文本 unary/SSE，但保持无工具、无会话；它不能延后当前稳定性收口，也不
+提供 text/image 输入、文本 unary/SSE 与独立授权的 hosted Web Search 子集，但保持无宿主机工具、
+无会话；它不能延后当前稳定性收口，也不
 把 Runtime 扩张成 Agent 平台。
 
 ## 3. M0：工程基线
@@ -60,7 +61,7 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
 
 - 已完成：Git 仓库、Cargo workspace、领域合同、Responses compatibility profile、fake provider、配置和本地 daemon/CLI 基线；
 - 已完成：严格 lint、workspace 测试、本机 loopback API 冒烟，以及 CLI fixture → Ollama 的一次真实 Responses 调用；
-- 已完成：`0.1.0-candidate.1` 冻结基线及 additive `0.1.0-candidate.2` OpenAPI、golden fixtures、运行时 contract manifest、严格 JSON/multipart/query/config 失败纪律和 route-level contract tests；
+- 已完成：`candidate.1` 冻结基线、additive `candidate.2` 及 breaking `candidate.3` OpenAPI、golden fixtures、运行时 contract manifest、严格 JSON/multipart/query/config 失败纪律、route-level contract tests 与 candidate.2→candidate.3 migration；
 - 待完成：CI 和自动化端到端 acceptance scenario。
 
 ### 工作包
@@ -90,7 +91,7 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
 ### 当前进度
 
 - 已完成：Intent 解析、按 workload 的 Model Profile/Build/Deployment registry、无状态 Responses 请求验证、Ollama adapter、有界优先队列、deadline、Job 状态、取消、控制面查询/取消/解释/metrics；
-- 已完成：Intent 不泄漏为物理模型名、质量下限与 placement 正交过滤、应用别名拒绝、`infer.*` metadata 不转发上游、SSE 身份归一化测试；
+- 已完成：Intent 不泄漏为物理模型名、能力下限与 placement 正交过滤、应用别名拒绝、`infer.*` metadata 不转发上游、SSE 身份归一化测试；
 - 已完成：独立音频核心契约、25 MiB 有界 multipart、常驻且单模型驻留的 MLX worker、音频 CLI，以及 ASR/强制对齐/三种 TTS build 的受控端到端验证；
 - 待完成：取消对真实慢流的自动化测试，以及 M0 的 CI 和完整 acceptance scenario。
 
@@ -99,7 +100,7 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
 - `InferenceJob`、`Attempt` 和状态机；
 - Responses-compatible submit/stream 与控制 API get/cancel；
 - 有界 FIFO 队列和单 provider concurrency；
-- 文本 Responses Intents，以及 `audio.transcribe`、`audio.align`、`speech.synthesize`、`speech.voice_design`、`speech.voice_clone` 文件音频 Intents；
+- 文本 Responses Intents，以及 `audio.transcribe`、`audio.align`、`speech.synthesize`、`speech.design_voice`、`speech.clone_voice` 文件音频 Intents；
 - 静态 registry、共享 Responses adapter 与 Ollama capability profile；
 - Job Coordinator 和 provider error normalization；
 - CLI：`status`、`jobs`、`models/deployments`；
@@ -130,15 +131,15 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
 - 已完成（第一段）：DeepSeek V4 Flash cloud Responses provider、云端 Provider/Build/Deployment 注册，以及本地/云端的能力分层和 placement 约束；V4 Pro 等其官方 Responses 支持后再激活；
 - 已完成（第二段）：policy-ordered Candidate Plan、稳定 hard-constraint reason codes、Job 固化的 routing explain，以及 auth/429/timeout/unavailable/invalid-request/protocol 的 provider 错误归类；
 - 已完成（第三段）：独立的 in-memory provider health owner；连续三次可恢复上游失败后打开 30 秒 circuit，路由计划以 `provider_circuit_open` 明确排除该 provider，成功调用清除该状态；
-- 已完成（第四段）：Job Attempt 链、非流式最多 3 次 Attempt、同候选最多重试 1 次、受 admission Candidate Plan 约束的 equivalent/allow-lower-quality fallback，以及流式可见输出后禁止切换 provider；
+- 已完成（第四段）：Job Attempt 链、非流式最多 3 次 Attempt、同候选最多重试 1 次、受 admission Candidate Plan 约束的 `equivalent`/`allow_lower_capability` fallback，以及流式可见输出后禁止切换 provider；
 - 已完成（第五段）：Provider instance 的 versioned capability profile；请求字段按实际所需 endpoint/model capability 参与 Candidate Plan；显式 `POST /infer/v1/providers/{provider_id}/probe` 逐项验证配置声明，并返回结构化报告；
 - 已完成（第六段）：三档优先级、aging 和 `max_pending_jobs` per-App admission 上限；已验证持续 interactive 负载下 aged background 会先于较新的 interactive ticket 获得释放的 slot；
 - 已完成（第七段）：Responses provider contract matrix 覆盖基础执行、instructions、SSE、tools、reasoning effort、sampling、truncation、metadata，以及失败后停止后续探测。
 
 ### 退出门槛
 
-- 同一 Intent Job 可按 quality floor、placement、reasoning effort 和获准 request override 在本机和云候选间选择；可信节点的实际执行面属于 M5；
-- `balanced`、`local-first`、`quality-first`、`latency-first`、`cost-first` 模板可配置，并能解释生效层级；
+- 同一 Intent Job 可按 capability floor、placement、reasoning effort 和获准 request override 在本机和云候选间选择；可信节点的实际执行面属于 M5；
+- `balanced`、`local-first`、`capability-first`、`latency-first`、`cost-first` 模板可配置，并能解释生效层级；
 - `local_only` 失败场景证明没有任何云请求；
 - 首个可见输出后失败不会静默拼接另一模型输出；
 - background 在持续 interactive 负载下最终获得执行机会；
@@ -177,7 +178,7 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
 
 ### 当前反馈阶段
 
-- 已冻结 `0.1.0-candidate.1` consumer route/schema/error 合同；candidate.2 以 additive 字段/路由扩展并继续把 operator resource/provider 管理面明确留在 experimental；
+- 已冻结 candidate.1/candidate.2 consumer route/schema/error 合同；candidate.3 以 migration 替换 Intent/capability 词汇，并继续把 operator resource/provider 管理面明确留在 experimental；
 - 已完成本地浏览器 `infer console` 接入期管理面：可 attach 或会话内启停 daemon，异步投影
   Jobs/provider（含 MLX audio）/resources，提供滚动 Statistics、可过滤/搜索日志、Job explain/
   cancel、显式 lifecycle load/unload/probe/refresh 和严格配置校验/原子保存；runtime credential
@@ -347,12 +348,12 @@ tolerance 仍不得借用本次关闭结果提前进入生产承诺。
    覆盖合同，不以真实权重作为 CI 前置；
 2. **首个 Shadow 视觉 slice**：YuNet `vision.detect_faces` 已完成；
 3. **后续 ONNX slices**：SFace `vision.embed_face` 与 SigLIP
-   `vision.embed_image` + `vision.embed_text` 已分别按 Build/space/privacy 门槛完成；
+   `semantic.embed_image` + `semantic.embed_text` 已分别按 Build/space/privacy 门槛完成；
    DINO 或受控 vocabulary classification/tagging 仍须重新验证；
 4. **QwenVL 结构化理解**：`vision.describe_image` 返回有界短描述与关键词 proposal，
-   `vision.review_classification` 只在 Consumer 提供的闭集内返回 `matched|none|uncertain`；
-   两者均不泄漏 Ollama chat schema。4B 是 basic/standard bulk 候选，8B 是 general/heavy
-   明确复核候选；Consumer 以 quality floor 选择能力下限，不绑定物理 tag。首版保持同步，
+   `vision.classify_closed_set` 只在 Consumer 提供的闭集内返回 `matched|none|uncertain`；
+   两者均不泄漏 Ollama chat schema。4B 是 foundational/standard bulk 候选，8B 是 capable/heavy
+   明确复核候选；Consumer 以 capability floor 选择能力下限，不绑定物理 tag。首版保持同步，
    可以使用 background priority，但不开放视觉 durable；
 5. **实时 ASR/TTS**：PCM TTS server-stream 与 commit-redecode ASR duplex experimental slice
    已完成；下一门槛是真实 Consumer 的慢读/断开 soak、长会话内存与延迟曲线，以及原生增量 ASR
@@ -385,16 +386,16 @@ SLO 和至少一个真实应用集成。不能只新增 Intent 枚举或共享 S
 - SFace CPU Session load/inventory/unload、官方五点相似对齐、128 维 L2 归一化与完整
   HTTP/鉴权/ACL/Job/Attempt 链路已通过；向量只出现在同步响应，不进入 Job metadata；
 - SigLIP 2 exact checkpoint/export/image graph/text graph/tokenizer 已形成内容寻址 Builds；
-  `vision.embed_image`/`vision.embed_text` 返回同一 768d L2 space，中文文本与 Shadow managed
+  `semantic.embed_image`/`semantic.embed_text` 返回同一 768d L2 space，中文文本与 Shadow managed
   credential 的真实 HTTP/ACL/Job/Attempt E2E 已通过；图片、查询与向量不进入 Job metadata；
 - release CPU 实测 image/text warm 约 100/33 ms，两 Session 合计约 1.9 GiB RSS，均标记
   `heavy`；当前 graph 的 Core ML 失败探测过慢，因此 immutable Builds 固定 CPU-only；
-- QwenVL 两条 typed route 已完成 strict multipart、闭集输出仲裁、4B/8B quality routing、
+- QwenVL 两条 typed route 已完成 strict multipart、闭集输出仲裁、4B/8B capability routing、
   local-only/offline/no-fallback 强制约束和 payload-free Job metadata；provider adapter 使用
   Ollama native vision transport，但 Consumer 不接触其 chat schema；真实 Shadow credential
-  HTTP E2E 已通过：4B basic 描述约 32.5 秒（load 2.8 秒）、8B general 描述约 51.0 秒
+  HTTP E2E 已通过：4B foundational 描述约 32.5 秒（load 2.8 秒）、8B capable 描述约 51.0 秒
   （load 6.2 秒）、warm 8B 闭集复核约 9.4 秒；本机 8B 实际驻留约 7.81 GB。数值只作为
-  当前 Build/机器的 admission 与 SLO 起点，不提升 provisional 质量评级；
+  当前 Build/机器的 admission 与 SLO 起点，不提升 provisional 能力评级；
 - Core ML 使用严格“不得暗中借 CPU”建 Session；两份当前 Build 均明确拒绝严格 Core ML，配置
   允许时重新建立纯 CPU Session并披露 requested/actual EP 与稳定 fallback reason；
 - experimental schema 尚未提升为冻结 Consumer contract；真实 Consumer feedback 与跨平台
@@ -404,7 +405,7 @@ SLO 和至少一个真实应用集成。不能只新增 Intent 枚举或共享 S
 
 Shape 已冻结生成式多输入图片编辑需求，但当前 Runtime 没有任何已验证的 raster-output
 Provider/Build/Deployment，因此本工作包只登记依赖，不创建 Intent、route、ACL 或 mock executor。
-实现时必须按 D-111 additive 发布 `0.1.0-candidate.3` 与
+实现时必须按 D-111 additive 发布 `0.1.0-candidate.4` 或更高 revision 与
 `infer.image.edit@20260811.1`，使用独立 `POST /v1/images/edits` strict multipart 数据面；不能
 复用只返回文本的 `/v1/responses` 或 QwenVL understanding route。
 
@@ -439,33 +440,30 @@ Deployment。
 
 ## 10. M7：订阅式推理桥接
 
-> 当前状态：Codex App Server execution slice 已实现；Antigravity 已完成动态 inventory、静态
-> Gemini 3.6 Flash effort-variant 准入与 unary text bridge。它复用当前用户真实 CLI 会话，仍是
-> experimental，且尚未开放给任何普通 Consumer。
+> 当前状态：Codex App Server execution slice 已实现，并增加标准 Responses hosted Web Search 的
+> 有界子集与独立 App ACL。
+> Web Search 当前以 candidate.3 的有界标准 Responses tool 形状发布；Provider 执行仍是
+> experimental，Intent、subscription access 与 hosted-tool ACL 三道授权保持独立。
 
 ### 已完成的纵切
 
 - `codex-subscription` 是一个 cloud/subscription Provider，共享一套 scheduler/concurrency pool；
 - `model/list` 动态发现模型组，但只有 Sol、Terra、Luna 的静态 Build/Deployment 可路由；
-- Luna 作为 `assistant.general` general 候选，Terra 作为 assistant/deep advanced 候选，Sol
-  只作为 `reasoning.deep` frontier 候选；评级均为 provisional；
-- public surface 支持 text/image、non-streaming 或 Responses SSE、instructions 与
-  `reasoning.effort`；不支持 tools、sampling、`max_output_tokens`、metadata passthrough、
-  conversation 或 durable background；
+- Luna 作为 `language.respond`/`multimodal.respond`/`reasoning.solve` advanced 候选，Terra 作为
+  language/reasoning expert 候选，Sol 作为 `reasoning.solve` exceptional、multimodal expert 候选；
+  评级均为 provisional；
+- public surface 支持 text/image、non-streaming 或 Responses SSE、instructions、
+  `reasoning.effort`，以及标准 `web_search + tool_choice` 的有界子集；仍不支持 function tool
+  执行、sampling、`max_output_tokens`、metadata passthrough、conversation 或 durable background；
 - image data URL 会有界校验并写入 ephemeral workspace；HTTPS image 保持 URL input，本地路径
   不进入公共合同；调用前还会复核动态 catalog 的 `inputModalities`；
 - App 默认只有 `standard` access class；`subscription` 必须显式授权；图片进入 cloud 还要求
   独立 `allowed_cloud_input_modalities=image`，两类拒绝分别使用稳定 reason code；
+- hosted Web Search 还要求独立 `allowed_builtin_tools=web_search`；Intent、subscription access
+  class 与 Provider capability 都不能隐式授予。非 Web Attempt 强制 disabled，获准请求才按
+  `external_web_access` 选择 cached/live，`required` 还必须观察到完成的 `webSearch` item；
 - 受控订阅环境的 `model/list` 与一次低投入调用已通过；fake App Server 覆盖 catalog、usage
-  normalization 和无工具完成链路。
-- `antigravity-subscription` 作为第二个 cloud/subscription Provider 已接入动态 `agy models`
-  inventory；Runtime 不读取或投影 token，而由 `agy` 复用真实 HOME/Keychain 登录会话；
-- Consumer 文本与显式诊断仅存在 owner-only ephemeral workspace，prompt 不进入 argv；首版只接受
-  无工具、无 conversation、无 durable、text-in/text-out 的 unary Responses 子集；
-- Gemini 3.6 Flash low/medium/high 物理 slug 分别映射 Low、None/Medium、High effort；静态
-  Build/Deployment 不会因 inventory 新增模型而自动扩张；
-- CLI 自身仍可能维护账号级状态或 history，因此 Provider 保持 experimental、cloud/subscription，
-  不适用于 local-only/offline/sensitive workload，现有 App ACL 未自动扩展。
+  normalization、Web Search action normalization、required postcondition 和越权 item fail-closed。
 
 ### 后续工作包
 
@@ -478,18 +476,16 @@ Deployment。
 4. **图片输入 soak**：已实现有界输入和独立 cloud modality ACL；继续验证真实 Consumer、URL
    取图失败分类、图片域限制与订阅额度行为；
 5. **模型准入自动审计**：catalog drift 只产生告警，新增/升级模型必须显式评测和配置变更；
-6. **Antigravity soak**：受信任用户会话、无 argv prompt、ephemeral request workspace 与 effort
-   variant 映射已经冻结；继续验证 inventory absence、取消/迟到结果、quota/rate-limit、退出码分类、
-   CLI history 行为和真实 Consumer ACL，证据稳定后再从 experimental 晋级；
-7. **Antigravity streaming/image**：真实签入环境先冻结 append-only delta 与 headless attachment
-   wire，再决定是否声明 server_stream/image；在此之前不得因底层模型能力推断 Runtime 能力；
-8. **第三种 bridge**：只有 Claude 等第三协议出现且重复模式成立后才提取更多共性；仍不抽象通用
+6. **Web Search soak**：用真实低风险请求验证 cached/live、SSE、取消、上游 quota/error 与
+   `web_search_call` 输出；App Server 提供稳定 citation DTO 前不伪造 URL annotation；
+7. **第二种 bridge**：只有 Claude 等第二协议出现且重复模式成立后才提取更多共性；仍不抽象通用
    CLI DSL。
 
 ### 退出门槛
 
 - 一个 Provider 多 Deployment 的 discovery/admission/absence/upgrade 行为有合同测试；
-- tool/file/network side effect 对标准推理 surface 为零，任何非推理 item 都 fail closed；
+- 未授权 tool/file/network side effect 对标准推理 surface 为零，获准 Web Search 只产生标准
+  `web_search_call`，任何其他非推理 item 都 fail closed；
 - subscription entitlement 在 App、fallback、retry 和 explain 中不可绕过；
 - cancellation、deadline、quota exhaustion、进程 crash 和 malformed JSON-RPC 有唯一终态；
 - 至少一个真实 Consumer 经过持续反馈后，才把所需字段从 experimental 提升为 stable。

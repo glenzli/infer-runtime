@@ -31,6 +31,10 @@ pub struct ResponsesRequest {
     pub metadata: BTreeMap<String, String>,
     #[serde(default)]
     pub tools: Vec<Value>,
+    /// Standard Responses tool selection for the explicitly supported string
+    /// forms. Object-form named tool selection is not part of candidate.3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<ToolChoice>,
     #[serde(default)]
     pub reasoning: Option<ReasoningConfig>,
     #[serde(default)]
@@ -82,6 +86,7 @@ impl ResponsesRequest {
                 "stream=true with background=true",
             ));
         }
+        self.validate_tools()?;
         let image_generation = self.requests_image_generation();
         if self.model == IMAGE_GENERATION_INTENT && !image_generation {
             return Err(ContractError::UnsupportedField(
@@ -94,6 +99,11 @@ impl ResponsesRequest {
             ));
         }
         if image_generation {
+            if self.effective_tool_choice() == ToolChoice::None {
+                return Err(ContractError::UnsupportedField(
+                    "tool_choice=none with image_generation",
+                ));
+            }
             if self.stream {
                 return Err(ContractError::UnsupportedField(
                     "stream=true with image_generation",
@@ -111,6 +121,49 @@ impl ResponsesRequest {
             }
         }
         RequestConstraints::from_metadata(&self.metadata).map(|_| ())
+    }
+
+    fn validate_tools(&self) -> Result<(), ContractError> {
+        if self.tools.is_empty() {
+            if self.tool_choice.is_some() {
+                return Err(ContractError::UnsupportedField("tool_choice without tools"));
+            }
+            return Ok(());
+        }
+
+        let web_search_tools = self
+            .tools
+            .iter()
+            .filter(|tool| tool.get("type").and_then(Value::as_str) == Some("web_search"))
+            .collect::<Vec<_>>();
+        if web_search_tools.is_empty() {
+            return Ok(());
+        }
+        if self.tools.len() != 1 {
+            return Err(ContractError::UnsupportedField(
+                "web_search mixed with another tool",
+            ));
+        }
+        let object = web_search_tools[0]
+            .as_object()
+            .ok_or(ContractError::UnsupportedField("tools.web_search"))?;
+        if object
+            .keys()
+            .any(|key| !matches!(key.as_str(), "type" | "external_web_access"))
+        {
+            return Err(ContractError::UnsupportedField(
+                "tools.web_search options outside candidate.3 subset",
+            ));
+        }
+        if object
+            .get("external_web_access")
+            .is_some_and(|value| !value.is_boolean())
+        {
+            return Err(ContractError::UnsupportedField(
+                "tools.web_search.external_web_access",
+            ));
+        }
+        Ok(())
     }
 
     pub fn constraints(&self) -> Result<RequestConstraints, ContractError> {
@@ -134,6 +187,34 @@ impl ResponsesRequest {
             object.len() == 1
                 && object.get("type").and_then(Value::as_str) == Some("image_generation")
         })
+    }
+
+    /// Whether the request declares the hosted Responses `web_search` tool.
+    /// Validation guarantees it is the sole tool and uses only the bounded
+    /// candidate.3 option subset.
+    pub fn requests_web_search(&self) -> bool {
+        self.tools
+            .iter()
+            .any(|tool| tool.get("type").and_then(Value::as_str) == Some("web_search"))
+    }
+
+    pub fn web_search_external_access(&self) -> Option<bool> {
+        self.tools
+            .iter()
+            .find(|tool| tool.get("type").and_then(Value::as_str) == Some("web_search"))
+            .and_then(|tool| tool.get("external_web_access"))
+            .and_then(Value::as_bool)
+    }
+
+    pub fn effective_tool_choice(&self) -> ToolChoice {
+        self.tool_choice.unwrap_or(ToolChoice::Auto)
+    }
+
+    /// Whether the declared Web Search tool is eligible to execute. Standard
+    /// Responses `tool_choice=none` keeps the declaration but disables the
+    /// tool, so it must not require Provider capability or App authority.
+    pub fn enables_web_search(&self) -> bool {
+        self.requests_web_search() && self.effective_tool_choice() != ToolChoice::None
     }
 
     /// Merge task-level generation defaults into an otherwise valid public
@@ -173,7 +254,7 @@ impl ResponsesRequest {
                 .provider_capabilities
                 .insert(ProviderCapability::Streaming);
         }
-        if !self.tools.is_empty() {
+        if !self.tools.is_empty() && self.effective_tool_choice() != ToolChoice::None {
             if self.requests_image_generation() {
                 requirements
                     .provider_capabilities
@@ -181,6 +262,11 @@ impl ResponsesRequest {
                 requirements
                     .model_features
                     .insert("image_generation".into());
+            } else if self.enables_web_search() {
+                requirements
+                    .provider_capabilities
+                    .insert(ProviderCapability::WebSearch);
+                requirements.model_features.insert("web_search".into());
             } else {
                 requirements
                     .provider_capabilities
@@ -333,7 +419,7 @@ pub struct RequestConstraints {
     pub placement: Option<PlacementScope>,
     pub prefer: Option<PlacementPreference>,
     pub offline_required: Option<bool>,
-    pub quality_floor: Option<QualityGrade>,
+    pub capability_floor: Option<CapabilityLevel>,
     pub latency: Option<Latency>,
     pub max_cost_usd: Option<f64>,
     pub fallback: Option<Fallback>,
@@ -386,11 +472,10 @@ impl RequestConstraints {
                             .map_err(|_| invalid("expected true or false"))?,
                     )
                 }
-                "infer.quality_floor" => {
-                    result.quality_floor =
-                        Some(value.parse().map_err(|_| {
-                            invalid("expected basic, general, advanced, or frontier")
-                        })?)
+                "infer.capability_floor" => {
+                    result.capability_floor = Some(value.parse().map_err(|_| {
+                        invalid("expected foundational, capable, advanced, expert, or exceptional")
+                    })?)
                 }
                 "infer.latency" => {
                     result.latency =
@@ -409,7 +494,7 @@ impl RequestConstraints {
                 }
                 "infer.fallback" => {
                     result.fallback = Some(value.parse().map_err(|_| {
-                        invalid("expected none, equivalent, or allow_lower_quality")
+                        invalid("expected none, equivalent, or allow_lower_capability")
                     })?)
                 }
                 "infer.deadline_ms" => {
@@ -432,27 +517,40 @@ string_enum!(Priority { Interactive => "interactive", Normal => "normal", Backgr
 string_enum!(Placement { Local => "local", TrustedNode => "trusted_node", Cloud => "cloud" });
 string_enum!(PlacementScope { LocalOnly => "local_only", Private => "private", Anywhere => "anywhere", CloudOnly => "cloud_only" });
 string_enum!(PlacementPreference { Local => "local", TrustedNode => "trusted_node", Cloud => "cloud" });
-string_enum!(QualityGrade { Basic => "basic", General => "general", Advanced => "advanced", Frontier => "frontier" });
-string_enum!(RatingStatus { Provisional => "provisional", Benchmarked => "benchmarked" });
+string_enum!(CapabilityLevel {
+    Foundational => "foundational",
+    Capable => "capable",
+    Advanced => "advanced",
+    Expert => "expert",
+    Exceptional => "exceptional"
+});
+string_enum!(EvaluationStatus { Provisional => "provisional", Benchmarked => "benchmarked" });
 string_enum!(ResourceClass { Light => "light", Standard => "standard", Heavy => "heavy", Extreme => "extreme" });
-string_enum!(ReasoningEffort { None => "none", Low => "low", Medium => "medium", High => "high", Xhigh => "xhigh", Max => "max" });
+string_enum!(ReasoningEffort {
+    None => "none",
+    Low => "low",
+    Medium => "medium",
+    High => "high",
+    Xhigh => "xhigh",
+    Max => "max",
+    Ultra => "ultra"
+});
 string_enum!(Latency { Interactive => "interactive", Balanced => "balanced", Throughput => "throughput" });
-string_enum!(Fallback { None => "none", Equivalent => "equivalent", AllowLowerQuality => "allow_lower_quality" });
+string_enum!(Fallback { None => "none", Equivalent => "equivalent", AllowLowerCapability => "allow_lower_capability" });
 string_enum!(Modality { Text => "text", Image => "image", Audio => "audio", Video => "video", Json => "json" });
-// `quality_fit` prefers the least overqualified candidate that satisfies the
-// effective quality floor; `quality` preserves strongest-eligible semantics.
+// `capability_fit` prefers the least overqualified candidate that satisfies the
+// effective capability floor; `capability` preserves strongest-eligible semantics.
 string_enum!(SortKey {
     Placement => "placement",
     DeadlineFit => "deadline_fit",
     QueueTime => "queue_time",
     Cost => "cost",
-    QualityFit => "quality_fit",
-    Quality => "quality"
+    CapabilityFit => "capability_fit",
+    Capability => "capability"
 });
 string_enum!(ProviderProtocol {
     Responses => "responses",
     CodexAppServer => "codex_app_server",
-    AntigravityCli => "antigravity_cli",
     AudioWorker => "audio_worker",
     Onnx => "onnx"
 });
@@ -461,6 +559,7 @@ string_enum!(ProviderCapability {
     Instructions => "instructions",
     Streaming => "streaming",
     FunctionTools => "function_tools",
+    WebSearch => "web_search",
     ImageGeneration => "image_generation",
     ReasoningEffort => "reasoning_effort",
     Temperature => "temperature",
@@ -468,6 +567,14 @@ string_enum!(ProviderCapability {
     MaxOutputTokens => "max_output_tokens",
     Truncation => "truncation",
     Metadata => "metadata"
+});
+string_enum!(ToolChoice {
+    None => "none",
+    Auto => "auto",
+    Required => "required"
+});
+string_enum!(BuiltinTool {
+    WebSearch => "web_search"
 });
 
 impl PlacementScope {
@@ -494,6 +601,7 @@ mod tests {
             background: false,
             metadata: BTreeMap::new(),
             tools: vec![],
+            tool_choice: None,
             reasoning: None,
             temperature: None,
             top_p: None,
@@ -519,21 +627,32 @@ mod tests {
     }
 
     #[test]
-    fn parses_orthogonal_quality_and_placement_constraints() {
+    fn parses_orthogonal_capability_and_placement_constraints() {
         let constraints = RequestConstraints::from_metadata(&BTreeMap::from([
-            ("infer.quality_floor".into(), "advanced".into()),
+            ("infer.capability_floor".into(), "expert".into()),
             ("infer.placement".into(), "private".into()),
             ("infer.prefer".into(), "trusted_node".into()),
             ("infer.provider_access_class".into(), "subscription".into()),
         ]))
         .unwrap();
-        assert_eq!(constraints.quality_floor, Some(QualityGrade::Advanced));
+        assert_eq!(constraints.capability_floor, Some(CapabilityLevel::Expert));
         assert_eq!(constraints.placement, Some(PlacementScope::Private));
         assert_eq!(constraints.prefer, Some(PlacementPreference::TrustedNode));
         assert_eq!(
             constraints.provider_access_class,
             Some(ProviderAccessClass::Subscription)
         );
+    }
+
+    #[test]
+    fn ultra_reasoning_effort_is_a_public_but_optional_deployment_requirement() {
+        let parsed = serde_json::from_value::<ResponsesRequest>(serde_json::json!({
+            "model": "reasoning.solve",
+            "input": "solve",
+            "reasoning": {"effort": "ultra"}
+        }))
+        .unwrap();
+        assert_eq!(parsed.reasoning_effort(), Some(ReasoningEffort::Ultra));
     }
 
     #[test]
@@ -557,7 +676,7 @@ mod tests {
         assert!(unknown.to_string().contains("unknown field `modle`"));
 
         let request = serde_json::from_value::<ResponsesRequest>(serde_json::json!({
-            "model": "assistant.general",
+            "model": "language.respond",
             "input": "text",
             "reasoning": {"effort": "low", "provider_mode": "fast"}
         }))
@@ -570,7 +689,7 @@ mod tests {
 
     #[test]
     fn execution_requirements_follow_the_public_request_shape() {
-        let mut request = request("assistant.general");
+        let mut request = request("language.respond");
         request.instructions = Some(Value::String("be concise".into()));
         request.stream = true;
         request.tools = vec![Value::Null];
@@ -612,7 +731,7 @@ mod tests {
 
     #[test]
     fn image_parts_are_classified_for_routing_and_cloud_acl() {
-        let mut request = request("assistant.multimodal");
+        let mut request = request("multimodal.respond");
         request.input = serde_json::json!([{
             "role": "user",
             "content": [
@@ -646,13 +765,13 @@ mod tests {
         );
 
         let mut wrong_intent = request.clone();
-        wrong_intent.model = "assistant.general".into();
+        wrong_intent.model = "language.respond".into();
         assert!(wrong_intent.validate().is_err());
 
         let mut configured_tool = request.clone();
         configured_tool.tools = vec![serde_json::json!({
             "type": "image_generation",
-            "quality": "low"
+            "capability": "low"
         })];
         assert!(!configured_tool.requests_image_generation());
         assert!(configured_tool.validate().is_err());
@@ -670,12 +789,70 @@ mod tests {
     }
 
     #[test]
+    fn web_search_uses_standard_tool_choice_and_distinct_requirements() {
+        let mut request = request("language.respond");
+        request.tools = vec![serde_json::json!({
+            "type": "web_search",
+            "external_web_access": false
+        })];
+        request.tool_choice = Some(ToolChoice::Required);
+        request.validate().unwrap();
+        assert!(request.requests_web_search());
+        assert_eq!(request.web_search_external_access(), Some(false));
+        assert_eq!(request.effective_tool_choice(), ToolChoice::Required);
+        assert!(request.enables_web_search());
+        let requirements = request.execution_requirements();
+        assert!(
+            requirements
+                .provider_capabilities
+                .contains(&ProviderCapability::WebSearch)
+        );
+        assert!(requirements.model_features.contains("web_search"));
+        assert!(!requirements.model_features.contains("function_tools"));
+
+        request.tool_choice = Some(ToolChoice::None);
+        request.validate().unwrap();
+        assert!(!request.enables_web_search());
+        let requirements = request.execution_requirements();
+        assert_eq!(
+            requirements.provider_capabilities,
+            BTreeSet::from([ProviderCapability::Responses])
+        );
+        assert!(requirements.model_features.is_empty());
+    }
+
+    #[test]
+    fn web_search_subset_rejects_mixed_or_unbounded_tools() {
+        let mut request = request("language.respond");
+        request.tools = vec![
+            serde_json::json!({"type": "web_search"}),
+            serde_json::json!({"type": "function", "name": "escape"}),
+        ];
+        assert!(matches!(
+            request.validate(),
+            Err(ContractError::UnsupportedField(
+                "web_search mixed with another tool"
+            ))
+        ));
+
+        request.tools = vec![serde_json::json!({
+            "type": "web_search",
+            "filters": {"allowed_domains": ["example.com"]}
+        })];
+        assert!(request.validate().is_err());
+
+        request.tools.clear();
+        request.tool_choice = Some(ToolChoice::Required);
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
     fn intent_generation_defaults_fill_only_missing_request_fields() {
         let intent: IntentProfile = toml::from_str(
             r#"
             input_modalities = ["text"]
             output_modalities = ["text"]
-            default_quality_floor = "basic"
+            default_capability_floor = "foundational"
             default_max_output_tokens = 256
             default_reasoning_effort = "none"
             "#,

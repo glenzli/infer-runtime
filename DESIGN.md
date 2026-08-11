@@ -75,7 +75,7 @@ stable contract promotion 仍需独立证据，不能从 ONNX provider 已存在
 
 ### 2.5 订阅式推理桥接
 
-Codex App Server、未来的 Claude/Antigravity CLI bridge 等属于新的 Provider 执行族：调用入口
+Codex App Server 等订阅式 bridge 属于新的 Provider 执行族：调用入口
 可以是本机进程或 socket，但真正推理发生在云端并消耗用户订阅，因此 `placement=cloud`，且
 Provider 使用独立的 `subscription` access class。App 的默认授权只有 `standard`；只有显式
 加入 subscription class 的 App 才能把这类 Deployment 纳入 Candidate Plan。
@@ -86,26 +86,23 @@ Profile → Build → Deployment；reasoning effort 是 Deployment 参数，不�
 “发现”不等于“准入”：新增上游模型只出现在 operator inventory，必须经过显式 Build、能力
 评级和 Deployment 配置才进入路由；已准入模型从 inventory 消失时执行 fail closed，不暗换模型。
 
-Codex slice 只翻译 text/image 输入和文本 unary/SSE 输出的无工具 Responses 子集。adapter 使用空的 ephemeral
-workspace、read-only sandbox、`approvalPolicy=never` 和禁用的 shell/web/plugin/app/multi-agent
-功能；若事件流出现 command、file change、MCP、web search、delegation 等非推理 item，Attempt
-以 `protocol` 失败。它不暴露 Codex thread、tool loop、memory、workspace mutation 或完整 agent
-能力。图片必须通过独立 cloud modality ACL，且只接受有界 JPEG/PNG data URL 或 HTTPS URL；
-持久会话、精确订阅 quota reconciliation 和第二种 CLI bridge 仍须独立扩展合同，不能从 App
-Server 已接入推导为支持。Antigravity 采用与 Codex subscription 相同的“受信任本机会话”模型：
-`agy` 直接复用当前用户真实 HOME/Keychain 中由 CLI 自己管理的登录态，Runtime 不读取、复制或轮换
-认证材料。Consumer payload 与显式日志仅写入一次性 owner-only workspace，prompt 不进入 argv；
-首版只准入 Gemini 3.6 Flash 的 low/medium/high 物理 slug，并确定映射到 Runtime
-`reasoning.effort`。该边界不声称隔离 CLI 自身的账号级状态或内部 history，因此只作为显式授权的
-experimental cloud/subscription unary text Provider，现有 Consumer 不会自动获得访问权。
+Codex slice 翻译 text/image 输入、文本 unary/SSE 输出，以及标准 Responses
+`tools=[{"type":"web_search"}] + tool_choice` 的有界子集。adapter 使用空的 ephemeral
+workspace、read-only sandbox、`approvalPolicy=never`，并关闭 shell/plugin/app/multi-agent 等 Agent
+能力。Web Search 默认关闭；只有同时通过 Intent、subscription access class、Provider/Build 能力和
+App `allowed_builtin_tools` 的请求，才会按 Attempt 开为 cached/live。其他 command、file change、
+MCP、delegation、未授权 tool item 或 server-initiated approval 均以 `protocol` 失败。bridge 不暴露
+Codex thread、通用 tool loop、memory、workspace mutation 或完整 Agent 能力。图片仍必须通过独立
+cloud modality ACL，且只接受有界 JPEG/PNG data URL 或 HTTPS URL；持久会话与精确订阅 quota
+reconciliation 仍须独立扩展合同，不能从 App Server 已接入推导为支持。
 
 ## 3. 术语与核心对象
 
 | 术语 | 含义 |
 | --- | --- |
 | App | 通过 Client SDK 或协议调用 runtime 的应用身份 |
-| Intent Profile | Responses `model` 字段引用的稳定任务意图，如 `text.summarize`、`assistant.general`；不含应用名、位置或厂商 |
-| Quality Grade | 某 Model Profile 在某个 Intent 上经评估得到的 `basic/general/advanced/frontier` 档位，不是全局模型等级 |
+| Intent Profile | Responses `model` 字段引用的稳定任务意图，如 `text.summarize`、`language.respond`；不含应用名、位置或厂商 |
+| Capability Level | 某 Model Profile 在某个 Intent 上经评估得到的 `foundational/capable/advanced/expert/exceptional` 能力等级，不是全局模型等级 |
 | Model Profile | 语义模型身份及其按 Intent 记录的能力评级，例如 Qwen 3.6 35B |
 | Model Build | 一个可运行制品/量化变体，例如 `qwen3.6:35b-mlx` |
 | Deployment | 某 Model Build 在一个 Provider 上的可执行实例；placement 从 Provider 获得 |
@@ -252,24 +249,35 @@ Intent 命名采用 `<domain>.<action>`，不包含 App、provider、位置或�
 text.summarize
 text.classify
 text.proofread
-assistant.general
-reasoning.deep
+language.respond
+reasoning.solve
+multimodal.respond
+image.generate
 audio.transcribe
 audio.align
 speech.analyze
 speech.synthesize
-speech.voice_design
-speech.voice_clone
-vision.caption
+speech.design_voice
+speech.clone_voice
 vision.detect_faces       experimental; synchronous local-only P0
 vision.embed_face         experimental; synchronous local-only SensitiveBiometric
-vision.embed_image        experimental; synchronous local-only SigLIP image encoder
-vision.embed_text         experimental; synchronous local-only SigLIP text encoder
+semantic.embed_image      experimental; synchronous local-only SigLIP image encoder
+semantic.embed_text       experimental; synchronous local-only SigLIP text encoder
 vision.describe_image     experimental; typed QwenVL bounded description/keywords
-vision.review_classification experimental; Consumer-supplied closed set
+vision.classify_closed_set experimental; Consumer-supplied closed set
 ```
 
-Intent Profile 定义输入/输出模态、required features、默认能力下限和默认 policy；Responses Intent 还可定义调用方缺省时使用的 `default_max_output_tokens` 与 `default_reasoning_effort`。这些是任务级生成默认值，不是模型能力评级；调用方显式标准字段优先。Model Profile 则对每个 Intent 分别评级；同一模型可在总结上为 `general`、在深度推理上仅为 `basic`、在视觉上为 unsupported。参数量、provider 和 placement 均不能自动推出档位。
+Intent Profile 只定义任务目标、输入/输出模态、required features、默认能力下限和默认 policy；
+它不编码模型强弱、reasoning effort 或 tool 权限。`language.respond` 是开放式文本响应，不暗示
+Web Search、function execution、shell、文件系统或 agent loop；`multimodal.respond` 是开放式
+text/image → text 响应。`reasoning.solve` 的评价目标是求解正确性、推导和方案分析，原
+旧 `reasoning.deep` 中混在 Intent 名称里的“deep”，现由 capability floor 与 reasoning effort
+分别表达，因此 candidate.3 使用中性的 `reasoning.solve`。
+
+Responses Intent 还可定义调用方缺省时使用的 `default_max_output_tokens` 与
+`default_reasoning_effort`。这些是任务级生成默认值，不是模型能力评级；调用方显式标准字段优先。
+Model Profile 则对每个 Intent 分别评级；同一模型可在总结上为 `advanced`、在求解上仅为
+`capable`、在视觉上未评估。参数量、provider、placement 和资源重量均不能自动推出等级。
 
 模型运行结构固定为：
 
@@ -281,7 +289,20 @@ Intent Profile
 Model Profile -> Model Build -> Deployment -> Provider -> Node
 ```
 
-评级为 `provisional` 或 `benchmarked`。`benchmarked` 必须引用 eval profile；未经任务级评估的模型不得伪装成精确分数或高档能力。
+Capability scale `20260811.1` 使用五个绝对、按任务评估的等级：
+
+| Level | 固定任务包络 |
+| --- | --- |
+| `foundational` | 有界、低歧义、短链路任务 |
+| `capable` | 日常开放任务、普通指令遵循和短多步骤问题 |
+| `advanced` | 明显歧义、较长多步骤、跨领域综合任务 |
+| `expert` | 复杂专业判断、困难推理和竞争约束 |
+| `exceptional` | 极高复杂度、长链路和高鲁棒性要求 |
+
+等级只可在同一 Intent 内比较；未来的小模型若通过 `expert` 任务包络，就应被评为 `expert`，
+不能因参数量或价格被压低。评级证据为 `provisional` 或 `benchmarked`；`benchmarked` 必须引用
+eval profile。缺少该 Intent rating 表示 `unassessed`、不参与路由，不能被解释为模型必然不支持；
+Build 的模态/features 才表达物理不支持。未经任务级评估的模型不得伪装成精确分数。
 
 Deployment 另有 `resource_class = light | standard | heavy | extreme`，只表示运行负担，不表示能力。美元价格同为 0 的本地候选仍可据此让总结优先使用 2B，而不是浪费 35B。
 
@@ -301,24 +322,24 @@ embedding-space identity；不同 space/revision 的向量不得进入同一比�
 Hard constraints
   placement     local_only | private | anywhere | cloud_only
   offline_required?
-  quality_floor basic | general | advanced | frontier
+  capability_floor foundational | capable | advanced | expert | exceptional
   max_cost?     per-job upper bound
   deadline_at?
   required_features[]   e.g. tool_calls, json_schema, image_input
-  fallback      none | equivalent | allow_lower_quality
+  fallback      none | equivalent | allow_lower_capability
 
 Preferences
   latency       interactive | balanced | throughput
   placement     prefer local | trusted_node | cloud
-  policy        balanced | local-first | quality-first | latency-first | cost-first
+  policy        balanced | local-first | capability-first | latency-first | cost-first
 ```
 
 设计要求：
 
 - hard constraint 先过滤，preference 后排序；
 - placement 是允许集合，`local`、可信远程节点和第三方 cloud 是不同信任边界；fallback 不得扩大集合；
-- 能力下限必须先过滤。较弱模型即使使用更高 reasoning effort，也不能被当成更高能力档位；
-- `fallback=allow_lower_quality` 只可撤销调用方通过 `infer.quality_floor` 额外提高的门槛，绝不能低于 Intent 的 `default_quality_floor`；
+- 能力下限必须先过滤。较弱模型即使使用更高 reasoning effort，也不能被当成更高能力等级；
+- `fallback=allow_lower_capability` 只可撤销调用方通过 `infer.capability_floor` 额外提高的门槛，绝不能低于 Intent 的 `default_capability_floor`；
 - 真正禁止付费使用 `max_cost=0` 表达；`cost=economy` 只是 profile 内的排序偏好；
 - deadline 包含排队和执行预算，而非仅 provider 超时；
 - provider/model 特有特性通过 `required_features` 协商，普通 App 不使用物理 backend 名称；
@@ -333,7 +354,7 @@ Responses 请求的标准 `model` 字段引用 Intent Profile，例如：
 intent: text.summarize
 input_modalities: [text]
 output_modalities: [text]
-default_quality_floor: basic
+default_capability_floor: foundational
 default_profile: cost-first
 ```
 
@@ -347,17 +368,25 @@ infer.priority        interactive | normal | background
 infer.placement       local_only | private | anywhere | cloud_only
 infer.prefer          local | trusted_node | cloud
 infer.offline_required true | false
-infer.quality_floor   basic | general | advanced | frontier
+infer.capability_floor   foundational | capable | advanced | expert | exceptional
 infer.provider_access_class standard | subscription（只能缩窄 App ACL）
 infer.latency         interactive | balanced | throughput
 infer.max_cost_usd    decimal string
-infer.fallback        none | equivalent | allow_lower_quality
+infer.fallback        none | equivalent | allow_lower_capability
 infer.deadline_ms     positive integer string
 ```
 
 这些 metadata 由 runtime 消费，默认不发送给下游 provider。未知 `infer.*` key、越权 override 或格式错误均在 admission 阶段明确拒绝，不能静默忽略。
 
-标准 Responses `reasoning.effort` 独立表达选中模型后的计算投入。deployment 必须声明支持的 effort；提高 effort 不得绕过 `quality_floor`。
+标准 Responses `reasoning.effort` 独立表达选中模型后的计算投入，公共值为
+`none/low/medium/high/xhigh/max/ultra`；省略表示使用 Deployment/provider 默认值。Deployment
+必须声明支持的子集；不支持的值使候选在 dispatch 前失败，不能静默降档。提高 effort 不得绕过
+`capability_floor`。
+
+Tools 与 Intent 正交：provider-hosted Web Search 由标准 `tools`、App `allowed_builtin_tools`、
+Provider/Build capability 和 cloud policy 共同授权；function tool 只允许模型产生调用请求，除非
+未来独立 Agent 数据面明确接管，否则 Runtime 不执行 Consumer function。shell、文件修改、
+computer use 和长时间 agent loop 不属于 `language.respond` 或 `multimodal.respond`。
 
 ### 6.5 音频协议族
 
@@ -368,8 +397,8 @@ infer.deadline_ms     positive integer string
 | `audio.transcribe` | `POST /v1/audio/transcriptions` multipart | Qwen3-ASR 1.7B 8-bit |
 | `audio.align` | `POST /v1/audio/alignments` multipart | Qwen3-ForcedAligner 0.6B 8-bit |
 | `speech.synthesize` | `POST /v1/audio/speech` JSON | Qwen3-TTS CustomVoice 1.7B 8-bit |
-| `speech.voice_design` | `POST /v1/audio/speech` JSON | Qwen3-TTS VoiceDesign 1.7B 8-bit |
-| `speech.voice_clone` | `POST /v1/audio/voice-clones` multipart | Qwen3-TTS Base 1.7B 8-bit |
+| `speech.design_voice` | `POST /v1/audio/speech` JSON | Qwen3-TTS VoiceDesign 1.7B 8-bit |
+| `speech.clone_voice` | `POST /v1/audio/voice-clones` multipart | Qwen3-TTS Base 1.7B 8-bit |
 
 文件上传上限为 25 MiB。payload 只在 API 请求和单次 executor 临时目录中存在，不进入 Job metadata；临时目录拥有输入、参考音频和输出的完整生命周期，执行完成即删除。MLX worker 是常驻进程，但默认仅缓存一个已加载模型，切换 build 时显式释放旧模型与 MLX cache，以控制统一内存压力。
 
@@ -455,12 +484,12 @@ Any non-terminal state -> failed, only when no permitted attempt remains.
 Router 负责“在哪里执行”，不负责“何时轮到”：
 
 1. Registry 根据 Intent 找出具有对应评级的 Model Profile，再展开到 Build/Deployment；
-2. 过滤模态/features、quality floor、placement、reasoning effort、deadline、cost 和健康状态；
+2. 过滤模态/features、capability floor、placement、reasoning effort、deadline、cost 和健康状态；
 3. Policy Engine 对剩余候选计算可解释排序；
 4. 输出有序 Candidate Plan，以及每个候选被接受/拒绝的 reason codes；
 5. Plan 带有短期有效期，资源状态显著变化时必须重算。
 
-排序由当前 policy profile 的类型化有序规则决定，而不是 runtime 内置一个普遍顺序或不可解释总分。profile 可依次比较 deadline 可行性、placement preference、已加载状态、预计排队、成本、资源重量、质量等属性；每一级都必须产生稳定 reason code。`quality_fit` 选择与有效 floor 距离最近的最低充分 grade，`quality` 选择最强合格 grade。系统提供 `balanced`、`local-first`、`quality-first`、`latency-first`、`cost-first` 模板，但全局/App 默认值和模板内容均可配置。
+排序由当前 policy profile 的类型化有序规则决定，而不是 runtime 内置一个普遍顺序或不可解释总分。profile 可依次比较 deadline 可行性、placement preference、已加载状态、预计排队、成本、资源重量、能力等属性；每一级都必须产生稳定 reason code。`capability_fit` 选择与有效 floor 距离最近的最低充分 level，`capability` 选择最强合格 level。系统提供 `balanced`、`local-first`、`capability-first`、`latency-first`、`cost-first` 模板，但全局/App 默认值和模板内容均可配置。
 
 ### 7.3 调度与资源预留
 
@@ -566,7 +595,9 @@ MVP adapter：
 - **Codex App Server bridge（experimental）**：独立进程/JSON-RPC adapter，把一个订阅账号建模为
   一个 Provider，把显式准入的 Sol/Terra/Luna 建模为多个 Deployment；`model/list` 只刷新动态
   inventory。bridge 支持有界 text/image input 和 append-only text SSE；模型每次必须实际声明
-  image modality。它不进入 HTTP Responses adapter 的条件分支，也不开放 tools/agent 能力。
+  image modality。它不进入 HTTP Responses adapter 的条件分支；仅开放独立 App ACL 保护的标准
+  hosted Web Search experimental 子集，不开放 function tool 执行或其他 Agent 能力；它不回填
+  当前 candidate.3 OpenAPI。
 
 MVP Responses profile 支持 `model`、`input`、`instructions`、`stream`、function tools、`temperature`、`top_p`、`max_output_tokens`、`truncation` 和 usage。function tools 只描述模型可以返回的 tool calls；runtime 不执行工具或接管 tool loop，调用方负责后续交互。MVP 是无状态调用：`previous_response_id`、`conversation` 及服务端 conversation state 明确返回 unsupported。字段集合以后只能通过 profile 和合同测试扩展。
 
@@ -585,14 +616,14 @@ tensor 编码、输出解释和模型语义。
 独占官方对齐、tensor 与归一化语义；128 维向量只出现在同步响应。普通应用不能指定 tensor、
 文件路径或物理 EP。
 
-第三个 slice 以两个 typed endpoint 暴露 SigLIP `vision.embed_image` / `vision.embed_text`：
+第三个 slice 以两个 typed endpoint 暴露 SigLIP `semantic.embed_image` / `semantic.embed_text`：
 image adapter 独占 FixRes 224/RGB/NCHW normalization，text adapter 独占 lowercase、固定 64-token
 tokenizer；两个 immutable Builds 绑定相同 768d L2/cosine space。当前真实 Core ML 不能完整接管
 且失败探测代价过高，因此当前 Builds 明确 CPU-only，未来 EP 组合形成新 Build。QwenVL 另以
-`vision.describe_image` / `vision.review_classification` 两条 typed 数据面封装 Ollama：前者返回
+`vision.describe_image` / `vision.classify_closed_set` 两条 typed 数据面封装 Ollama：前者返回
 有界描述和关键词 proposal，后者只在 Consumer 提供的闭集内返回
-`matched|none|uncertain`。4B 是 basic/standard bulk 候选，8B 是 general/heavy 明确复核候选；
-Consumer 只请求 Intent 与 quality floor，不绑定 Ollama tag。MLX audio 继续保持独立数据面。
+`matched|none|uncertain`。4B 是 foundational/standard bulk 候选，8B 是 capable/heavy 明确复核候选；
+Consumer 只请求 Intent 与 capability floor，不绑定 Ollama tag。MLX audio 继续保持独立数据面。
 
 ## 10. 调度策略
 
@@ -709,7 +740,7 @@ Attempt 计数治理；后续只有在上游提供稳定 quota snapshot 后才�
 - 网络瞬断、明确 rate limit、临时 unavailable 可按 provider policy 重试；
 - 退避必须计入 deadline；
 - streaming 已向客户端发出可见内容后，默认不跨模型自动 fallback，以免拼接两个模型的输出；若未来支持，必须成为显式协议语义；
-- fallback 不能放宽 placement/data policy、quality floor、required_features 或 max_cost；
+- fallback 不能放宽 placement/data policy、capability floor、required_features 或 max_cost；
 - 每个 Job 限制最大 Attempts、总执行时间和累计估算费用。
 
 ### 12.2 熔断与健康
@@ -743,7 +774,7 @@ POST /v1/responses
     "infer.policy": "cost-first",
     "infer.placement": "private",
     "infer.prefer": "local",
-    "infer.quality_floor": "basic",
+    "infer.capability_floor": "foundational",
     "infer.fallback": "equivalent",
     "infer.deadline_ms": "30000"
   }
@@ -825,10 +856,10 @@ max_usd = 2.0
 max_concurrent_attempts = 1
 
 [profiles.local-first]
-order = ["placement", "deadline_fit", "queue_time", "cost", "quality_fit"]
+order = ["placement", "deadline_fit", "queue_time", "cost", "capability_fit"]
 
-[profiles.quality-first]
-order = ["quality", "deadline_fit", "cost", "placement"]
+[profiles.capability-first]
+order = ["capability", "deadline_fit", "cost", "placement"]
 
 [providers.ollama-local]
 kind = "responses"
@@ -854,27 +885,16 @@ placement = "cloud"
 # Dynamic inventory may be registered before any model is admitted. Stable
 # upstream model slugs become routable only after explicit Build/Deployment
 # configuration and evaluation.
-[providers.antigravity-subscription]
-kind = "antigravity_cli"
-access_class = "subscription"
-command = "/absolute/path/to/agy"
-placement = "cloud"
-
-[providers.antigravity-subscription.capability_profile]
-version = 1
-protocol = "antigravity_cli"
-capabilities = ["responses", "instructions", "reasoning_effort"]
-
 [intents."text.summarize"]
 input_modalities = ["text"]
 output_modalities = ["text"]
-default_quality_floor = "basic"
+default_capability_floor = "foundational"
 default_policy = "cost-first"
 
 [model_profiles.qwen_2b]
 family = "qwen"
 [model_profiles.qwen_2b.ratings."text.summarize"]
-grade = "basic"
+level = "foundational"
 status = "benchmarked"
 eval_profile = "summary-zh-v1"
 score = 0.82
@@ -893,16 +913,16 @@ build = "qwen_2b_mlx"
 credential = { source = "managed" }
 resource_admin = true
 allowed_provider_access_classes = ["standard", "subscription"]
-allowed_intents = ["text.summarize", "assistant.general"]
+allowed_intents = ["text.summarize", "language.respond"]
 max_pending_jobs = 16
 default_policy = "balanced"
-allowed_policies = ["local-first", "balanced", "quality-first"]
+allowed_policies = ["local-first", "balanced", "capability-first"]
 
 [apps.local-operator.request_overrides]
 priority = ["interactive", "normal"]
 placement = ["local_only", "private", "anywhere"]
 prefer = ["local", "trusted_node", "cloud"]
-quality_floor = ["basic", "general", "advanced", "frontier"]
+capability_floor = ["foundational", "capable", "advanced", "expert", "exceptional"]
 max_cost_usd = { min = 0.0, max = 0.10 }
 ```
 
@@ -911,7 +931,7 @@ profiles 中的规则名称来自受版本控制的类型化集合；用户可�
 `allowed_intents` 的三态语义是：字段省略表示兼容旧配置、允许全部当前 Intent；显式空数组
 表示保留 App 身份但禁止推理；非空数组表示精确 allowlist。配置验证拒绝未知或重复 Intent。
 不在清单中的请求返回稳定的 `403 intent_forbidden`，不会产生 Job/Attempt、配额预留或
-provider side effect。该清单与 placement/policy/quality 等 request override 上限正交，
+provider side effect。该清单与 placement/policy/capability 等 request override 上限正交，
 不演化成角色 DSL 或 endpoint 专属权限表。
 
 `allowed_provider_access_classes` 是第二个正交硬边界：旧配置和新建 Consumer 默认只有
@@ -1051,7 +1071,7 @@ infer-runtime/
 - `node-agent` 在远程节点阶段再增加，不能用空 crate 预占未来；
 - 避免 `common`、`utils`、`manager` 大杂烩；共享类型先确认唯一语义 owner。
 
-该拓扑应用了 source-cohesion growth review：控制平面仍是 admission/execution 的粗粒度 owner；durable payload crypto 因独立安全生命周期提取为 crate，恢复与存储事务分别留在已有语义 owner。音频作为另一种 payload 生命周期和协议族，已分别提取到 `infer-core::audio`、`infer-provider::audio_worker` 与 API multipart owner。DeepSeek Flash 复用已经稳定的 Responses adapter；Codex App Server 因独立的进程生命周期、JSON-RPC、动态模型组和 Agent 能力收窄要求，落在 `infer-provider::codex_app_server` 独立 semantic owner，而不是继续扩大 HTTP adapter。Antigravity 复用 Provider SPI、模型组 DTO 与 subscription ACL，但其 CLI 用户会话、一次性请求 workspace、进程/NDJSON wire 和错误策略仍由 `infer-provider::antigravity_cli` 独立拥有；它明确披露真实 HOME 会话边界，不在 Runtime 内复制 credential，也不把 CLI history 冒充已隔离。第二个协议没有证明 JSON-RPC 与 CLI wire 应被抹平，因此不建立万能 Agent/CLI adapter。通用 Chat Completions owner 尚无第二个独立需求验证，因此不预占模块。ONNX 的制品发布、Session 生命周期、类型化视觉合同和模型专属语义分别落在 artifact/provider/core+API/adapter owner；新增边界对应真实权限、依赖和生命周期，未把 tensor 或图片 payload 引入核心 Job。远程 node 仍推迟到真实需求出现时提取。
+该拓扑应用了 source-cohesion growth review：控制平面仍是 admission/execution 的粗粒度 owner；durable payload crypto 因独立安全生命周期提取为 crate，恢复与存储事务分别留在已有语义 owner。音频作为另一种 payload 生命周期和协议族，已分别提取到 `infer-core::audio`、`infer-provider::audio_worker` 与 API multipart owner。DeepSeek Flash 复用已经稳定的 Responses adapter；Codex App Server 因独立的进程生命周期、JSON-RPC、动态模型组和 Agent 能力收窄要求，落在 `infer-provider::codex_app_server` 独立 semantic owner，而不是继续扩大 HTTP adapter。没有第二个可接受的订阅桥接协议证明共性，因此不建立万能 Agent/CLI adapter。通用 Chat Completions owner 尚无第二个独立需求验证，因此不预占模块。ONNX 的制品发布、Session 生命周期、类型化视觉合同和模型专属语义分别落在 artifact/provider/core+API/adapter owner；新增边界对应真实权限、依赖和生命周期，未把 tensor 或图片 payload 引入核心 Job。远程 node 仍推迟到真实需求出现时提取。
 
 ## 18. 测试与验证策略
 
@@ -1070,7 +1090,8 @@ infer-runtime/
 - 使用可脚本化 fake provider 验证 streaming、慢消费者、取消、超时、迟到响应和 malformed response；
 - Responses adapter 使用版本化 capability profile 测试，不以单一供应商通过推断全部兼容；
 - Codex bridge 使用 fake JSON-RPC 覆盖动态 model group、显式 admission、usage、malformed
-  event、非推理 item fail-closed 和子进程 drop；本机可选 acceptance 才使用真实订阅；
+  event、Web Search cached/live/disabled 映射、required postcondition、非推理 item fail-closed 和
+  子进程 drop；本机可选 acceptance 才使用真实订阅；
 - 官方 OpenAI SDK 对 `inferd` 运行 client-side compatibility tests，覆盖非流式、SSE 和明确 unsupported errors。
 - 未来 ONNX provider 必须校验 artifact/export、tensor、preprocess、tokenizer/vocabulary、
   embedding-space 与 license identity，并覆盖 Session load/unload/reservation race、取消和迟到结果；
@@ -1105,8 +1126,8 @@ infer-runtime/
 
 - `/v1/responses` 兼容 profile、控制 API 和错误码显式版本化；
 - consumer contract 以 `contracts/v0.1/openapi.json`、golden fixtures 和 daemon 的
-  `/infer/v1/contract` 为共同身份；`0.1.0-candidate.1` 已冻结，当前
-  `0.1.0-candidate.2` 也交给外部 consumer 后不可原地修改；
+  `/infer/v1/contract` 为共同身份；`0.1.0-candidate.1` 与 `candidate.2` 已冻结，当前
+  `0.1.0-candidate.3` 通过显式 migration 引入新的 Intent/capability vocabulary；
 - Responses、文件音频、app-scoped Job 控制属于 candidate consumer surface；metrics、provider
   probe 和 resource lifecycle/eviction 属于 experimental operator surface，不共享稳定性承诺；
 - capability schema 可新增可选字段，破坏性变更使用新版本；
@@ -1122,6 +1143,6 @@ MVP **包含**：单机 `inferd`、无状态 provider execution 的 OpenAI Respo
 
 ## 21. 决策状态
 
-启动实现所需的 `D-001` 至 `D-013` 以及 M4 payload ownership `D-105` 已接受，详见 [docs/DECISIONS.md](docs/DECISIONS.md) 及对应 ADR。D-012/D-013 只接受 experimental Codex text/image + SSE 和类型化音频 streaming 的收窄 slice，不接受 Agent surface、万能流协议或其他 CLI 的推定兼容。`D-101` 至 `D-104` 属于远程节点、跨节点大 payload、第三方扩展与 benchmark 后续阶段。`D-106` 至 `D-110` 已接受收窄的 ONNX foundation、同步 local-only face/SigLIP 与 QwenVL typed slices；视觉 durable、Windows tolerance、照片域质量与通用 Resource Pool 仍保留独立门槛。
+启动实现所需的 `D-001` 至 `D-013` 以及 M4 payload ownership `D-105` 已接受，详见 [docs/DECISIONS.md](docs/DECISIONS.md) 及对应 ADR。D-012/D-013 接受 experimental Codex text/image + SSE、独立授权的 hosted Web Search 子集，以及类型化音频 streaming 的收窄 slice；不接受通用 Agent surface、万能流协议或其他 CLI 的推定兼容。`D-101` 至 `D-104` 属于远程节点、跨节点大 payload、第三方扩展与 benchmark 后续阶段。`D-106` 至 `D-110` 已接受收窄的 ONNX foundation、同步 local-only face/SigLIP 与 QwenVL typed slices；视觉 durable、Windows tolerance、照片域质量与通用 Resource Pool 仍保留独立门槛。
 
-本设计基线已进入实现：Git/Cargo workspace、Responses 垂直链路、本地文件音频垂直链路、受 Candidate Plan 约束的有界 retry/fallback、短期 provider 熔断、versioned capability profile/显式 probe、per-App admission、SQLite 持久化/预算，以及 M4 的 Ollama/ONNX inventory、Attempt reservation、显式生命周期控制与加密 local background restart recovery 均可运行。ONNX 另有内容寻址 artifact store、YuNet/SFace/SigLIP Builds、Session Registry 和四条可路由的 experimental typed data planes；Ollama QwenVL 另有有界描述/关键词与闭集分类复核两条 typed data planes；Codex App Server 另有动态模型组、subscription + cloud modality ACL、图像输入与文本 SSE；音频另有 PCM TTS server-stream 与 commit-redecode ASR duplex experimental slices。CI、自动资源长期启用、视觉/音频 stable promotion、Codex quota reconciliation、照片域质量、background batch/音频/cloud 幂等与远程节点仍待完成。
+本设计基线已进入实现：Git/Cargo workspace、Responses 垂直链路、本地文件音频垂直链路、受 Candidate Plan 约束的有界 retry/fallback、短期 provider 熔断、versioned capability profile/显式 probe、per-App admission、SQLite 持久化/预算，以及 M4 的 Ollama/ONNX inventory、Attempt reservation、显式生命周期控制与加密 local background restart recovery 均可运行。ONNX 另有内容寻址 artifact store、YuNet/SFace/SigLIP Builds、Session Registry 和四条可路由的 experimental typed data planes；Ollama QwenVL 另有有界描述/关键词与闭集分类复核两条 typed data planes；Codex App Server 另有动态模型组、subscription + cloud modality ACL、图像输入、文本 SSE 与 hosted Web Search 子集；音频另有 PCM TTS server-stream 与 commit-redecode ASR duplex experimental slices。CI、自动资源长期启用、视觉/音频 stable promotion、Codex quota reconciliation、照片域质量、background batch/音频/cloud 幂等与远程节点仍待完成。

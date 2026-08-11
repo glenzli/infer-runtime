@@ -316,8 +316,8 @@ function providerCard(provider, resource) {
     const actions = lifecycle ? `<button class="mini-button" data-resource-action="load" data-provider="${escapeAttribute(provider.id)}" data-deployment="${escapeAttribute(deployment.id)}" ${canLoad ? "" : "disabled"}>加载</button><button class="mini-button" data-resource-action="unload" data-provider="${escapeAttribute(provider.id)}" data-deployment="${escapeAttribute(deployment.id)}" ${canUnload ? "" : "disabled"}>卸载</button>` : "";
     return `<div class="model-row"><div class="model-main"><strong title="${escapeAttribute(deployment.id)}">${escapeHtml(deployment.id)}</strong><small title="${escapeAttribute(`${modelIdentity}${coverage ? ` · ${coverage}` : ""}`)}">${escapeHtml(details)}${escapeHtml(lifecycleDetail)}</small></div><div class="model-actions"><span class="status-chip ${statusClass(state)}">${escapeHtml(modelStateLabel(state))}</span>${actions}</div></div>`;
   }).join("") : `<div class="empty-state">该 Provider 当前没有已准入的 Deployment。</div>`;
-  const probe = deployments.length && ["responses", "codex_app_server", "antigravity_cli"].includes(provider.kind) ? `<button class="mini-button" data-provider-probe="${escapeAttribute(provider.id)}">兼容性 Probe</button>` : "";
-  const catalog = ["codex_app_server", "antigravity_cli"].includes(provider.kind) ? `<button class="mini-button" data-provider-models="${escapeAttribute(provider.id)}">动态 Inventory</button>` : "";
+  const probe = deployments.length && ["responses", "codex_app_server"].includes(provider.kind) ? `<button class="mini-button" data-provider-probe="${escapeAttribute(provider.id)}">兼容性 Probe</button>` : "";
+  const catalog = provider.kind === "codex_app_server" ? `<button class="mini-button" data-provider-models="${escapeAttribute(provider.id)}">动态 Inventory</button>` : "";
   const access = provider.access_class && provider.access_class !== "standard" ? ` · ${provider.access_class}` : "";
   const availability = `${deployments.length} admitted${lifecycleModels.length ? ` · ${available} available` : ""}`;
   const modes = provider.execution_modes?.join(" / ") || "unary";
@@ -328,7 +328,7 @@ function providerCard(provider, resource) {
 function deploymentCoverage(deployment) {
   const ratings = Object.entries(deployment.ratings || {});
   if (!ratings.length) return "";
-  const labels = ratings.map(([intent, rating]) => `${intent}:${rating.grade || "—"}`);
+  const labels = ratings.map(([intent, rating]) => `${intent}:${rating.level || "—"}`);
   return labels.length <= 2 ? labels.join(" / ") : `${labels.slice(0, 2).join(" / ")} +${labels.length - 2}`;
 }
 

@@ -72,11 +72,11 @@ fn config(database: &Path) -> RuntimeConfig {
         [intents."text.summarize"]
         input_modalities = ["text"]
         output_modalities = ["text"]
-        default_quality_floor = "basic"
+        default_capability_floor = "foundational"
         [model_profiles.qwen]
         family = "qwen"
         [model_profiles.qwen.ratings."text.summarize"]
-        grade = "basic"
+        level = "foundational"
         status = "benchmarked"
         eval_profile = "summary-v1"
         score = 0.8
@@ -112,6 +112,7 @@ fn request() -> ResponsesRequest {
         background: true,
         metadata: BTreeMap::new(),
         tools: Vec::new(),
+        tool_choice: None,
         reasoning: None,
         temperature: None,
         top_p: None,

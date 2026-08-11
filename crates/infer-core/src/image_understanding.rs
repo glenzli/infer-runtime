@@ -331,7 +331,7 @@ mod tests {
             description: None,
         };
         let request = ClassificationReviewRequest {
-            model: "vision.review_classification".into(),
+            model: "vision.classify_closed_set".into(),
             image: VisionImage {
                 content_type: "image/png".into(),
                 bytes: vec![1],

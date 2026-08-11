@@ -1204,8 +1204,8 @@ mod tests {
 
     use infer_core::{
         AttemptOutcome, AttemptSnapshot, AttemptTrigger, CandidateDecision,
-        CandidateDecisionStatus, JobState, Placement, Priority, QualityGrade, QuotaLimitConfig,
-        RatingStatus, RequestConstraints, ResourceClass, RoutingDecision,
+        CandidateDecisionStatus, CapabilityLevel, EvaluationStatus, JobState, Placement, Priority,
+        QuotaLimitConfig, RequestConstraints, ResourceClass, RoutingDecision,
     };
     use serde_json::json;
 
@@ -1226,15 +1226,15 @@ mod tests {
             model_build: "deepseek_flash".into(),
             physical_model: "deepseek-v4-flash".into(),
             placement: Placement::Cloud,
-            quality_grade: QualityGrade::General,
-            rating_status: RatingStatus::Provisional,
+            capability_level: CapabilityLevel::Capable,
+            evaluation_status: EvaluationStatus::Provisional,
             resource_class: ResourceClass::Standard,
             state,
             policy: "balanced".into(),
             priority: Priority::Normal,
             constraints: RequestConstraints::default(),
             routing: RoutingDecision {
-                quality_floor: QualityGrade::Basic,
+                capability_floor: CapabilityLevel::Foundational,
                 candidates: vec![CandidateDecision {
                     deployment: "deepseek_flash".into(),
                     provider: "cloud".into(),

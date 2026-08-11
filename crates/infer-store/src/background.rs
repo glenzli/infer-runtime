@@ -416,8 +416,9 @@ mod recovery_soak_tests;
 #[cfg(test)]
 mod tests {
     use infer_core::{
-        AttemptSnapshot, AttemptTrigger, CandidateDecision, CandidateDecisionStatus, Placement,
-        Priority, QualityGrade, RatingStatus, RequestConstraints, ResourceClass, RoutingDecision,
+        AttemptSnapshot, AttemptTrigger, CandidateDecision, CandidateDecisionStatus,
+        CapabilityLevel, EvaluationStatus, Placement, Priority, RequestConstraints, ResourceClass,
+        RoutingDecision,
     };
 
     use super::*;
@@ -439,15 +440,15 @@ mod tests {
             model_build: "qwen_small".into(),
             physical_model: "qwen:2b".into(),
             placement: Placement::Local,
-            quality_grade: QualityGrade::Basic,
-            rating_status: RatingStatus::Benchmarked,
+            capability_level: CapabilityLevel::Foundational,
+            evaluation_status: EvaluationStatus::Benchmarked,
             resource_class: ResourceClass::Light,
             state,
             policy: "balanced".into(),
             priority: Priority::Background,
             constraints: RequestConstraints::default(),
             routing: RoutingDecision {
-                quality_floor: QualityGrade::Basic,
+                capability_floor: CapabilityLevel::Foundational,
                 candidates: vec![CandidateDecision {
                     deployment: "small".into(),
                     provider: "local".into(),

@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 
 use crate::{
-    Placement, Priority, QualityGrade, RatingStatus, RequestConstraints, ResourceClass, string_enum,
+    CapabilityLevel, EvaluationStatus, Placement, Priority, RequestConstraints, ResourceClass,
+    string_enum,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -18,8 +19,8 @@ pub struct JobSnapshot {
     pub model_build: String,
     pub physical_model: String,
     pub placement: Placement,
-    pub quality_grade: QualityGrade,
-    pub rating_status: RatingStatus,
+    pub capability_level: CapabilityLevel,
+    pub evaluation_status: EvaluationStatus,
     pub resource_class: ResourceClass,
     pub state: JobState,
     pub policy: String,
@@ -119,7 +120,7 @@ string_enum!(AttemptTrigger {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RoutingDecision {
-    pub quality_floor: QualityGrade,
+    pub capability_floor: CapabilityLevel,
     pub candidates: Vec<CandidateDecision>,
 }
 
@@ -141,6 +142,7 @@ string_enum!(CandidateDecisionStatus {
 });
 
 string_enum!(CandidateReasonCode {
+    IntentUnassessed => "intent_unassessed",
     ProviderCredentialUnavailable => "provider_credential_unavailable",
     ProviderAccessNotAllowed => "provider_access_not_allowed",
     ProviderAccessClassMismatch => "provider_access_class_mismatch",
@@ -154,7 +156,7 @@ string_enum!(CandidateReasonCode {
     RequiredFeatureMissing => "required_feature_missing",
     PlacementNotAllowed => "placement_not_allowed",
     OfflineRequired => "offline_required",
-    QualityBelowFloor => "quality_below_floor",
+    CapabilityBelowFloor => "capability_below_floor",
     ReasoningEffortUnsupported => "reasoning_effort_unsupported",
     CostLimitExceeded => "cost_limit_exceeded"
 });

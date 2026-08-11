@@ -65,6 +65,7 @@ mod tests {
                 observer_access: infer_core::ObserverAccess::None,
                 resource_admin: false,
                 allowed_intents: None,
+                allowed_builtin_tools: Default::default(),
                 allowed_speech_voice_aliases: None,
                 allowed_provider_access_classes: std::collections::BTreeSet::from([
                     infer_core::ProviderAccessClass::Standard,

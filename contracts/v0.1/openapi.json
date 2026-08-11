@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "infer-runtime consumer API",
-    "version": "0.1.0-candidate.2",
-    "description": "Candidate contract for application integration. This revision is immutable; later candidate revisions are additive unless accompanied by migration notes. Operator resource and provider administration routes are intentionally excluded."
+    "version": "0.1.0-candidate.3",
+    "description": "Candidate contract for application integration. Candidate.3 intentionally replaces candidate.2 intent and capability vocabulary; see the migration guide. Operator resource and provider administration routes are intentionally excluded."
   },
   "servers": [
     { "url": "http://127.0.0.1:8787" }
@@ -485,9 +485,10 @@
       "ContractManifest": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["contract_version", "stability", "compatibility", "openapi_url", "consumer_routes", "experimental_routes", "operator_routes"],
+        "required": ["contract_version", "capability_scale_version", "stability", "compatibility", "openapi_url", "consumer_routes", "experimental_routes", "operator_routes"],
         "properties": {
-          "contract_version": { "const": "0.1.0-candidate.2" },
+          "contract_version": { "const": "0.1.0-candidate.3" },
+          "capability_scale_version": { "const": "20260811.1" },
           "stability": { "const": "candidate" },
           "compatibility": { "type": "string" },
           "openapi_url": { "const": "/infer/v1/openapi.json" },
@@ -561,7 +562,7 @@
         "properties": {
           "effort": {
             "type": ["string", "null"],
-            "enum": ["none", "low", "medium", "high", "xhigh", "max", null]
+            "enum": ["none", "low", "medium", "high", "xhigh", "max", "ultra", null]
           }
         }
       },
@@ -629,7 +630,7 @@
         "additionalProperties": false,
         "required": ["model", "input"],
         "properties": {
-          "model": { "enum": ["speech.synthesize", "speech.voice_design"] },
+          "model": { "enum": ["speech.synthesize", "speech.design_voice"] },
           "input": { "type": "string", "minLength": 1 },
           "voice": { "type": ["string", "null"] },
           "instructions": { "type": ["string", "null"] },
@@ -673,7 +674,7 @@
         "patternProperties": { "^infer\\.": { "type": "string" } },
         "required": ["model", "input", "reference_audio", "reference_text"],
         "properties": {
-          "model": { "const": "speech.voice_clone" },
+          "model": { "const": "speech.clone_voice" },
           "input": { "type": "string", "minLength": 1 },
           "reference_audio": { "type": "string", "format": "binary" },
           "reference_text": { "type": "string", "minLength": 1 },
@@ -702,7 +703,7 @@
         "patternProperties": { "^infer\\.": { "type": "string" } },
         "required": ["model", "image", "source_revision", "image_orientation", "taxonomy_revision", "categories"],
         "properties": {
-          "model": { "const": "vision.review_classification" },
+          "model": { "const": "vision.classify_closed_set" },
           "image": { "type": "string", "format": "binary", "description": "JPEG/PNG, at most 20 MiB and 40 megapixels decoded" },
           "source_revision": { "type": "string", "minLength": 1, "maxLength": 256 },
           "image_orientation": { "const": "display_pixels_orientation_normalized" },
@@ -849,7 +850,7 @@
       "JobSnapshot": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "app_id", "intent", "provider", "deployment", "model_profile", "model_build", "physical_model", "placement", "quality_grade", "rating_status", "resource_class", "state", "policy", "priority", "constraints", "routing", "attempts", "error"],
+        "required": ["id", "app_id", "intent", "provider", "deployment", "model_profile", "model_build", "physical_model", "placement", "capability_level", "evaluation_status", "resource_class", "state", "policy", "priority", "constraints", "routing", "attempts", "error"],
         "properties": {
           "id": { "type": "string" },
           "app_id": { "type": "string" },
@@ -860,8 +861,8 @@
           "model_build": { "type": "string" },
           "physical_model": { "type": "string" },
           "placement": { "enum": ["local", "trusted_node", "cloud"] },
-          "quality_grade": { "enum": ["basic", "general", "advanced", "frontier"] },
-          "rating_status": { "enum": ["provisional", "benchmarked"] },
+          "capability_level": { "enum": ["foundational", "capable", "advanced", "expert", "exceptional"] },
+          "evaluation_status": { "enum": ["provisional", "benchmarked"] },
           "resource_class": { "enum": ["light", "standard", "heavy", "extreme"] },
           "state": { "$ref": "#/components/schemas/JobState" },
           "policy": { "type": "string" },
@@ -875,9 +876,9 @@
       "RoutingDecision": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["quality_floor", "candidates"],
+        "required": ["capability_floor", "candidates"],
         "properties": {
-          "quality_floor": { "enum": ["basic", "general", "advanced", "frontier"] },
+          "capability_floor": { "enum": ["foundational", "capable", "advanced", "expert", "exceptional"] },
           "candidates": {
             "type": "array",
             "items": {

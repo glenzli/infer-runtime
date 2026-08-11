@@ -73,12 +73,12 @@ mod tests {
     #[test]
     fn builds_exact_ipv4_consumer_offer() {
         let offer =
-            consumer_http_offer("127.0.0.1:8787".parse().unwrap(), "0.1.0-candidate.2").unwrap();
+            consumer_http_offer("127.0.0.1:8787".parse().unwrap(), "0.1.0-candidate.3").unwrap();
 
         assert_eq!(offer.protocol, CONSUMER_PROTOCOL);
         assert_eq!(
             offer.protocol_versions,
-            vec!["0.1.0-candidate.2".to_owned()]
+            vec!["0.1.0-candidate.3".to_owned()]
         );
         assert_eq!(offer.binding, CONSUMER_HTTP_LOOPBACK_BINDING);
         assert_eq!(offer.endpoint, "http://127.0.0.1:8787");

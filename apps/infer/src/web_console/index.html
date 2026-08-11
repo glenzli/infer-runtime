@@ -288,7 +288,7 @@
           <div class="form-grid">
             <label class="field"><span>App ID</span><input id="access-app-id" class="input mono" required maxlength="80" pattern="[A-Za-z0-9._-]+" placeholder="shadow"></label>
             <label class="field"><span>权限预设</span><select id="access-preset" class="input"><option value="local-private">本地私密</option><option value="local-preferred">本地优先</option><option value="hybrid">混合灵活</option><option value="custom">自定义</option></select></label>
-            <label class="field"><span>默认策略</span><select id="access-default-policy" class="input"><option value="balanced">balanced</option><option value="local-first">local-first</option><option value="quality-first">quality-first</option><option value="latency-first">latency-first</option><option value="cost-first">cost-first</option></select></label>
+            <label class="field"><span>默认策略</span><select id="access-default-policy" class="input"><option value="balanced">balanced</option><option value="local-first">local-first</option><option value="capability-first">capability-first</option><option value="latency-first">latency-first</option><option value="cost-first">cost-first</option></select></label>
             <label class="field"><span>最大等待 Jobs</span><input id="access-max-pending" class="input" type="number" min="1" max="100000" value="16" required></label>
           </div>
 
@@ -298,15 +298,15 @@
           </fieldset>
           <fieldset class="permission-group" data-permission="policies">
             <legend>允许的路由策略</legend>
-            <label><input type="checkbox" value="balanced"> balanced</label><label><input type="checkbox" value="local-first"> local-first</label><label><input type="checkbox" value="quality-first"> quality-first</label><label><input type="checkbox" value="latency-first"> latency-first</label><label><input type="checkbox" value="cost-first"> cost-first</label>
+            <label><input type="checkbox" value="balanced"> balanced</label><label><input type="checkbox" value="local-first"> local-first</label><label><input type="checkbox" value="capability-first"> capability-first</label><label><input type="checkbox" value="latency-first"> latency-first</label><label><input type="checkbox" value="cost-first"> cost-first</label>
           </fieldset>
           <div class="permission-grid">
             <fieldset class="permission-group" data-permission="priority"><legend>Priority</legend><label><input type="checkbox" value="interactive"> interactive</label><label><input type="checkbox" value="normal"> normal</label><label><input type="checkbox" value="background"> background</label></fieldset>
             <fieldset class="permission-group" data-permission="placement"><legend>Placement</legend><label><input type="checkbox" value="local_only"> local_only</label><label><input type="checkbox" value="private"> private</label><label><input type="checkbox" value="anywhere"> anywhere</label><label><input type="checkbox" value="cloud_only"> cloud_only</label></fieldset>
             <fieldset class="permission-group" data-permission="prefer"><legend>Preference</legend><label><input type="checkbox" value="local"> local</label><label><input type="checkbox" value="trusted_node"> trusted_node</label><label><input type="checkbox" value="cloud"> cloud</label></fieldset>
-            <fieldset class="permission-group" data-permission="quality_floor"><legend>Quality floor</legend><label><input type="checkbox" value="basic"> basic</label><label><input type="checkbox" value="general"> general</label><label><input type="checkbox" value="advanced"> advanced</label><label><input type="checkbox" value="frontier"> frontier</label></fieldset>
+            <fieldset class="permission-group" data-permission="capability_floor"><legend>Capability floor</legend><label><input type="checkbox" value="foundational"> foundational</label><label><input type="checkbox" value="capable"> capable</label><label><input type="checkbox" value="advanced"> advanced</label><label><input type="checkbox" value="expert"> expert</label><label><input type="checkbox" value="exceptional"> exceptional</label></fieldset>
             <fieldset class="permission-group" data-permission="latency"><legend>Latency</legend><label><input type="checkbox" value="interactive"> interactive</label><label><input type="checkbox" value="balanced"> balanced</label><label><input type="checkbox" value="throughput"> throughput</label></fieldset>
-            <fieldset class="permission-group" data-permission="fallback"><legend>Fallback</legend><label><input type="checkbox" value="none"> none</label><label><input type="checkbox" value="equivalent"> equivalent</label><label><input type="checkbox" value="allow_lower_quality"> allow_lower_quality</label></fieldset>
+            <fieldset class="permission-group" data-permission="fallback"><legend>Fallback</legend><label><input type="checkbox" value="none"> none</label><label><input type="checkbox" value="equivalent"> equivalent</label><label><input type="checkbox" value="allow_lower_capability"> allow_lower_capability</label></fieldset>
           </div>
           <div class="form-grid compact-form-grid">
             <label class="field field-checkbox"><input id="access-offline" type="checkbox"><span>允许请求要求离线可用</span></label>

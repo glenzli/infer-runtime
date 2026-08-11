@@ -305,19 +305,19 @@ mod tests {
         )
     }
 
-    fn metadata(quality: Option<&str>) -> BTreeMap<String, String> {
+    fn metadata(capability: Option<&str>) -> BTreeMap<String, String> {
         let mut metadata = BTreeMap::from([
             ("infer.placement".into(), "local_only".into()),
             ("infer.offline_required".into(), "true".into()),
             ("infer.fallback".into(), "none".into()),
         ]);
-        if let Some(quality) = quality {
-            metadata.insert("infer.quality_floor".into(), quality.into());
+        if let Some(capability) = capability {
+            metadata.insert("infer.capability_floor".into(), capability.into());
         }
         metadata
     }
 
-    fn description_request(quality: Option<&str>) -> ImageDescriptionRequest {
+    fn description_request(capability: Option<&str>) -> ImageDescriptionRequest {
         ImageDescriptionRequest {
             model: "vision.describe_image".into(),
             image: VisionImage {
@@ -327,13 +327,13 @@ mod tests {
             source_revision: "photo:1".into(),
             image_orientation: VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS.into(),
             language: "zh-CN".into(),
-            metadata: metadata(quality),
+            metadata: metadata(capability),
         }
     }
 
     fn classification_request() -> ClassificationReviewRequest {
         ClassificationReviewRequest {
-            model: "vision.review_classification".into(),
+            model: "vision.classify_closed_set".into(),
             image: VisionImage {
                 content_type: "image/png".into(),
                 bytes: b"private-classification-image".to_vec(),
@@ -351,27 +351,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn quality_floor_selects_4b_for_bulk_and_8b_for_explicit_quality() {
+    async fn capability_floor_selects_4b_for_bulk_and_8b_for_explicit_capability() {
         let (runtime, executor) = runtime(&["vision.describe_image"]);
-        let basic = runtime
-            .execute_image_description("example-local-consumer", description_request(Some("basic")))
-            .await
-            .unwrap();
-        assert_eq!(basic.provenance.model_build, "qwen3_vl_4b");
-        let general = runtime
+        let foundational = runtime
             .execute_image_description(
                 "example-local-consumer",
-                description_request(Some("general")),
+                description_request(Some("foundational")),
             )
             .await
             .unwrap();
-        assert_eq!(general.provenance.model_build, "qwen3_vl_8b");
+        assert_eq!(foundational.provenance.model_build, "qwen3_vl_4b");
+        let capable = runtime
+            .execute_image_description(
+                "example-local-consumer",
+                description_request(Some("capable")),
+            )
+            .await
+            .unwrap();
+        assert_eq!(capable.provenance.model_build, "qwen3_vl_8b");
         assert_eq!(
             *executor.models.lock().unwrap(),
             ["qwen3-vl:4b", "qwen3-vl:8b"]
         );
 
-        let snapshot = runtime.snapshot(&basic.id).await.unwrap().unwrap();
+        let snapshot = runtime.snapshot(&foundational.id).await.unwrap().unwrap();
         let serialized = serde_json::to_string(&snapshot).unwrap();
         for private in [
             "private-image-marker",
@@ -383,8 +386,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn classification_review_defaults_to_general_8b_and_stays_acl_scoped() {
-        let (runtime, _) = runtime(&["vision.review_classification"]);
+    async fn classification_review_defaults_to_capable_8b_and_stays_acl_scoped() {
+        let (runtime, _) = runtime(&["vision.classify_closed_set"]);
         let response = runtime
             .execute_classification_review("example-local-consumer", classification_request())
             .await
@@ -393,7 +396,10 @@ mod tests {
         assert_eq!(response.suggestion.category_id.as_deref(), Some("travel"));
 
         let denied = runtime
-            .execute_image_description("example-local-consumer", description_request(Some("basic")))
+            .execute_image_description(
+                "example-local-consumer",
+                description_request(Some("foundational")),
+            )
             .await;
         assert!(matches!(denied, Err(RuntimeError::IntentNotAllowed { .. })));
     }

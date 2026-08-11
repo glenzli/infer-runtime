@@ -131,7 +131,7 @@ async fn face_embedding_traverses_auth_acl_job_attempt_and_cpu_provider() {
 #[ignore = "requires pinned SigLIP 2 image/text ONNX Builds and tokenizer"]
 async fn siglip_image_and_text_share_one_normalized_space_through_http() {
     let (service, token, _temporary) =
-        real_service(&["vision.embed_image", "vision.embed_text"]).await;
+        real_service(&["semantic.embed_image", "semantic.embed_text"]).await;
     let image = RgbImage::from_fn(320, 240, |x, y| {
         image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8])
     });
@@ -185,7 +185,7 @@ async fn siglip_image_and_text_share_one_normalized_space_through_http() {
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
                     serde_json::to_vec(&serde_json::json!({
-                        "model": "vision.embed_text",
+                        "model": "semantic.embed_text",
                         "text": "北京的日落",
                         "query_revision": "query:test:zh:1",
                         "language": "zh-CN"
@@ -245,7 +245,7 @@ async fn siglip_image_and_text_share_one_normalized_space_through_http() {
 #[ignore = "requires pinned SigLIP 2 Build and macOS Core ML execution provider"]
 async fn siglip_coreml_route_is_used_or_discloses_cpu_fallback() {
     let (service, token, _temporary) = real_service_with_execution_providers(
-        &["vision.embed_image"],
+        &["semantic.embed_image"],
         vec![OnnxExecutionProvider::Coreml, OnnxExecutionProvider::Cpu],
         true,
     )
@@ -344,7 +344,7 @@ async fn real_service_with_execution_providers(
 fn image_embedding_multipart(image: Vec<u8>) -> Vec<u8> {
     let mut body = Vec::new();
     body.extend_from_slice(
-        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nvision.embed_image\r\n",
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nsemantic.embed_image\r\n",
     );
     body.extend_from_slice(
         b"--infer-boundary\r\nContent-Disposition: form-data; name=\"source_revision\"\r\n\r\nphoto:test:semantic:1\r\n",

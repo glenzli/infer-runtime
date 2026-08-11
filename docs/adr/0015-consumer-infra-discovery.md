@@ -14,7 +14,7 @@ Infer Runtime 的 Consumer 目前普遍把 `127.0.0.1:8787` 当作默认地址�
 ## 决定
 
 1. 同一 `infer-runtime` registration 新增 `infer-runtime.consumer` offer；其版本精确等于冻结的
-   Consumer contract，当前为 `0.1.0-candidate.2`。
+   Consumer contract，当前为 `0.1.0-candidate.3`。
 2. Consumer 使用 Infer 自有 binding `infer-runtime.http-loopback`。它发布已经实际绑定的数值型
    loopback HTTP URL；不把 HTTP 请求、鉴权或错误语义塞进通用 Discovery 协议。
 3. Registration 不携带 App id、token、credential id、ACL 或任何 Provider secret。发现地址后，
@@ -33,4 +33,5 @@ Infer Runtime 的 Consumer 目前普遍把 `127.0.0.1:8787` 当作默认地址�
   新配置层。
 - Consumer 必须验证 registration owner/lease/protocol/version/binding/endpoint，禁用 HTTP proxy
   与 redirect，并在 generation 变化后重新发现。
-- 本决定不改变 `0.1.0-candidate.2` 的 HTTP path、payload、错误 envelope 或兼容承诺。
+- 本决定不改变已冻结 candidate revision 的 HTTP path、payload、错误 envelope 或兼容承诺。
+  candidate.3 的 Intent/能力 breaking change 由独立 migration 管理，Discovery 只做精确版本选择。

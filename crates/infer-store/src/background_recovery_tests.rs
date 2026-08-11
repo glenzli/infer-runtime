@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use infer_core::{
     AttemptOutcome, AttemptSnapshot, AttemptTrigger, CandidateDecision, CandidateDecisionStatus,
-    DurablePayloadKind, DurablePayloadRef, JobSnapshot, JobState, Placement, Priority,
-    QualityGrade, RatingStatus, RequestConstraints, ResourceClass, RoutingDecision,
+    CapabilityLevel, DurablePayloadKind, DurablePayloadRef, EvaluationStatus, JobSnapshot,
+    JobState, Placement, Priority, RequestConstraints, ResourceClass, RoutingDecision,
 };
 use serde_json::json;
 
@@ -22,15 +22,15 @@ fn snapshot(index: usize) -> JobSnapshot {
         model_build: "qwen_small".into(),
         physical_model: "qwen:2b".into(),
         placement: Placement::Local,
-        quality_grade: QualityGrade::Basic,
-        rating_status: RatingStatus::Benchmarked,
+        capability_level: CapabilityLevel::Foundational,
+        evaluation_status: EvaluationStatus::Benchmarked,
         resource_class: ResourceClass::Light,
         state: JobState::Running,
         policy: "balanced".into(),
         priority: Priority::Background,
         constraints: RequestConstraints::default(),
         routing: RoutingDecision {
-            quality_floor: QualityGrade::Basic,
+            capability_floor: CapabilityLevel::Foundational,
             candidates: vec![CandidateDecision {
                 deployment: "small".into(),
                 provider: "local".into(),

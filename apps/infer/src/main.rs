@@ -87,7 +87,7 @@ enum Command {
         max_logs: usize,
     },
     Run {
-        #[arg(long, default_value = "assistant.general")]
+        #[arg(long, default_value = "language.respond")]
         route: String,
         #[arg(long)]
         input: String,
@@ -152,7 +152,7 @@ enum Command {
         output: PathBuf,
     },
     CloneVoice {
-        #[arg(long, default_value = "speech.voice_clone")]
+        #[arg(long, default_value = "speech.clone_voice")]
         route: String,
         #[arg(long)]
         input: String,

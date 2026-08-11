@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn semantic_image_embedding_requires_orientation_normalized_pixels() {
         let request = ImageEmbeddingRequest {
-            model: "vision.embed_image".into(),
+            model: "semantic.embed_image".into(),
             image: VisionImage {
                 content_type: "image/jpeg".into(),
                 bytes: vec![1],
@@ -469,7 +469,7 @@ mod tests {
     #[test]
     fn semantic_text_embedding_is_bounded_and_local_only() {
         let valid = TextEmbeddingRequest {
-            model: "vision.embed_text".into(),
+            model: "semantic.embed_text".into(),
             text: "海边日落".into(),
             query_revision: "shadow:query:v1".into(),
             language: Some("zh-CN".into()),

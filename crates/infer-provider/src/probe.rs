@@ -2,7 +2,7 @@
 
 use infer_core::{
     ProviderCapability, ProviderCapabilityProfile, ReasoningConfig, ReasoningEffort,
-    ResponsesRequest,
+    ResponsesRequest, ToolChoice,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -136,6 +136,31 @@ async fn probe_capability(
             })];
             provider.execute(request).await?;
         }
+        ProviderCapability::WebSearch => {
+            request.input = Value::String(
+                "Use web search to identify the official domain example.com and answer only ok."
+                    .into(),
+            );
+            request.tools = vec![json!({
+                "type": "web_search",
+                "external_web_access": false
+            })];
+            request.tool_choice = Some(ToolChoice::Required);
+            let response = provider.execute(request).await?;
+            if response
+                .get("output")
+                .and_then(Value::as_array)
+                .is_none_or(|items| {
+                    !items.iter().any(|item| {
+                        item.get("type").and_then(Value::as_str) == Some("web_search_call")
+                    })
+                })
+            {
+                return Err(ProviderError::Protocol(
+                    "web search probe did not return a web_search_call item".into(),
+                ));
+            }
+        }
         ProviderCapability::ImageGeneration => {
             request.input = Value::String(
                 "Generate one simple solid blue circle on a white background, with no text.".into(),
@@ -198,6 +223,7 @@ fn base_request(model: &str) -> ResponsesRequest {
         background: false,
         metadata: Default::default(),
         tools: vec![],
+        tool_choice: None,
         reasoning: None,
         temperature: None,
         top_p: None,
@@ -241,6 +267,7 @@ mod tests {
                 });
             }
             let image_generation = request.requests_image_generation();
+            let web_search = request.requests_web_search();
             self.requests.lock().await.push(request);
             if image_generation {
                 Ok(json!({
@@ -248,6 +275,15 @@ mod tests {
                     "output": [{
                         "type": "image_generation_call",
                         "result": "AA=="
+                    }]
+                }))
+            } else if web_search {
+                Ok(json!({
+                    "id": "probe",
+                    "output": [{
+                        "type": "web_search_call",
+                        "status": "completed",
+                        "action": {"type": "search", "query": "example.com"}
                     }]
                 }))
             } else {
@@ -288,6 +324,7 @@ mod tests {
                 ProviderCapability::Instructions,
                 ProviderCapability::Streaming,
                 ProviderCapability::FunctionTools,
+                ProviderCapability::WebSearch,
                 ProviderCapability::ImageGeneration,
                 ProviderCapability::ReasoningEffort,
                 ProviderCapability::Temperature,
@@ -318,6 +355,7 @@ mod tests {
                 .iter()
                 .any(ResponsesRequest::requests_image_generation)
         );
+        assert!(requests.iter().any(ResponsesRequest::requests_web_search));
         assert!(
             requests
                 .iter()

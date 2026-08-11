@@ -730,8 +730,8 @@ async fn explain_job(
         "model_build": job.model_build,
         "physical_model": job.physical_model,
         "placement": job.placement,
-        "quality_grade": job.quality_grade,
-        "rating_status": job.rating_status,
+        "capability_level": job.capability_level,
+        "evaluation_status": job.evaluation_status,
         "resource_class": job.resource_class,
         "constraints": job.constraints,
         "routing": job.routing,
@@ -1217,7 +1217,7 @@ mod tests {
     fn intent_acl_has_a_distinct_forbidden_code() {
         let error: ApiError = RuntimeError::IntentNotAllowed {
             app_id: "reader".into(),
-            intent: "reasoning.deep".into(),
+            intent: "reasoning.solve".into(),
         }
         .into();
         assert_eq!(error.status, StatusCode::FORBIDDEN);

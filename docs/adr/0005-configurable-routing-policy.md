@@ -15,7 +15,7 @@ local-first 描述控制平面的部署与所有权，不代表每次推理都�
 
 合并顺序为：系统安全不变量、全局/provider hard limits、App policy、Intent defaults、request overrides。请求不能放宽上层 hard constraints。profiles 采用类型化过滤条件和有序比较规则，并输出 reason codes。
 
-提供 balanced、local-first、quality-first、latency-first、cost-first 模板，但均可配置；没有不可修改的全局“本地优先”。
+提供 balanced、local-first、capability-first、latency-first、cost-first 模板，但均可配置；没有不可修改的全局“本地优先”。
 
 ## 备选方案
 

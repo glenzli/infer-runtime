@@ -15,7 +15,7 @@ use axum::{
 };
 use infer_auth::{ManagedCredentialStore, ProvisionedManagedCredential};
 use infer_core::{
-    AppConfig, AppCredentialConfig, Modality, ObserverAccess, ProviderAccessClass,
+    AppConfig, AppCredentialConfig, BuiltinTool, Modality, ObserverAccess, ProviderAccessClass,
     RequestOverrideConfig, RuntimeConfig,
 };
 use serde::{Deserialize, Serialize};
@@ -143,6 +143,11 @@ pub(super) struct AppAccessInput {
     #[serde(default)]
     pub allowed_intents: Option<Vec<String>>,
     /// Omission preserves the existing value on update and creates a
+    /// deny-all hosted-tool ACL. Web Search is never implied by subscription
+    /// provider access.
+    #[serde(default)]
+    pub allowed_builtin_tools: Option<BTreeSet<BuiltinTool>>,
+    /// Omission preserves the existing value on update and creates a
     /// standard-only Consumer. The Console exposes subscription access as an
     /// explicit operator-controlled permission, never as part of a preset.
     #[serde(default)]
@@ -178,6 +183,7 @@ struct AppAccessView {
     observer_access: ObserverAccess,
     protected: bool,
     allowed_intents: Option<Vec<String>>,
+    allowed_builtin_tools: BTreeSet<BuiltinTool>,
     allowed_provider_access_classes: BTreeSet<ProviderAccessClass>,
     allowed_cloud_input_modalities: BTreeSet<Modality>,
     max_pending_jobs: usize,
@@ -239,6 +245,9 @@ impl AccessManager {
             input.allowed_provider_access_classes =
                 Some(BTreeSet::from([ProviderAccessClass::Standard]));
         }
+        if input.allowed_builtin_tools.is_none() {
+            input.allowed_builtin_tools = Some(BTreeSet::new());
+        }
         if input.allowed_cloud_input_modalities.is_none() {
             input.allowed_cloud_input_modalities = Some(BTreeSet::from([Modality::Text]));
         }
@@ -296,6 +305,9 @@ impl AccessManager {
         if input.allowed_provider_access_classes.is_none() {
             input.allowed_provider_access_classes =
                 Some(existing.allowed_provider_access_classes.clone());
+        }
+        if input.allowed_builtin_tools.is_none() {
+            input.allowed_builtin_tools = Some(existing.allowed_builtin_tools.clone());
         }
         if input.allowed_cloud_input_modalities.is_none() {
             input.allowed_cloud_input_modalities =
@@ -416,6 +428,7 @@ fn app_view(
         resource_admin: app.resource_admin,
         observer_access: app.observer_access,
         allowed_intents: app.allowed_intents,
+        allowed_builtin_tools: app.allowed_builtin_tools,
         allowed_provider_access_classes: app.allowed_provider_access_classes,
         allowed_cloud_input_modalities: app.allowed_cloud_input_modalities,
         max_pending_jobs: app.max_pending_jobs,
@@ -461,6 +474,7 @@ fn app_config(
         observer_access,
         resource_admin: false,
         allowed_intents: input.allowed_intents.clone(),
+        allowed_builtin_tools: input.allowed_builtin_tools.clone().unwrap_or_default(),
         allowed_speech_voice_aliases: None,
         allowed_provider_access_classes: input
             .allowed_provider_access_classes
@@ -542,6 +556,10 @@ fn write_app_policy(table: &mut Table, input: &AppAccessInput) {
             table.remove("allowed_intents");
         }
     }
+    if let Some(tools) = &input.allowed_builtin_tools {
+        table["allowed_builtin_tools"] =
+            value(enum_array(&tools.iter().copied().collect::<Vec<_>>()));
+    }
     if let Some(classes) = &input.allowed_provider_access_classes {
         table["allowed_provider_access_classes"] =
             value(enum_array(&classes.iter().copied().collect::<Vec<_>>()));
@@ -564,7 +582,7 @@ fn write_app_policy(table: &mut Table, input: &AppAccessInput) {
     overrides["placement"] = value(enum_array(&input.request_overrides.placement));
     overrides["prefer"] = value(enum_array(&input.request_overrides.prefer));
     overrides["offline_required"] = value(input.request_overrides.offline_required);
-    overrides["quality_floor"] = value(enum_array(&input.request_overrides.quality_floor));
+    overrides["capability_floor"] = value(enum_array(&input.request_overrides.capability_floor));
     overrides["latency"] = value(enum_array(&input.request_overrides.latency));
     overrides["fallback"] = value(enum_array(&input.request_overrides.fallback));
     if let Some(range) = &input.request_overrides.max_cost_usd {
@@ -620,6 +638,7 @@ mod tests {
         AppAccessInput {
             app_id: app_id.into(),
             allowed_intents: Some(vec!["text.summarize".into()]),
+            allowed_builtin_tools: Some(BTreeSet::new()),
             allowed_provider_access_classes: Some(BTreeSet::from([ProviderAccessClass::Standard])),
             allowed_cloud_input_modalities: Some(BTreeSet::from([Modality::Text])),
             max_pending_jobs: 16,
@@ -746,6 +765,30 @@ mod tests {
                 "audio.align".to_owned(),
                 "text.summarize".to_owned(),
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn omitted_hosted_tool_acl_preserves_existing_explicit_grant() {
+        let (_temp, manager) = test_manager();
+        let mut created = input("web-search-consumer");
+        created.allowed_builtin_tools = Some(BTreeSet::from([BuiltinTool::WebSearch]));
+        manager.create(created).await.unwrap();
+
+        let mut update = input("web-search-consumer");
+        update.allowed_builtin_tools = None;
+        update.max_pending_jobs = 20;
+        manager.update(update).await.unwrap();
+
+        let overview = manager.list(&BTreeSet::new()).await.unwrap();
+        let app = overview
+            .apps
+            .iter()
+            .find(|app| app.app_id == "web-search-consumer")
+            .unwrap();
+        assert_eq!(
+            app.allowed_builtin_tools,
+            BTreeSet::from([BuiltinTool::WebSearch])
         );
     }
 

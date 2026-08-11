@@ -1,8 +1,8 @@
 # v0.1 外部合同审计
 
-日期：2026-08-10
+日期：2026-08-11
 
-基线：`0.1.0-candidate.2`（`candidate.1` 保持冻结）
+基线：`0.1.0-candidate.3`（`candidate.1`、`candidate.2` 保持冻结）
 结论：consumer surface 已形成可供外部应用开始反馈测试的版本化 candidate；正式发布仍由
 长期运行、真实 consumer 和 SLO 证据决定。
 
@@ -44,7 +44,9 @@ Candidate/Attempt、取消、deadline、错误归类、provider capability probe
 candidate.1 新增的是它们的外部发布形态：精确版本、路由清单、最小 JSON schema、golden fixtures、
 严格失败纪律和兼容策略。candidate.2 以 additive 方式增加 speech `execution_mode`、PCM
 server-stream 描述和 experimental duplex ASR 路由，同时在 Responses 后端允许已授权的 Codex
-text/image + SSE。ONNX/视觉 typed slices 只列在 manifest `experimental_routes`，不进入 stable
+text/image + SSE。candidate.3 通过显式 migration 更换 Intent、capability、policy/fallback 与
+Job provenance 词汇，并增加 `reasoning.effort=ultra`；它不修改 bearer、HTTP path、typed payload
+或错误 envelope。ONNX/视觉 typed slices 只列在 manifest `experimental_routes`，不进入 stable
 consumer routes；远程节点与 operator resource schema 同样没有进入。
 
 ## 自动化证据

@@ -527,11 +527,11 @@ for line in sys.stdin:
             input_modalities = ["text"]
             output_modalities = ["audio"]
             required_features = ["built_in_voices"]
-            default_quality_floor = "basic"
+            default_capability_floor = "foundational"
             [model_profiles.tts]
             family = "fake"
             [model_profiles.tts.ratings."speech.synthesize"]
-            grade = "basic"
+            level = "foundational"
             status = "benchmarked"
             eval_profile = "fake-v1"
             score = 1.0

@@ -7,7 +7,7 @@
 
 ## 背景
 
-Ollama 与大多数目标云服务都提供某种 OpenAI-compatible API。自定义一套文本生成协议会增加 Client SDK、adapter 和迁移成本。与此同时，runtime 还需要表达 Intent、priority、placement、quality floor、queue、budget 和 routing，这些不是物理模型 API 自然拥有的语义。
+Ollama 与大多数目标云服务都提供某种 OpenAI-compatible API。自定义一套文本生成协议会增加 Client SDK、adapter 和迁移成本。与此同时，runtime 还需要表达 Intent、priority、placement、capability floor、queue、budget 和 routing，这些不是物理模型 API 自然拥有的语义。
 
 ## 决策
 

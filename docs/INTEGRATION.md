@@ -3,7 +3,8 @@
 本文面向调用 `infer-runtime` 的应用开发者。它说明如何登记一个 App、取得调用凭证、发送
 第一条文本或音频请求，以及在反馈测试中保留哪些诊断信息。
 
-当前外部合同版本为 `0.1.0-candidate.2`。接入前先阅读
+当前外部合同版本为 `0.1.0-candidate.3`。从 candidate.2 升级的 Consumer 必须先完成
+[candidate.3 migration](MIGRATION-0.1.0-candidate.3.md)，再阅读
 [consumer contract](../contracts/v0.1/README.md)；机器可读字段、枚举和响应以
 [OpenAPI](../contracts/v0.1/openapi.json) 为准。本文是 onboarding，不替代版本化合同。
 
@@ -19,7 +20,7 @@
 Provider key 只由 daemon 在服务端读取，不得交给 consumer。
 
 正式本机接入应按 [Consumer Discovery](CONSUMER_DISCOVERY.md) 选择
-`infer-runtime.consumer@0.1.0-candidate.2` offer。显式 endpoint 配置可覆盖 Discovery，供开发与
+`infer-runtime.consumer@0.1.0-candidate.3` offer。显式 endpoint 配置可覆盖 Discovery，供开发与
 诊断使用；固定端口只是现有 Consumer 的迁移 fallback，不应继续成为新接入的硬编码依赖。
 
 ## 2. 为 consumer 登记独立 App
@@ -46,7 +47,7 @@ priority = ["interactive", "normal", "background"]
 placement = ["local_only", "private", "anywhere"]
 prefer = ["local", "trusted_node", "cloud"]
 offline_required = true
-quality_floor = ["basic", "general", "advanced"]
+capability_floor = ["foundational", "capable", "advanced", "expert"]
 latency = ["interactive", "balanced", "throughput"]
 fallback = ["none", "equivalent"]
 max_cost_usd = { min = 0.0, max = 1.0 }
@@ -107,9 +108,9 @@ curl http://127.0.0.1:8787/v1/responses \
   }'
 ```
 
-常用 Intent 包括 `text.summarize`、`text.proofread`、`assistant.general` 和
-`reasoning.deep`。可用的 Intent 及默认路由以运行配置和合同为准。`infer.placement`、
-`infer.quality_floor`、`infer.fallback` 等是约束，不是物理 deployment 选择器。
+常用 Intent 包括 `text.summarize`、`text.proofread`、`language.respond` 和
+`reasoning.solve`。可用的 Intent 及默认路由以运行配置和合同为准。`infer.placement`、
+`infer.capability_floor`、`infer.fallback` 等是约束，不是物理 deployment 选择器。
 
 普通 HTTP client 的接入形状如下：
 
@@ -121,7 +122,7 @@ const response = await fetch("http://127.0.0.1:8787/v1/responses", {
     "Content-Type": "application/json",
   },
   body: JSON.stringify({
-    model: "assistant.general",
+    model: "language.respond",
     input: "解释这张卡片里的错误",
     metadata: { "infer.placement": "local_only" },
   }),
@@ -144,7 +145,7 @@ if (!response.ok) {
 curl -N http://127.0.0.1:8787/v1/responses \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"assistant.general","input":"你好","stream":true}'
+  -d '{"model":"language.respond","input":"你好","stream":true}'
 ```
 
 客户端取消 HTTP/SSE 连接后仍应按正常取消路径处理。不要假设所有 provider 都产生完全相同
@@ -173,8 +174,8 @@ POST /v1/responses/{response_id}/cancel
 | `audio.transcribe` | `POST /v1/audio/transcriptions` | multipart | JSON 或 text |
 | `audio.transcribe`（实验流） | `GET /v1/audio/transcriptions/stream` | WebSocket PCM + control JSON | revisioned partial/final JSON |
 | `audio.align` | `POST /v1/audio/alignments` | multipart | JSON timestamps |
-| `speech.synthesize` / `speech.voice_design` | `POST /v1/audio/speech` | JSON | 完整音频或 streamed PCM bytes |
-| `speech.voice_clone` | `POST /v1/audio/voice-clones` | multipart | 音频 bytes |
+| `speech.synthesize` / `speech.design_voice` | `POST /v1/audio/speech` | JSON | 完整音频或 streamed PCM bytes |
+| `speech.clone_voice` | `POST /v1/audio/voice-clones` | multipart | 音频 bytes |
 
 转写示例：
 
@@ -214,10 +215,10 @@ revision `infer.speech.voice-aliases@20260811.1` 当前发布
 alias 不会被静默重定义。获得该 Intent 不会同时获得 VoiceDesign、VoiceClone 或录音引用能力。
 对需要稳定产品合同的 App，配置
 `allowed_speech_voice_aliases = ["speech.voice.zh.bright_female.v1"]`；该 App 传入任何 provider
-原生 speaker 字符串都会在创建 Job 前被拒绝。省略 allowlist 只用于兼容尚未迁移的 candidate.2
+原生 speaker 字符串都会在创建 Job 前被拒绝。省略 allowlist 只用于兼容尚未迁移到 Runtime 逻辑别名的
 调用方。
 
-### TTS server stream（candidate.2）
+### TTS server stream（candidate.2 引入，candidate.3 保留）
 
 同一 speech endpoint 使用显式执行模式，不另造模型专属接口。首个 streaming codec 固定为
 `pcm_s16le`，所以必须同时使用 `response_format=pcm`：
@@ -275,7 +276,7 @@ partial，只有 final 可按终态保存。
 
 ## 6. 试用实验性本地人脸检测与 SFace 向量
 
-ONNX P0 提供一个刻意收窄的实验路由。它不属于 `0.1.0-candidate.2` stable Consumer routes，外部接入时
+ONNX P0 提供一个刻意收窄的实验路由。它不属于 `0.1.0-candidate.3` stable Consumer routes，外部接入时
 必须单独固定 daemon commit，并接受在 stable promotion 前可能调整 schema：
 
 | 项目 | 当前 wire contract |
@@ -348,8 +349,8 @@ SigLIP 2 纵向切片把图像和文本编码为同一个语义空间，供 Cons
 
 | Intent | Endpoint | 请求 |
 | --- | --- | --- |
-| `vision.embed_image` | `POST /infer/v1/vision/image-embeddings` | multipart JPEG/PNG |
-| `vision.embed_text` | `POST /infer/v1/vision/text-embeddings` | strict JSON |
+| `semantic.embed_image` | `POST /infer/v1/vision/image-embeddings` | multipart JPEG/PNG |
+| `semantic.embed_text` | `POST /infer/v1/vision/text-embeddings` | strict JSON |
 
 图像必须由 Consumer 预先完成 EXIF/orientation 归一化并编码为 display-sized JPEG/PNG。当前
 合同要求 `image_orientation=display_pixels_orientation_normalized`，Runtime 不再应用 EXIF
@@ -359,7 +360,7 @@ SigLIP 2 纵向切片把图像和文本编码为同一个语义空间，供 Cons
 ```bash
 curl http://127.0.0.1:8787/infer/v1/vision/image-embeddings \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
-  -F model=vision.embed_image \
+  -F model=semantic.embed_image \
   -F source_revision='shadow:photo-42/recipe:7/artifact:abc123' \
   -F image_orientation=display_pixels_orientation_normalized \
   -F image=@display.jpg\;type=image/jpeg
@@ -374,7 +375,7 @@ curl http://127.0.0.1:8787/infer/v1/vision/text-embeddings \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "vision.embed_text",
+    "model": "semantic.embed_text",
     "text": "海边日落",
     "query_revision": "shadow:semantic-query:v1",
     "language": "zh-CN"
@@ -412,7 +413,7 @@ schema，也不传物理模型名：
 | Intent | Endpoint | 结果 |
 | --- | --- | --- |
 | `vision.describe_image` | `POST /infer/v1/vision/image-descriptions` | 短描述 + 自由关键词 proposal |
-| `vision.review_classification` | `POST /infer/v1/vision/classification-reviews` | 闭集中的 `matched`，或 `none` / `uncertain` |
+| `vision.classify_closed_set` | `POST /infer/v1/vision/classification-reviews` | 闭集中的 `matched`，或 `none` / `uncertain` |
 
 两者都是严格 multipart 请求，必填 `model`、`source_revision`、
 `image_orientation=display_pixels_orientation_normalized` 和名为 `image` 的 JPEG/PNG。图片最多
@@ -429,7 +430,7 @@ curl http://127.0.0.1:8787/infer/v1/vision/image-descriptions \
   -F image_orientation=display_pixels_orientation_normalized \
   -F language=zh-CN \
   -F infer.priority=background \
-  -F infer.quality_floor=basic \
+  -F infer.capability_floor=foundational \
   -F infer.placement=local_only \
   -F infer.offline_required=true \
   -F infer.fallback=none \
@@ -446,13 +447,13 @@ curl http://127.0.0.1:8787/infer/v1/vision/image-descriptions \
 ```bash
 curl http://127.0.0.1:8787/infer/v1/vision/classification-reviews \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
-  -F model=vision.review_classification \
+  -F model=vision.classify_closed_set \
   -F source_revision='shadow:photo-42/recipe:7/artifact:abc123' \
   -F image_orientation=display_pixels_orientation_normalized \
   -F taxonomy_revision='shadow:categories:9' \
   -F 'categories=[{"id":"travel","name":"旅行"},{"id":"food","name":"食物"}]' \
   -F infer.priority=interactive \
-  -F infer.quality_floor=general \
+  -F infer.capability_floor=capable \
   -F infer.placement=local_only \
   -F infer.offline_required=true \
   -F infer.fallback=none \
@@ -464,9 +465,9 @@ curl http://127.0.0.1:8787/infer/v1/vision/classification-reviews \
 公共响应可增加字段，Consumer 必须忽略未知响应字段；请求始终严格。错误继续按 HTTP status +
 `error.code` 处理，不解析诊断 message。
 
-当前 4B Build 在两条 Intent 上评级 `basic`、resource class 为 `standard`；8B Build 评级
-`general`、resource class 为 `heavy`。描述默认 basic，闭集复核默认 general；Consumer 可为
-明确复核请求 `infer.quality_floor=general`，但不得提交 Ollama tag。响应 `provenance` 会披露实际
+当前 4B Build 在两条 Intent 上评级 `foundational`、resource class 为 `standard`；8B Build 评级
+`capable`、resource class 为 `heavy`。描述默认 `foundational`，闭集复核默认 `capable`；Consumer 可为
+明确复核请求使用 `infer.capability_floor=capable`，但不得提交 Ollama tag。响应 `provenance` 会披露实际
 provider、deployment、model profile/build、physical model、runtime、schema/prompt revision 与
 可用的 native timing。
 
@@ -478,7 +479,7 @@ source revision/stale-result 仲裁与用户接受链路。图片、闭集、描
 原生计算不承诺硬抢占，迟到结果不会发布为第二个终态。
 
 App 必须只为实际需要显式加入 `vision.describe_image` 和/或
-`vision.review_classification`；不需要 `resource_admin`，也不因此获得其他视觉 Intent。
+`vision.classify_closed_set`；不需要 `resource_admin`，也不因此获得其他视觉 Intent。
 
 ## 9. 试用 Codex 订阅模型组（experimental）
 
@@ -494,17 +495,17 @@ Provider；本机 stdio 只是 transport。一个登录会话当前发现 Sol、
 [apps.sample-advanced-consumer]
 credential = { source = "managed" }
 resource_admin = false
-allowed_intents = ["assistant.general", "reasoning.deep", "image.generate"]
+allowed_intents = ["language.respond", "reasoning.solve", "image.generate"]
 allowed_provider_access_classes = ["standard", "subscription"]
 allowed_cloud_input_modalities = ["text"]
-default_policy = "quality-first"
-allowed_policies = ["quality-first"]
+default_policy = "capability-first"
+allowed_policies = ["capability-first"]
 
 [apps.sample-advanced-consumer.request_overrides]
 priority = ["interactive"]
 placement = ["cloud_only"]
 prefer = ["cloud"]
-quality_floor = ["advanced", "frontier"]
+capability_floor = ["expert", "exceptional"]
 fallback = ["none"]
 ```
 
@@ -517,27 +518,27 @@ curl http://127.0.0.1:8787/v1/responses \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "reasoning.deep",
+    "model": "reasoning.solve",
     "input": "比较两个方案并给出简洁结论。",
     "reasoning": {"effort": "low"},
     "metadata": {
-      "infer.policy": "quality-first",
+      "infer.policy": "capability-first",
       "infer.priority": "interactive",
       "infer.placement": "cloud_only",
       "infer.provider_access_class": "subscription",
-      "infer.quality_floor": "advanced",
+      "infer.capability_floor": "expert",
       "infer.fallback": "none"
     }
   }'
 ```
 
-图片请求使用独立 `assistant.multimodal` Intent，且 App 必须把 `image` 加入
+图片请求使用独立 `multimodal.respond` Intent，且 App 必须把 `image` 加入
 `allowed_cloud_input_modalities`。获得 subscription 访问权并不会自动允许图片外发。输入采用
 Responses parts；只接受 HTTPS image URL 或有界 JPEG/PNG data URL，本地文件路径不会被接受：
 
 ```json
 {
-  "model": "assistant.multimodal",
+  "model": "multimodal.respond",
   "stream": true,
   "input": [{
     "role": "user",
@@ -593,9 +594,10 @@ Codex 子进程或消费订阅。`local_only` 和 `offline_required=true` 也始
 `infer.provider_access_class=standard|subscription` 做硬性收窄。它只减少候选，不会扩大 App 的
 `allowed_provider_access_classes`；越权值会在创建 Job、进入队列或启动 Provider 前被拒绝。
 
-模型强度与推理强度是两个维度：`infer.quality_floor` 决定候选模型至少达到哪个能力 grade，
-`reasoning.effort` 决定选中模型本次投入多少计算。默认模板使用 `quality_fit` 选择最低充分 grade；
-显式 `quality-first` 才使用 `quality` 追求最强合格模型。
+模型能力与推理投入是两个维度：`infer.capability_floor` 决定候选模型至少达到哪个能力 level，
+`reasoning.effort` 决定选中模型本次投入多少计算。默认模板使用 `capability_fit` 选择最低充分 level；
+显式 `capability-first` 才使用 `capability` 追求最强合格模型。公共 effort 顺序为
+`none|low|medium|high|xhigh|max|ultra`，但每个 Deployment 只接受自己明确声明的子集。
 
 operator 可读取动态模型组；`admitted=false` 只表示发现，不能路由：
 
@@ -603,57 +605,48 @@ operator 可读取动态模型组；`admitted=false` 只表示发现，不能路
 GET /infer/v1/providers/codex-subscription/models
 ```
 
-该能力不等于完整 Codex Server 代理。Thread、任意工具、文件、Shell、MCP、Web、delegation 和
-memory 均不向 Consumer 暴露；文本模式观察到任何 tool item 都会失败，`image.generate` 模式也
-只允许一个 `imageGeneration` item。
+Codex Web Search 使用标准 Responses request 形状，不增加 `web.research` 一类模型别名：
 
-### 9.1 Antigravity CLI 第二订阅 bridge（experimental）
+```json
+{
+  "model": "language.respond",
+  "input": "查询当前信息并给出简洁结论。",
+  "tools": [{"type": "web_search", "external_web_access": true}],
+  "tool_choice": "auto",
+  "metadata": {
+    "infer.provider_access_class": "subscription",
+    "infer.placement": "cloud_only",
+    "infer.fallback": "none"
+  }
+}
+```
 
-Antigravity CLI 使用同一 Provider inventory 结构，但不是 Codex JSON-RPC 的别名。一个登录账号对应
-一个 `placement=cloud`、`access_class=subscription` Provider；`agy models` 只形成动态 operator
-inventory；只有配置中显式 Build/Deployment 的模型能成为 Consumer 候选。
+这个 Codex experimental extension 沿用标准 Responses 形状，当前接受
+`tool_choice = auto|required|none`，以及单个 `web_search` tool 的 `external_web_access` 布尔值。
+它是 candidate.3 Responses 合同中的有界 hosted-tool 子集；获得 Intent 或 subscription access
+并不自动授权 Web Search，App 仍必须显式取得 `allowed_builtin_tools=web_search`。domain filter、
+位置、图片结果和 object-form tool choice 留到独立合同版本。`false` 映射
+Codex cached search，缺省/`true` 映射 live search；`required` 会在返回前验证至少出现一个
+`webSearch` item，`none` 则为该 Attempt 强制关闭搜索且不要求 Web Search Provider/Build 能力或
+App hosted-tool 权限。unary 与文本 SSE 都可
+使用；SSE 的最终 `response.completed.response.output` 包含规范化结果。
 
-bridge 把 `agy` 当作受信任本机 subscription agent：CLI 直接使用当前用户真实 HOME/Keychain 登录，
-Runtime 不读取、复制、轮换或输出 token。Consumer payload 和显式诊断写入一次性 owner-only
-workspace，argv 只有固定提示；CLI 自身仍可能维护账号级状态/history，所以这不是 credential 或
-history 隔离边界。以下配置开启动态 inventory；只有额外配置的静态 Deployment 才会路由：
+成功响应把 App Server 的 `webSearch` 转为标准 `web_search_call`，action 名称规范化为
+`search|open_page|find_in_page`，随后是普通 message。App Server 当前没有给 adapter 稳定的
+Responses URL-annotation DTO，因此首版不伪造 `url_citation`；Consumer 必须允许未知响应字段，且
+不能把空 annotations 理解为“没有使用 Web”。
+
+Web Search 权限与 Intent、subscription access、cloud payload egress 三者独立。普通 App 默认
+`allowed_builtin_tools=[]`；必须显式加入：
 
 ```toml
-[providers.antigravity-subscription]
-kind = "antigravity_cli"
-access_class = "subscription"
-command = "/absolute/path/to/agy"
-placement = "cloud"
-max_concurrency = 1
-max_queue = 16
-
-[providers.antigravity-subscription.capability_profile]
-version = 1
-protocol = "antigravity_cli"
-capabilities = ["responses", "instructions", "reasoning_effort"]
+allowed_builtin_tools = ["web_search"]
 ```
 
-首版 Consumer 合同是 `POST /v1/responses` 的 text-in/text-out unary 子集：允许 instructions 和
-`reasoning.effort`，禁止 tools、图片、streaming、conversation、sampling、metadata passthrough 与
-durable background。`gemini-3.6-flash-low|medium|high` 是三个物理上游 slug，分别只接受 Low、
-None/Medium、High effort。它们共享一个语义 Model Profile，新增 inventory 模型不会自动准入。
-
-Provider 可在 Console 的 Models 页面查看动态 Inventory；未登录返回 authentication unavailable，
-不是 Runtime 配置损坏：
-
-```http
-GET /infer/v1/providers/antigravity-subscription/models
-```
-
-App 必须同时显式允许目标 Intent 与 `subscription` provider access class；`local_only`、
-`offline_required=true` 或未授权 App 都不会启动 `agy`。当前不适合敏感输入；真实 tool-denial、
-cancel/late-result、quota、history 与错误分类仍处于 soak。图片和 streaming 是更后的独立门，不能
-因 Gemini 原生能力而推导为 Runtime 能力。
-
-CLI 1.1.12 的真实 `stream-json` 还会产生一个没有内容的 `step_type="unknown"` 状态/计时帧。
-Runtime 只忽略字段精确为 `conversation_id`、`duration_seconds`、`state`、`step_index`、
-`step_type`，且 conversation 与 init 一致的这一种帧。任何新增字段、类型漂移、内容、tool 或
-subagent payload 都继续失败；该例外不是对未知事件的通用兼容。
+缺少该 ACL 的请求会在建 Job、排队或启动 Codex 子进程前以 policy violation 拒绝。非 Web 请求的
+Codex 进程继续以 `web_search="disabled"` 启动；Web 请求才按请求追加 cached/live 设置。Shell、
+文件、MCP、Apps、computer use、delegation 与任意 server-initiated approval 继续 fail closed。
+`image.generate` 仍是上文的独立精确合同，不能与 Web Search 混用。
 
 ## 10. 查询和解释自己的 Job
 
@@ -692,7 +685,7 @@ operator experimental surface，不是普通 consumer 合同。
     单个精确 tool 外不得发送 tools；订阅 bridge 不得使用 durable background。
 11. 音频 streaming Consumer 必须验证 PCM descriptor、partial replacement、final、disconnect
     cancel 和 reservation 释放，并记录实际 `transcription_mode`，不得假设原生实时 ASR。
-12. Qwen 视觉 Consumer 必须验证闭集 id 不外逸、basic/general 路由、取消与 source revision
+12. Qwen 视觉 Consumer 必须验证闭集 id 不外逸、foundational/capable 路由、取消与 source revision
     仲裁；proposal 只有在应用自己的用户接受链路后才能成为业务事实。
 
 Golden request/response/error 示例位于 [contracts/v0.1/fixtures](../contracts/v0.1/fixtures)。

@@ -28,16 +28,16 @@ use futures_util::{Stream, StreamExt};
 use infer_artifact::{ArtifactError, ArtifactStore};
 use infer_auth::{AppCredentials, CredentialError};
 use infer_core::{
-    AppConfig, AttemptOutcome, AttemptSnapshot, AttemptTrigger, AudioExecutionRequest,
+    AppConfig, AttemptOutcome, AttemptSnapshot, AttemptTrigger, AudioExecutionRequest, BuiltinTool,
     ContractError, DurablePayloadRef, ExecutionMode, ExecutionRequirements, Fallback,
     IntentProfile, JobListPage, JobPageCursor, JobSnapshot, JobState, LocalInventoryKind, Modality,
-    Priority, ProviderConfig, ProviderProtocol, QuotaConfig, RequestConstraints, ResponsesRequest,
-    RuntimeConfig,
+    Priority, ProviderCapability, ProviderConfig, ProviderProtocol, QuotaConfig,
+    RequestConstraints, ResponsesRequest, RuntimeConfig,
 };
 use infer_payload::PayloadError;
 use infer_provider::{
-    AntigravityCliProvider, AudioWorkerExecutor, CodexAppServerProvider, DynAudioDuplexExecutor,
-    DynAudioExecutor, DynAudioStreamExecutor, DynFaceDetectionExecutor, DynFaceEmbeddingExecutor,
+    AudioWorkerExecutor, CodexAppServerProvider, DynAudioDuplexExecutor, DynAudioExecutor,
+    DynAudioStreamExecutor, DynFaceDetectionExecutor, DynFaceEmbeddingExecutor,
     DynImageEmbeddingExecutor, DynImageUnderstandingExecutor, DynProvider,
     DynTextEmbeddingExecutor, OllamaVisionExecutor, OnnxProviderRuntime, ProviderError,
     ProviderModelCatalog, ResponsesProvider, probe_responses_provider,
@@ -398,22 +398,6 @@ impl Runtime {
                         .map(|build| build.model_id.clone())
                         .collect::<BTreeSet<_>>();
                     let adapter = CodexAppServerProvider::new(
-                        id,
-                        provider.command.clone().expect("validated command"),
-                        provider.args.clone(),
-                        admitted_models,
-                    );
-                    providers.insert(id.clone(), Arc::new(adapter) as DynProvider);
-                }
-                "antigravity_cli" => {
-                    let admitted_models = config
-                        .deployments
-                        .values()
-                        .filter(|deployment| deployment.provider == *id)
-                        .filter_map(|deployment| config.model_builds.get(&deployment.build))
-                        .map(|build| build.model_id.clone())
-                        .collect::<BTreeSet<_>>();
-                    let adapter = AntigravityCliProvider::new(
                         id,
                         provider.command.clone().expect("validated command"),
                         provider.args.clone(),
@@ -1101,9 +1085,7 @@ impl Runtime {
                     .collect::<BTreeSet<_>>();
                 if matches!(
                     provider.capability_profile.protocol,
-                    ProviderProtocol::Responses
-                        | ProviderProtocol::CodexAppServer
-                        | ProviderProtocol::AntigravityCli
+                    ProviderProtocol::Responses | ProviderProtocol::CodexAppServer
                 ) && provider
                     .capability_profile
                     .supports(infer_core::ProviderCapability::Streaming)
@@ -1141,9 +1123,7 @@ impl Runtime {
             .ok_or_else(|| RuntimeError::ProviderUnavailable(provider_id.into()))?;
         if !matches!(
             config.capability_profile.protocol,
-            ProviderProtocol::Responses
-                | ProviderProtocol::CodexAppServer
-                | ProviderProtocol::AntigravityCli
+            ProviderProtocol::Responses | ProviderProtocol::CodexAppServer
         ) {
             return Err(RuntimeError::ProviderProbeUnsupported(provider_id.into()));
         }
@@ -1160,10 +1140,7 @@ impl Runtime {
             .map(|build| build.model_id.clone())
             .ok_or_else(|| RuntimeError::ProviderProbeModelMissing(provider_id.into()))?;
         let provider = self.provider(provider_id)?;
-        if matches!(
-            config.capability_profile.protocol,
-            ProviderProtocol::CodexAppServer | ProviderProtocol::AntigravityCli
-        ) {
+        if config.capability_profile.protocol == ProviderProtocol::CodexAppServer {
             Ok(probe_responses_provider_with_effort(
                 provider.as_ref(),
                 &model,
@@ -1390,6 +1367,15 @@ impl Runtime {
                 intent: logical_model.to_owned(),
             });
         }
+        if execution_requirements
+            .provider_capabilities
+            .contains(&ProviderCapability::WebSearch)
+            && !app.allows_builtin_tool(BuiltinTool::WebSearch)
+        {
+            return Err(RuntimeError::OverrideNotAllowed {
+                field: "tools.web_search",
+            });
+        }
         if intent.data_plane != expected_data_plane {
             return Err(RuntimeError::DataPlaneMismatch {
                 intent: logical_model.to_owned(),
@@ -1423,8 +1409,8 @@ impl Runtime {
         );
         let fallback = constraints.fallback.unwrap_or(Fallback::None);
         let mut targets = plan.candidates.clone();
-        if fallback == Fallback::AllowLowerQuality {
-            targets.extend(plan.lower_quality_candidates.iter().cloned());
+        if fallback == Fallback::AllowLowerCapability {
+            targets.extend(plan.lower_capability_candidates.iter().cloned());
         }
         let candidate = targets.first().cloned().ok_or(RuntimeError::NoCandidate)?;
         if fallback == Fallback::None {
@@ -1451,8 +1437,8 @@ impl Runtime {
             model_build: candidate.build_id.clone(),
             physical_model: candidate.physical_model.clone(),
             placement: candidate.placement,
-            quality_grade: candidate.quality_grade,
-            rating_status: candidate.rating_status,
+            capability_level: candidate.capability_level,
+            evaluation_status: candidate.evaluation_status,
             resource_class: candidate.resource_class,
             state: JobState::Queued,
             policy: policy_name,
@@ -1793,8 +1779,8 @@ impl Runtime {
             entry.snapshot.model_build = target.build_id.clone();
             entry.snapshot.physical_model = target.physical_model.clone();
             entry.snapshot.placement = target.placement;
-            entry.snapshot.quality_grade = target.quality_grade;
-            entry.snapshot.rating_status = target.rating_status;
+            entry.snapshot.capability_level = target.capability_level;
+            entry.snapshot.evaluation_status = target.evaluation_status;
             entry.snapshot.resource_class = target.resource_class;
             entry.snapshot.clone()
         };
@@ -1954,11 +1940,11 @@ fn validate_overrides(
         });
     }
     if constraints
-        .quality_floor
-        .is_some_and(|value| !allowed.quality_floor.contains(&value))
+        .capability_floor
+        .is_some_and(|value| !allowed.capability_floor.contains(&value))
     {
         return Err(RuntimeError::OverrideNotAllowed {
-            field: "infer.quality_floor",
+            field: "infer.capability_floor",
         });
     }
     if constraints
@@ -2377,11 +2363,11 @@ mod tests {
             [intents."text.summarize"]
             input_modalities = ["text"]
             output_modalities = ["text"]
-            default_quality_floor = "basic"
+            default_capability_floor = "foundational"
             [model_profiles.qwen]
             family = "qwen"
             [model_profiles.qwen.ratings."text.summarize"]
-            grade = "basic"
+            level = "foundational"
             status = "benchmarked"
             eval_profile = "summary-v1"
             score = 0.8
@@ -2410,8 +2396,8 @@ mod tests {
             [apps.test-app.request_overrides]
             priority = ["background"]
             placement = ["local_only", "anywhere"]
-            quality_floor = ["general"]
-            fallback = ["equivalent", "allow_lower_quality"]
+            capability_floor = ["capable"]
+            fallback = ["equivalent", "allow_lower_capability"]
         "#,
         )
         .unwrap()
@@ -2426,6 +2412,7 @@ mod tests {
             background: false,
             metadata: BTreeMap::new(),
             tools: vec![],
+            tool_choice: None,
             reasoning: None,
             temperature: None,
             top_p: None,
@@ -2485,6 +2472,7 @@ mod tests {
             background: false,
             metadata: BTreeMap::new(),
             tools: vec![],
+            tool_choice: None,
             reasoning: None,
             temperature: None,
             top_p: None,
@@ -2531,6 +2519,7 @@ mod tests {
                     background: false,
                     metadata: BTreeMap::new(),
                     tools: vec![],
+                    tool_choice: None,
                     reasoning: None,
                     temperature: None,
                     top_p: None,
@@ -2601,6 +2590,7 @@ mod tests {
                     background: false,
                     metadata: BTreeMap::new(),
                     tools: vec![],
+                    tool_choice: None,
                     reasoning: None,
                     temperature: None,
                     top_p: None,
@@ -2707,6 +2697,7 @@ mod tests {
             background: false,
             metadata: BTreeMap::new(),
             tools: vec![],
+            tool_choice: None,
             reasoning: None,
             temperature: None,
             top_p: None,
@@ -2747,6 +2738,7 @@ mod tests {
             background: false,
             metadata: BTreeMap::new(),
             tools: vec![],
+            tool_choice: None,
             reasoning: None,
             temperature: None,
             top_p: None,
@@ -2792,6 +2784,7 @@ mod tests {
             background: false,
             metadata,
             tools: vec![],
+            tool_choice: None,
             reasoning: None,
             temperature: None,
             top_p: None,
@@ -2851,6 +2844,7 @@ mod tests {
             background: false,
             metadata,
             tools: vec![],
+            tool_choice: None,
             reasoning: None,
             temperature: None,
             top_p: None,
@@ -2890,6 +2884,7 @@ mod tests {
             background: false,
             metadata: BTreeMap::from([("infer.fallback".into(), "equivalent".into())]),
             tools: vec![],
+            tool_choice: None,
             reasoning: None,
             temperature: None,
             top_p: None,
@@ -2948,6 +2943,7 @@ mod tests {
             background: false,
             metadata: BTreeMap::from([("infer.fallback".into(), "equivalent".into())]),
             tools: vec![],
+            tool_choice: None,
             reasoning: None,
             temperature: None,
             top_p: None,
@@ -2981,7 +2977,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn explicit_quality_fallback_can_remove_only_the_requested_raise() {
+    async fn explicit_capability_fallback_can_remove_only_the_requested_raise() {
         let config = config();
         let local = Arc::new(FakeProvider {
             id: "local".into(),
@@ -2998,10 +2994,11 @@ mod tests {
             stream: false,
             background: false,
             metadata: BTreeMap::from([
-                ("infer.quality_floor".into(), "general".into()),
-                ("infer.fallback".into(), "allow_lower_quality".into()),
+                ("infer.capability_floor".into(), "capable".into()),
+                ("infer.fallback".into(), "allow_lower_capability".into()),
             ]),
             tools: vec![],
+            tool_choice: None,
             reasoning: None,
             temperature: None,
             top_p: None,
@@ -3036,6 +3033,7 @@ mod tests {
             background: false,
             metadata: BTreeMap::new(),
             tools: vec![],
+            tool_choice: None,
             reasoning: None,
             temperature: None,
             top_p: None,
@@ -3160,6 +3158,7 @@ mod tests {
             background: false,
             metadata: BTreeMap::new(),
             tools: vec![],
+            tool_choice: None,
             reasoning: None,
             temperature: None,
             top_p: None,
@@ -3212,6 +3211,7 @@ mod tests {
                             background: false,
                             metadata: BTreeMap::new(),
                             tools: vec![],
+                            tool_choice: None,
                             reasoning: None,
                             temperature: None,
                             top_p: None,
@@ -3270,6 +3270,52 @@ mod tests {
         ));
         assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
         assert!(runtime.jobs.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn app_builtin_tool_acl_rejects_web_search_before_job_or_provider_admission() {
+        let config = config();
+        let provider = Arc::new(UnavailableProvider {
+            id: "local".into(),
+            calls: AtomicUsize::new(0),
+        });
+        let runtime = Runtime::with_providers(
+            config,
+            BTreeMap::from([("local".into(), provider.clone() as DynProvider)]),
+        );
+        let mut request = summary_request();
+        request.tools = vec![json!({"type": "web_search"})];
+
+        assert!(matches!(
+            runtime.execute("test-app", request).await,
+            Err(RuntimeError::OverrideNotAllowed {
+                field: "tools.web_search"
+            })
+        ));
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+        assert!(runtime.jobs.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn tool_choice_none_does_not_require_hosted_tool_authority() {
+        let config = config();
+        let provider = Arc::new(UnavailableProvider {
+            id: "local".into(),
+            calls: AtomicUsize::new(0),
+        });
+        let runtime = Runtime::with_providers(
+            config,
+            BTreeMap::from([("local".into(), provider.clone() as DynProvider)]),
+        );
+        let mut request = summary_request();
+        request.tools = vec![json!({"type": "web_search"})];
+        request.tool_choice = Some(infer_core::ToolChoice::None);
+
+        assert!(matches!(
+            runtime.execute("test-app", request).await,
+            Err(RuntimeError::Provider(_))
+        ));
+        assert!(provider.calls.load(Ordering::SeqCst) > 0);
     }
 
     #[tokio::test]

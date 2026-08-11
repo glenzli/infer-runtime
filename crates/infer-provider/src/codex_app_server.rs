@@ -2,12 +2,13 @@
 //!
 //! Codex App Server is an agent protocol, not a Responses endpoint. This
 //! adapter deliberately exposes only stateless inference with typed text/image
-//! input, append-only text output, and one separately admitted hosted image
-//! generation operation. Each call runs in an empty ephemeral workspace; all
-//! other tool-like items fail the Attempt closed.
+//! input, append-only text output, and separately admitted hosted Web Search
+//! and image generation operations. Each call runs in an empty ephemeral
+//! workspace; all other tool-like items fail the Attempt closed.
 
 mod image_generation;
 mod input;
+mod web_search;
 
 use std::{
     collections::{BTreeSet, VecDeque},
@@ -18,7 +19,7 @@ use std::{
 use async_stream::try_stream;
 use async_trait::async_trait;
 use bytes::Bytes;
-use infer_core::{ReasoningEffort, ResponsesRequest};
+use infer_core::{ReasoningEffort, ResponsesRequest, ToolChoice};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::{
@@ -33,14 +34,51 @@ use crate::{
 };
 use image_generation::GeneratedImage;
 use input::prepare_turn_input;
+use web_search::CompletedWebSearch;
 
 const TEXT_BASE_INSTRUCTIONS: &str = "You are serving one stateless inference request. Answer the user directly. Do not use tools, inspect files, run commands, access applications, browse, delegate, or modify external state. Do not mention this bridge or its execution environment.";
 const IMAGE_BASE_INSTRUCTIONS: &str = "You are serving one stateless image generation request. Use the built-in image generation tool exactly once to generate one PNG from the user's text prompt. Do not use any other tool, inspect files, run commands, access applications, browse, delegate, or modify external state. Do not mention this bridge or its execution environment.";
+const WEB_SEARCH_AUTO_INSTRUCTIONS: &str = "You are serving one stateless inference request. Answer the user directly. You may use only the built-in web search tool when current or web-grounded information is needed. Do not use commands, files, applications, MCP, delegation, or any other tool, and do not modify external state. Do not mention this bridge or its execution environment.";
+const WEB_SEARCH_REQUIRED_INSTRUCTIONS: &str = "You are serving one stateless web-grounded inference request. Use the built-in web search tool at least once, then answer the user directly. Do not use commands, files, applications, MCP, delegation, or any other tool, and do not modify external state. Do not mention this bridge or its execution environment.";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WebSearchMode {
+    Cached,
+    Live,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BridgeMode {
     Text,
+    WebSearch {
+        search_mode: WebSearchMode,
+        required: bool,
+    },
     ImageGeneration,
+}
+
+impl BridgeMode {
+    fn web_search_enabled(self) -> bool {
+        matches!(self, Self::WebSearch { .. })
+    }
+
+    fn requires_web_search(self) -> bool {
+        matches!(self, Self::WebSearch { required: true, .. })
+    }
+
+    fn codex_web_search_setting(self) -> &'static str {
+        match self {
+            Self::Text | Self::ImageGeneration => "disabled",
+            Self::WebSearch {
+                search_mode: WebSearchMode::Cached,
+                ..
+            } => "cached",
+            Self::WebSearch {
+                search_mode: WebSearchMode::Live,
+                ..
+            } => "live",
+        }
+    }
 }
 
 pub struct CodexAppServerProvider {
@@ -65,8 +103,32 @@ impl CodexAppServerProvider {
         }
     }
 
-    async fn session(&self) -> Result<CodexSession, ProviderError> {
-        CodexSession::spawn(&self.command, &self.args).await
+    fn execution_args(&self, mode: BridgeMode) -> Vec<String> {
+        let mut args = Vec::with_capacity(self.args.len() + 2);
+        let mut index = 0;
+        while index < self.args.len() {
+            if self.args[index] == "-c"
+                && self
+                    .args
+                    .get(index + 1)
+                    .is_some_and(|value| value.trim_start().starts_with("web_search="))
+            {
+                index += 2;
+                continue;
+            }
+            args.push(self.args[index].clone());
+            index += 1;
+        }
+        args.push("-c".into());
+        args.push(format!(
+            "web_search=\"{}\"",
+            mode.codex_web_search_setting()
+        ));
+        args
+    }
+
+    async fn session(&self, mode: BridgeMode) -> Result<CodexSession, ProviderError> {
+        CodexSession::spawn(&self.command, &self.execution_args(mode)).await
     }
 
     async fn catalog_with_session(
@@ -159,7 +221,7 @@ impl CodexAppServerProvider {
     }
 
     pub async fn discover_model_catalog(&self) -> Result<ProviderModelCatalog, ProviderError> {
-        let mut session = self.session().await?;
+        let mut session = self.session(BridgeMode::Text).await?;
         self.catalog_with_session(&mut session).await
     }
 
@@ -180,7 +242,7 @@ impl CodexAppServerProvider {
             .and_then(|reasoning| reasoning.effort)
             .and_then(|effort| (effort != ReasoningEffort::None).then(|| effort_string(effort)));
 
-        let mut session = self.session().await?;
+        let mut session = self.session(mode).await?;
         let catalog = self.catalog_with_session(&mut session).await?;
         let model = catalog
             .models
@@ -235,6 +297,8 @@ impl CodexAppServerProvider {
                     "approvalPolicy": "never",
                     "baseInstructions": match mode {
                         BridgeMode::Text => TEXT_BASE_INSTRUCTIONS,
+                        BridgeMode::WebSearch { required: false, .. } => WEB_SEARCH_AUTO_INSTRUCTIONS,
+                        BridgeMode::WebSearch { required: true, .. } => WEB_SEARCH_REQUIRED_INSTRUCTIONS,
                         BridgeMode::ImageGeneration => IMAGE_BASE_INSTRUCTIONS,
                     },
                     "cwd": session.workspace_path().display().to_string(),
@@ -294,7 +358,7 @@ impl Provider for CodexAppServerProvider {
         &self,
         request: ResponsesRequest,
     ) -> Result<ProviderByteStream, ProviderError> {
-        if validate_request(&request)? != BridgeMode::Text {
+        if validate_request(&request)? == BridgeMode::ImageGeneration {
             return Err(ProviderError::InvalidInput(
                 "image generation does not support streaming".into(),
             ));
@@ -309,13 +373,25 @@ impl Provider for CodexAppServerProvider {
 }
 
 fn validate_request(request: &ResponsesRequest) -> Result<BridgeMode, ProviderError> {
-    let mode = if request.tools.is_empty() {
+    let mode = if request.tools.is_empty() || request.effective_tool_choice() == ToolChoice::None {
         BridgeMode::Text
     } else if request.requests_image_generation() {
         BridgeMode::ImageGeneration
+    } else if request.requests_web_search() {
+        match request.effective_tool_choice() {
+            ToolChoice::None => BridgeMode::Text,
+            choice => BridgeMode::WebSearch {
+                search_mode: if request.web_search_external_access() == Some(false) {
+                    WebSearchMode::Cached
+                } else {
+                    WebSearchMode::Live
+                },
+                required: choice == ToolChoice::Required,
+            },
+        }
     } else {
         return Err(ProviderError::InvalidInput(
-            "only the exact image_generation tool is exposed by the Codex bridge".into(),
+            "only the bounded web_search and exact image_generation hosted tools are exposed by the Codex bridge".into(),
         ));
     };
     if mode == BridgeMode::ImageGeneration && (request.stream || request.background) {
@@ -377,8 +453,10 @@ struct TurnAccumulator {
     usage: Option<Value>,
     messages: Vec<Value>,
     images: Vec<GeneratedImage>,
+    searches: Vec<CompletedWebSearch>,
 }
 
+#[derive(Debug)]
 enum TurnProgress {
     Continue,
     TextDelta(String),
@@ -413,6 +491,12 @@ fn observe_turn_message(
     let Some(method) = message.get("method").and_then(Value::as_str) else {
         return Ok(TurnProgress::Continue);
     };
+    if message.get("id").is_some() {
+        return Err(ProviderError::Classified {
+            kind: ProviderFailureKind::Protocol,
+            message: "Codex bridge refused an interactive server request".into(),
+        });
+    }
     let params = message.get("params").unwrap_or(&Value::Null);
     if params
         .get("threadId")
@@ -475,11 +559,17 @@ fn observe_turn_message(
                     record_completed_item(item, accumulator)?;
                 }
             }
+            if mode.requires_web_search() && accumulator.searches.is_empty() {
+                return Err(ProviderError::Protocol(
+                    "Codex completed a required web search turn without a webSearch item".into(),
+                ));
+            }
             Ok(TurnProgress::Completed(response_value(
                 model,
                 mode,
                 std::mem::take(&mut accumulator.messages),
                 std::mem::take(&mut accumulator.images),
+                std::mem::take(&mut accumulator.searches),
                 accumulator.usage.take(),
             )?))
         }
@@ -547,6 +637,7 @@ fn sse_frame(event: &str, data: Value) -> Result<Bytes, ProviderError> {
 fn enforce_inference_item(item: &Value, mode: BridgeMode) -> Result<(), ProviderError> {
     match item.get("type").and_then(Value::as_str) {
         Some("userMessage" | "agentMessage" | "reasoning") => Ok(()),
+        Some("webSearch") if mode.web_search_enabled() => Ok(()),
         Some("imageGeneration") if mode == BridgeMode::ImageGeneration => Ok(()),
         Some(_) => Err(ProviderError::Classified {
             kind: ProviderFailureKind::Protocol,
@@ -582,6 +673,22 @@ fn record_completed_item(
                 return Err(ProviderError::Protocol(
                     "Codex generated more than one image".into(),
                 ));
+            }
+        }
+        Some("webSearch") => {
+            let search = CompletedWebSearch::from_completed_item(item)?;
+            if let Some(existing) = accumulator
+                .searches
+                .iter()
+                .find(|existing| existing.id() == search.id())
+            {
+                if existing != &search {
+                    return Err(ProviderError::Protocol(
+                        "Codex repeated a web search result with conflicting content".into(),
+                    ));
+                }
+            } else {
+                accumulator.searches.push(search);
             }
         }
         _ => {}
@@ -630,10 +737,13 @@ fn response_value(
     mode: BridgeMode,
     messages: Vec<Value>,
     images: Vec<GeneratedImage>,
+    searches: Vec<CompletedWebSearch>,
     usage: Option<Value>,
 ) -> Result<Value, ProviderError> {
     match mode {
-        BridgeMode::Text => text_response_value(model, messages, usage),
+        BridgeMode::Text | BridgeMode::WebSearch { .. } => {
+            text_response_value(model, messages, searches, usage)
+        }
         BridgeMode::ImageGeneration => image_response_value(model, images, usage),
     }
 }
@@ -641,6 +751,7 @@ fn response_value(
 fn text_response_value(
     model: &str,
     messages: Vec<Value>,
+    searches: Vec<CompletedWebSearch>,
     usage: Option<Value>,
 ) -> Result<Value, ProviderError> {
     let selected = messages
@@ -661,19 +772,24 @@ fn text_response_value(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
+    let mut output = searches
+        .iter()
+        .map(CompletedWebSearch::response_item)
+        .collect::<Vec<_>>();
+    output.push(json!({
+        "id": message_id,
+        "type": "message",
+        "role": "assistant",
+        "status": "completed",
+        "content": [{"type": "output_text", "text": text, "annotations": []}],
+    }));
     Ok(json!({
         "id": format!("codex_{}", Uuid::new_v4().simple()),
         "object": "response",
         "created_at": created_at,
         "status": "completed",
         "model": model,
-        "output": [{
-            "id": message_id,
-            "type": "message",
-            "role": "assistant",
-            "status": "completed",
-            "content": [{"type": "output_text", "text": text, "annotations": []}],
-        }],
+        "output": output,
         "usage": usage,
     }))
 }
@@ -837,6 +953,7 @@ mod tests {
             background: false,
             metadata: Default::default(),
             tools: vec![],
+            tool_choice: None,
             reasoning: None,
             temperature: None,
             top_p: None,
@@ -904,6 +1021,12 @@ mod tests {
         let error = enforce_inference_item(&json!({"type":"imageGeneration"}), BridgeMode::Text)
             .unwrap_err();
         assert_eq!(error.kind(), ProviderFailureKind::Protocol);
+        let web_mode = BridgeMode::WebSearch {
+            search_mode: WebSearchMode::Live,
+            required: false,
+        };
+        assert!(enforce_inference_item(&json!({"type":"webSearch"}), web_mode).is_ok());
+        assert!(enforce_inference_item(&json!({"type":"webSearch"}), BridgeMode::Text).is_err());
         assert!(
             enforce_inference_item(
                 &json!({"type":"imageGeneration"}),
@@ -917,6 +1040,103 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.kind(), ProviderFailureKind::Protocol);
+    }
+
+    #[test]
+    fn web_search_request_controls_per_process_mode_and_required_postcondition() {
+        let provider = CodexAppServerProvider::new(
+            "codex-test",
+            "codex",
+            vec![
+                "app-server".into(),
+                "-c".into(),
+                "web_search=\"disabled\"".into(),
+            ],
+            BTreeSet::new(),
+        );
+        let mut search = request(json!("current status"));
+        search.tools = vec![json!({"type": "web_search", "external_web_access": false})];
+        search.tool_choice = Some(ToolChoice::Required);
+        let mode = validate_request(&search).unwrap();
+        assert_eq!(
+            mode,
+            BridgeMode::WebSearch {
+                search_mode: WebSearchMode::Cached,
+                required: true,
+            }
+        );
+        assert_eq!(
+            provider.execution_args(mode).last().map(String::as_str),
+            Some("web_search=\"cached\"")
+        );
+        assert_eq!(
+            provider
+                .execution_args(mode)
+                .iter()
+                .filter(|argument| argument.starts_with("web_search="))
+                .count(),
+            1
+        );
+
+        search.tool_choice = Some(ToolChoice::None);
+        assert_eq!(validate_request(&search).unwrap(), BridgeMode::Text);
+        assert_eq!(
+            provider
+                .execution_args(BridgeMode::Text)
+                .last()
+                .map(String::as_str),
+            Some("web_search=\"disabled\"")
+        );
+
+        let mut declared_function = request(json!("answer without tools"));
+        declared_function.tools = vec![json!({"type": "function", "name": "ignored"})];
+        declared_function.tool_choice = Some(ToolChoice::None);
+        assert_eq!(
+            validate_request(&declared_function).unwrap(),
+            BridgeMode::Text
+        );
+    }
+
+    #[test]
+    fn required_search_and_interactive_server_requests_fail_closed() {
+        let mode = BridgeMode::WebSearch {
+            search_mode: WebSearchMode::Live,
+            required: true,
+        };
+        let mut accumulator = TurnAccumulator::default();
+        let missing = observe_turn_message(
+            &json!({
+                "jsonrpc": "2.0",
+                "method": "turn/completed",
+                "params": {
+                    "threadId": "thread-1",
+                    "turn": {"id": "turn-1", "status": "completed", "items": []}
+                }
+            }),
+            "gpt-5.6-terra",
+            "thread-1",
+            "turn-1",
+            mode,
+            &mut accumulator,
+        )
+        .unwrap_err();
+        assert_eq!(missing.kind(), ProviderFailureKind::Protocol);
+
+        let interactive = observe_turn_message(
+            &json!({
+                "jsonrpc": "2.0",
+                "id": 99,
+                "method": "item/commandExecution/requestApproval",
+                "params": {"threadId": "thread-1", "turnId": "turn-1"}
+            }),
+            "gpt-5.6-terra",
+            "thread-1",
+            "turn-1",
+            mode,
+            &mut accumulator,
+        )
+        .unwrap_err();
+        assert_eq!(interactive.kind(), ProviderFailureKind::Protocol);
     }
 
     #[cfg(unix)]
@@ -975,6 +1195,52 @@ echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1"
         assert!(output.contains("response.output_text.delta"));
         assert!(output.contains("hello "));
         assert!(output.contains("response.completed"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn fake_app_server_normalizes_required_web_search_without_other_tools() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("fake-codex-web");
+        std::fs::write(
+            &script,
+            r##"#!/bin/sh
+read initialize
+echo '{"jsonrpc":"2.0","id":1,"result":{"userAgent":"fake","platformFamily":"unix","platformOs":"test","codexHome":"/tmp"}}'
+read initialized
+read models
+echo '{"jsonrpc":"2.0","id":2,"result":{"data":[{"id":"gpt-5.6-terra","model":"gpt-5.6-terra","displayName":"Terra","description":"test model","supportedReasoningEfforts":[{"reasoningEffort":"low","description":""}],"defaultReasoningEffort":"low","inputModalities":["text"],"isDefault":true,"hidden":false,"upgrade":null}],"nextCursor":null}}'
+read thread
+echo '{"jsonrpc":"2.0","id":3,"result":{"thread":{"id":"thread-1"}}}'
+read turn
+echo '{"jsonrpc":"2.0","id":4,"result":{"turn":{"id":"turn-1"}}}'
+echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"ws-1","type":"webSearch","query":"runtime release","action":{"type":"openPage","url":"https://example.com/release"}}}}'
+echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"msg-1","type":"agentMessage","text":"grounded answer","phase":"final_answer"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1","turn":{"id":"turn-1","status":"completed","items":[]}}}'
+"##,
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&script).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&script, permissions).unwrap();
+        let provider = CodexAppServerProvider::new(
+            "codex-test",
+            script.display().to_string(),
+            vec![],
+            BTreeSet::from(["gpt-5.6-terra".into()]),
+        );
+        let mut search = request(json!("current release"));
+        search.tools = vec![json!({"type": "web_search"})];
+        search.tool_choice = Some(ToolChoice::Required);
+        let response = provider.execute(search).await.unwrap();
+        assert_eq!(response["output"][0]["type"], "web_search_call");
+        assert_eq!(response["output"][0]["action"]["type"], "open_page");
+        assert_eq!(
+            response["output"][1]["content"][0]["text"],
+            "grounded answer"
+        );
     }
 
     #[cfg(unix)]

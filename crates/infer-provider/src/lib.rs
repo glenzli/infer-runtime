@@ -1,6 +1,5 @@
 //! Provider contracts and protocol-family adapters.
 
-mod antigravity_cli;
 mod audio_stream;
 mod audio_worker;
 mod codex_app_server;
@@ -18,7 +17,6 @@ use reqwest::Client;
 use serde_json::Value;
 use thiserror::Error;
 
-pub use antigravity_cli::AntigravityCliProvider;
 pub use audio_stream::{
     AudioDuplexExecutor, AudioDuplexSession, AudioStreamExecutor, DynAudioDuplexExecutor,
     DynAudioDuplexSession, DynAudioStreamExecutor, ProviderAudioByteStream, SpeechStreamOutput,

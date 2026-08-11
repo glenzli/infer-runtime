@@ -210,47 +210,29 @@ priority_aging_ms = 10000
 [providers.codex-subscription.capability_profile]
 version = 1
 protocol = "codex_app_server"
-capabilities = ["responses", "instructions", "streaming", "image_generation", "reasoning_effort"]
-
-# Antigravity is a second subscription bridge. It reuses the current user's
-# real CLI login session. Consumer payloads use a disposable project, but the
-# CLI may retain account-level state; keep this experimental and non-sensitive.
-# Replace `agy` with an absolute path when the daemon is GUI-owned.
-[providers.antigravity-subscription]
-kind = "antigravity_cli"
-access_class = "subscription"
-command = "agy"
-placement = "cloud"
-max_concurrency = 1
-max_queue = 16
-priority_aging_ms = 10000
-
-[providers.antigravity-subscription.capability_profile]
-version = 1
-protocol = "antigravity_cli"
-capabilities = ["responses", "instructions", "reasoning_effort"]
+capabilities = ["responses", "instructions", "streaming", "web_search", "image_generation", "reasoning_effort"]
 
 [profiles.balanced]
-order = ["quality_fit", "deadline_fit", "queue_time", "cost", "placement"]
+order = ["capability_fit", "deadline_fit", "queue_time", "cost", "placement"]
 
 [profiles.local-first]
-order = ["placement", "deadline_fit", "queue_time", "cost", "quality_fit"]
+order = ["placement", "deadline_fit", "queue_time", "cost", "capability_fit"]
 
-[profiles.quality-first]
-order = ["quality", "deadline_fit", "cost", "placement"]
+[profiles.capability-first]
+order = ["capability", "deadline_fit", "cost", "placement"]
 
 [profiles.latency-first]
-order = ["deadline_fit", "queue_time", "placement", "quality_fit", "cost"]
+order = ["deadline_fit", "queue_time", "placement", "capability_fit", "cost"]
 
 [profiles.cost-first]
-order = ["cost", "placement", "quality_fit"]
+order = ["cost", "placement", "capability_fit"]
 
 # Intent profiles are stable runtime contracts. Application names never appear
 # here; an App maps its own actions to one of these intents.
 [intents."text.summarize"]
 input_modalities = ["text"]
 output_modalities = ["text"]
-default_quality_floor = "basic"
+default_capability_floor = "foundational"
 default_policy = "cost-first"
 default_max_output_tokens = 256
 default_reasoning_effort = "none"
@@ -258,23 +240,23 @@ default_reasoning_effort = "none"
 [intents."text.proofread"]
 input_modalities = ["text"]
 output_modalities = ["text"]
-default_quality_floor = "basic"
+default_capability_floor = "foundational"
 default_policy = "cost-first"
 default_max_output_tokens = 512
 default_reasoning_effort = "none"
 
-[intents."assistant.general"]
+[intents."language.respond"]
 input_modalities = ["text"]
 output_modalities = ["text"]
-default_quality_floor = "general"
+default_capability_floor = "capable"
 default_policy = "balanced"
 
 # Stateless image+text reasoning. Cloud image egress also requires the App's
 # independent allowed_cloud_input_modalities entitlement.
-[intents."assistant.multimodal"]
+[intents."multimodal.respond"]
 input_modalities = ["text", "image"]
 output_modalities = ["text"]
-default_quality_floor = "general"
+default_capability_floor = "capable"
 default_policy = "balanced"
 
 # First-slice hosted generation is a distinct unary text-to-image contract.
@@ -283,20 +265,14 @@ default_policy = "balanced"
 input_modalities = ["text"]
 output_modalities = ["image"]
 required_features = ["image_generation"]
-default_quality_floor = "general"
+default_capability_floor = "capable"
 default_policy = "balanced"
 
-[intents."reasoning.deep"]
+[intents."reasoning.solve"]
 input_modalities = ["text"]
 output_modalities = ["text"]
-default_quality_floor = "advanced"
-default_policy = "quality-first"
-
-[intents."vision.understand"]
-input_modalities = ["text", "image"]
-output_modalities = ["text"]
-default_quality_floor = "basic"
-default_policy = "balanced"
+default_capability_floor = "advanced"
+default_policy = "capability-first"
 
 # Bounded generative vision remains a typed local data plane. The Consumer
 # supplies a normalized display artifact and never sees Ollama's chat schema.
@@ -305,15 +281,15 @@ data_plane = "vision.image_description"
 input_modalities = ["image"]
 output_modalities = ["json"]
 required_features = ["structured_vision_output"]
-default_quality_floor = "basic"
+default_capability_floor = "foundational"
 default_policy = "local-first"
 
-[intents."vision.review_classification"]
+[intents."vision.classify_closed_set"]
 data_plane = "vision.classification_review"
 input_modalities = ["image"]
 output_modalities = ["json"]
 required_features = ["structured_vision_output"]
-default_quality_floor = "general"
+default_capability_floor = "capable"
 default_policy = "local-first"
 
 [intents."vision.detect_faces"]
@@ -321,7 +297,7 @@ data_plane = "vision.face_detection"
 input_modalities = ["image"]
 output_modalities = ["json"]
 required_features = ["five_point_landmarks"]
-default_quality_floor = "basic"
+default_capability_floor = "foundational"
 default_policy = "local-first"
 
 [intents."vision.embed_face"]
@@ -329,23 +305,23 @@ data_plane = "vision.face_embedding"
 input_modalities = ["image"]
 output_modalities = ["json"]
 required_features = ["face_embedding_128d", "sensitive_biometric"]
-default_quality_floor = "basic"
+default_capability_floor = "foundational"
 default_policy = "local-first"
 
-[intents."vision.embed_image"]
+[intents."semantic.embed_image"]
 data_plane = "vision.image_embedding"
 input_modalities = ["image"]
 output_modalities = ["json"]
 required_features = ["siglip2_embedding_768d", "cross_modal_retrieval"]
-default_quality_floor = "basic"
+default_capability_floor = "foundational"
 default_policy = "local-first"
 
-[intents."vision.embed_text"]
+[intents."semantic.embed_text"]
 data_plane = "vision.text_embedding"
 input_modalities = ["text"]
 output_modalities = ["json"]
 required_features = ["siglip2_embedding_768d", "multilingual_text", "cross_modal_retrieval"]
-default_quality_floor = "basic"
+default_capability_floor = "foundational"
 default_policy = "local-first"
 
 [intents."audio.transcribe"]
@@ -353,7 +329,7 @@ data_plane = "audio.transcription"
 input_modalities = ["audio"]
 output_modalities = ["text", "json"]
 required_features = ["language_detection"]
-default_quality_floor = "basic"
+default_capability_floor = "foundational"
 default_policy = "local-first"
 
 [intents."audio.align"]
@@ -361,7 +337,7 @@ data_plane = "audio.alignment"
 input_modalities = ["audio", "text"]
 output_modalities = ["json"]
 required_features = ["word_timestamps"]
-default_quality_floor = "basic"
+default_capability_floor = "foundational"
 default_policy = "local-first"
 
 [intents."speech.synthesize"]
@@ -369,96 +345,96 @@ data_plane = "audio.speech"
 input_modalities = ["text"]
 output_modalities = ["audio"]
 required_features = ["built_in_voices"]
-default_quality_floor = "basic"
+default_capability_floor = "foundational"
 default_policy = "local-first"
 
-[intents."speech.voice_design"]
+[intents."speech.design_voice"]
 data_plane = "audio.speech"
 input_modalities = ["text"]
 output_modalities = ["audio"]
 required_features = ["voice_design"]
-default_quality_floor = "basic"
+default_capability_floor = "foundational"
 default_policy = "local-first"
 
-[intents."speech.voice_clone"]
+[intents."speech.clone_voice"]
 data_plane = "audio.voice_clone"
 input_modalities = ["text", "audio"]
 output_modalities = ["audio"]
 required_features = ["voice_clone"]
-default_quality_floor = "basic"
+default_capability_floor = "foundational"
 default_policy = "local-first"
 
 [model_profiles.qwen3_5_2b]
 family = "qwen3.5"
 
 [model_profiles.qwen3_5_2b.ratings."text.summarize"]
-grade = "basic"
+level = "foundational"
 status = "provisional"
 
 [model_profiles.qwen3_5_2b.ratings."text.proofread"]
-grade = "basic"
+level = "foundational"
 status = "provisional"
 
 [model_profiles.qwen3_5_4b]
 family = "qwen3.5"
 
 [model_profiles.qwen3_5_4b.ratings."text.summarize"]
-grade = "basic"
+level = "foundational"
 status = "provisional"
 
 [model_profiles.qwen3_5_4b.ratings."text.proofread"]
-grade = "basic"
+level = "foundational"
 status = "provisional"
 
 [model_profiles.qwen3_vl_4b]
 family = "qwen3-vl"
 
-[model_profiles.qwen3_vl_4b.ratings."vision.understand"]
-grade = "basic"
+[model_profiles.qwen3_vl_4b.ratings."multimodal.respond"]
+level = "foundational"
 status = "provisional"
 
 [model_profiles.qwen3_vl_4b.ratings."vision.describe_image"]
-grade = "basic"
+level = "foundational"
 status = "provisional"
 
-[model_profiles.qwen3_vl_4b.ratings."vision.review_classification"]
-grade = "basic"
+[model_profiles.qwen3_vl_4b.ratings."vision.classify_closed_set"]
+level = "foundational"
 status = "provisional"
 
 [model_profiles.qwen3_vl_8b]
 family = "qwen3-vl"
 
-[model_profiles.qwen3_vl_8b.ratings."vision.understand"]
-grade = "basic"
+[model_profiles.qwen3_vl_8b.ratings."multimodal.respond"]
+level = "capable"
 status = "provisional"
 
 [model_profiles.qwen3_vl_8b.ratings."vision.describe_image"]
-grade = "general"
+level = "capable"
 status = "provisional"
 
-[model_profiles.qwen3_vl_8b.ratings."vision.review_classification"]
-grade = "general"
+[model_profiles.qwen3_vl_8b.ratings."vision.classify_closed_set"]
+level = "capable"
 status = "provisional"
 
 [model_profiles.qwen3_6_35b]
 family = "qwen3.6"
 
-[model_profiles.qwen3_6_35b.ratings."assistant.general"]
-grade = "general"
+[model_profiles.qwen3_6_35b.ratings."language.respond"]
+level = "capable"
 status = "provisional"
 
 [model_profiles.qwen3_6_35b.ratings."text.summarize"]
-grade = "general"
+level = "advanced"
 status = "provisional"
 
 [model_profiles.qwen3_6_35b.ratings."text.proofread"]
-grade = "general"
+level = "advanced"
 status = "provisional"
 
-# It can be evaluated on deep reasoning, but the provisional grade remains
-# below the intent's advanced floor, so it is not routed there by default.
-[model_profiles.qwen3_6_35b.ratings."reasoning.deep"]
-grade = "basic"
+# The local 35B is a competent solver, but remains below reasoning.solve's
+# advanced default and therefore is not routed there by default.
+[model_profiles.qwen3_6_35b.ratings."reasoning.solve"]
+level = "capable"
 status = "provisional"
 
 # Cloud ratings are deliberately provisional until the runtime's own
@@ -467,123 +443,121 @@ status = "provisional"
 family = "deepseek-v4"
 
 [model_profiles.deepseek_v4_flash.ratings."text.summarize"]
-grade = "general"
+level = "advanced"
 status = "provisional"
 
 [model_profiles.deepseek_v4_flash.ratings."text.proofread"]
-grade = "general"
+level = "advanced"
 status = "provisional"
 
-[model_profiles.deepseek_v4_flash.ratings."assistant.general"]
-grade = "general"
+[model_profiles.deepseek_v4_flash.ratings."language.respond"]
+level = "advanced"
+status = "provisional"
+
+[model_profiles.deepseek_v4_flash.ratings."reasoning.solve"]
+level = "advanced"
 status = "provisional"
 
 [model_profiles.deepseek_v4_pro]
 family = "deepseek-v4"
 
 [model_profiles.deepseek_v4_pro.ratings."text.summarize"]
-grade = "advanced"
+level = "expert"
 status = "provisional"
 
 [model_profiles.deepseek_v4_pro.ratings."text.proofread"]
-grade = "advanced"
+level = "expert"
 status = "provisional"
 
-[model_profiles.deepseek_v4_pro.ratings."assistant.general"]
-grade = "advanced"
+[model_profiles.deepseek_v4_pro.ratings."language.respond"]
+level = "expert"
 status = "provisional"
 
-[model_profiles.deepseek_v4_pro.ratings."reasoning.deep"]
-grade = "advanced"
+[model_profiles.deepseek_v4_pro.ratings."reasoning.solve"]
+level = "expert"
 status = "provisional"
 
 # Codex subscription ratings are provisional routing policy, not vendor model
-# rankings. Luna is the general entry, Terra the advanced default, and Sol is
-# reserved for the deep-reasoning intent in this first admission set.
+# rankings. Luna is the advanced entry, Terra the expert default, and Sol is
+# reserved for exceptional reasoning in this first admission set.
 [model_profiles.codex_gpt_5_6_luna]
 family = "gpt-5.6"
 
-[model_profiles.codex_gpt_5_6_luna.ratings."assistant.general"]
-grade = "general"
+[model_profiles.codex_gpt_5_6_luna.ratings."language.respond"]
+level = "advanced"
 status = "provisional"
 
-[model_profiles.codex_gpt_5_6_luna.ratings."assistant.multimodal"]
-grade = "general"
+[model_profiles.codex_gpt_5_6_luna.ratings."multimodal.respond"]
+level = "advanced"
+status = "provisional"
+
+[model_profiles.codex_gpt_5_6_luna.ratings."reasoning.solve"]
+level = "advanced"
 status = "provisional"
 
 [model_profiles.codex_gpt_5_6_luna.ratings."image.generate"]
-grade = "general"
+level = "advanced"
 status = "provisional"
 
 [model_profiles.codex_gpt_5_6_terra]
 family = "gpt-5.6"
 
-[model_profiles.codex_gpt_5_6_terra.ratings."assistant.general"]
-grade = "advanced"
+[model_profiles.codex_gpt_5_6_terra.ratings."language.respond"]
+level = "expert"
 status = "provisional"
 
-[model_profiles.codex_gpt_5_6_terra.ratings."assistant.multimodal"]
-grade = "advanced"
+[model_profiles.codex_gpt_5_6_terra.ratings."multimodal.respond"]
+level = "expert"
 status = "provisional"
 
-[model_profiles.codex_gpt_5_6_terra.ratings."reasoning.deep"]
-grade = "advanced"
+[model_profiles.codex_gpt_5_6_terra.ratings."reasoning.solve"]
+level = "expert"
 status = "provisional"
 
 [model_profiles.codex_gpt_5_6_sol]
 family = "gpt-5.6"
 
-[model_profiles.codex_gpt_5_6_sol.ratings."reasoning.deep"]
-grade = "frontier"
+[model_profiles.codex_gpt_5_6_sol.ratings."reasoning.solve"]
+level = "exceptional"
 status = "provisional"
 
-[model_profiles.codex_gpt_5_6_sol.ratings."assistant.multimodal"]
-grade = "advanced"
-status = "provisional"
-
-# Antigravity's Gemini Flash effort levels are separate physical upstream
-# slugs. Runtime keeps one semantic Model Profile and maps the requested effort
-# to one exact Build/Deployment below.
-[model_profiles.antigravity_gemini_3_6_flash]
-family = "gemini-3.6-flash"
-
-[model_profiles.antigravity_gemini_3_6_flash.ratings."assistant.general"]
-grade = "general"
+[model_profiles.codex_gpt_5_6_sol.ratings."multimodal.respond"]
+level = "expert"
 status = "provisional"
 
 [model_profiles.qwen3_asr_1_7b]
 family = "qwen3-asr"
 
 [model_profiles.qwen3_asr_1_7b.ratings."audio.transcribe"]
-grade = "general"
+level = "capable"
 status = "provisional"
 
 [model_profiles.qwen3_forced_aligner_0_6b]
 family = "qwen3-forced-aligner"
 
 [model_profiles.qwen3_forced_aligner_0_6b.ratings."audio.align"]
-grade = "general"
+level = "capable"
 status = "provisional"
 
 [model_profiles.qwen3_tts_custom_voice_1_7b]
 family = "qwen3-tts"
 
 [model_profiles.qwen3_tts_custom_voice_1_7b.ratings."speech.synthesize"]
-grade = "general"
+level = "capable"
 status = "provisional"
 
 [model_profiles.qwen3_tts_voice_design_1_7b]
 family = "qwen3-tts"
 
-[model_profiles.qwen3_tts_voice_design_1_7b.ratings."speech.voice_design"]
-grade = "general"
+[model_profiles.qwen3_tts_voice_design_1_7b.ratings."speech.design_voice"]
+level = "capable"
 status = "provisional"
 
 [model_profiles.qwen3_tts_base_1_7b]
 family = "qwen3-tts"
 
-[model_profiles.qwen3_tts_base_1_7b.ratings."speech.voice_clone"]
-grade = "general"
+[model_profiles.qwen3_tts_base_1_7b.ratings."speech.clone_voice"]
+level = "capable"
 status = "provisional"
 
 # This example catalogs an optional PyTorch asset but intentionally gives it no
@@ -592,32 +566,32 @@ status = "provisional"
 family = "sensevoice"
 
 [model_profiles.sensevoice_small.ratings."audio.transcribe"]
-grade = "basic"
+level = "foundational"
 status = "provisional"
 
 [model_profiles.yunet_2026may]
 family = "yunet"
 
 [model_profiles.yunet_2026may.ratings."vision.detect_faces"]
-grade = "basic"
+level = "foundational"
 status = "provisional"
 
 [model_profiles.sface_2021dec]
 family = "sface"
 
 [model_profiles.sface_2021dec.ratings."vision.embed_face"]
-grade = "basic"
+level = "foundational"
 status = "provisional"
 
 [model_profiles.siglip2_base_patch16_224]
 family = "siglip2"
 
-[model_profiles.siglip2_base_patch16_224.ratings."vision.embed_image"]
-grade = "basic"
+[model_profiles.siglip2_base_patch16_224.ratings."semantic.embed_image"]
+level = "foundational"
 status = "provisional"
 
-[model_profiles.siglip2_base_patch16_224.ratings."vision.embed_text"]
-grade = "basic"
+[model_profiles.siglip2_base_patch16_224.ratings."semantic.embed_text"]
+level = "foundational"
 status = "provisional"
 
 [model_builds.qwen3_5_2b_mlx]
@@ -677,7 +651,7 @@ model_id = "gpt-5.6-luna"
 variant = "codex-subscription"
 input_modalities = ["text", "image"]
 output_modalities = ["text", "image"]
-features = ["reasoning", "image_generation"]
+features = ["reasoning", "web_search", "image_generation"]
 
 [model_builds.codex_gpt_5_6_terra_subscription]
 profile = "codex_gpt_5_6_terra"
@@ -685,7 +659,7 @@ model_id = "gpt-5.6-terra"
 variant = "codex-subscription"
 input_modalities = ["text", "image"]
 output_modalities = ["text"]
-features = ["reasoning"]
+features = ["reasoning", "web_search"]
 
 [model_builds.codex_gpt_5_6_sol_subscription]
 profile = "codex_gpt_5_6_sol"
@@ -693,31 +667,7 @@ model_id = "gpt-5.6-sol"
 variant = "codex-subscription"
 input_modalities = ["text", "image"]
 output_modalities = ["text"]
-features = ["reasoning"]
-
-[model_builds.antigravity_gemini_3_6_flash_medium]
-profile = "antigravity_gemini_3_6_flash"
-model_id = "gemini-3.6-flash-medium"
-variant = "antigravity-subscription-medium"
-input_modalities = ["text"]
-output_modalities = ["text"]
-features = ["reasoning"]
-
-[model_builds.antigravity_gemini_3_6_flash_low]
-profile = "antigravity_gemini_3_6_flash"
-model_id = "gemini-3.6-flash-low"
-variant = "antigravity-subscription-low"
-input_modalities = ["text"]
-output_modalities = ["text"]
-features = ["reasoning"]
-
-[model_builds.antigravity_gemini_3_6_flash_high]
-profile = "antigravity_gemini_3_6_flash"
-model_id = "gemini-3.6-flash-high"
-variant = "antigravity-subscription-high"
-input_modalities = ["text"]
-output_modalities = ["text"]
-features = ["reasoning"]
+features = ["reasoning", "web_search"]
 
 [model_builds.qwen3_asr_1_7b_8bit]
 profile = "qwen3_asr_1_7b"
@@ -989,8 +939,8 @@ estimated_cost_usd = 0.05
 supported_execution_modes = ["unary", "server_stream"]
 
 # These Deployments share one Provider scheduler and subscription quota pool.
-# `ultra` is upstream inventory only for now because it is outside the public
-# infer-runtime ReasoningEffort contract.
+# `ultra` is a public effort value in candidate.3, but only Deployments whose
+# upstream model inventory advertises it may list it here.
 [deployments.codex_gpt_5_6_luna]
 provider = "codex-subscription"
 build = "codex_gpt_5_6_luna_subscription"
@@ -1003,7 +953,7 @@ supported_execution_modes = ["unary", "server_stream"]
 provider = "codex-subscription"
 build = "codex_gpt_5_6_terra_subscription"
 resource_class = "standard"
-supported_efforts = ["low", "medium", "high", "xhigh", "max"]
+supported_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 estimated_cost_usd = 0.0
 supported_execution_modes = ["unary", "server_stream"]
 
@@ -1011,36 +961,9 @@ supported_execution_modes = ["unary", "server_stream"]
 provider = "codex-subscription"
 build = "codex_gpt_5_6_sol_subscription"
 resource_class = "standard"
-supported_efforts = ["low", "medium", "high", "xhigh", "max"]
+supported_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 estimated_cost_usd = 0.0
 supported_execution_modes = ["unary", "server_stream"]
-
-# The base id is the no-override default and therefore maps to the medium
-# physical slug. Explicit low/high requests select only their matching
-# Deployment; the adapter never combines a suffixed slug with `--effort`.
-[deployments.antigravity_gemini_3_6_flash]
-provider = "antigravity-subscription"
-build = "antigravity_gemini_3_6_flash_medium"
-resource_class = "standard"
-supported_efforts = ["none", "medium"]
-estimated_cost_usd = 0.0
-supported_execution_modes = ["unary"]
-
-[deployments.antigravity_gemini_3_6_flash_low]
-provider = "antigravity-subscription"
-build = "antigravity_gemini_3_6_flash_low"
-resource_class = "standard"
-supported_efforts = ["low"]
-estimated_cost_usd = 0.0
-supported_execution_modes = ["unary"]
-
-[deployments.antigravity_gemini_3_6_flash_high]
-provider = "antigravity-subscription"
-build = "antigravity_gemini_3_6_flash_high"
-resource_class = "standard"
-supported_efforts = ["high"]
-estimated_cost_usd = 0.0
-supported_execution_modes = ["unary"]
 
 [deployments.mlx_qwen3_asr_1_7b]
 provider = "mlx-audio-local"
@@ -1108,20 +1031,21 @@ estimated_cost_usd = 0.0
 [apps.local-operator]
 credential = { source = "managed" }
 resource_admin = true
+allowed_builtin_tools = ["web_search"]
 allowed_provider_access_classes = ["standard", "subscription"]
 allowed_cloud_input_modalities = ["text", "image"]
 max_pending_jobs = 16
 default_policy = "balanced"
-allowed_policies = ["balanced", "local-first", "quality-first", "latency-first", "cost-first"]
+allowed_policies = ["balanced", "local-first", "capability-first", "latency-first", "cost-first"]
 
 [apps.local-operator.request_overrides]
 priority = ["interactive", "normal", "background"]
 placement = ["local_only", "private", "anywhere", "cloud_only"]
 prefer = ["local", "trusted_node", "cloud"]
 offline_required = true
-quality_floor = ["basic", "general", "advanced", "frontier"]
+capability_floor = ["foundational", "capable", "advanced", "expert", "exceptional"]
 latency = ["interactive", "balanced", "throughput"]
-fallback = ["none", "equivalent", "allow_lower_quality"]
+fallback = ["none", "equivalent", "allow_lower_capability"]
 max_cost_usd = { min = 0.0, max = 5.0 }
 
 # Infra Sentinel can read only the redacted observer snapshot. HTTP auth
@@ -1149,7 +1073,7 @@ priority = ["interactive", "background"]
 placement = ["local_only"]
 prefer = ["local"]
 offline_required = true
-quality_floor = ["basic", "general"]
+capability_floor = ["foundational", "capable"]
 latency = ["interactive", "balanced", "throughput"]
 fallback = ["none"]
 max_cost_usd = { min = 0.0, max = 0.0 }

@@ -3,9 +3,9 @@
 use std::{cmp::Ordering, collections::BTreeSet};
 
 use infer_core::{
-    CandidateDecision, CandidateDecisionStatus, CandidateReasonCode, CapabilityRating,
-    ExecutionRequirements, Fallback, IntentProfile, Modality, Placement, PlacementPreference,
-    PolicyProfile, ProviderAccessClass, QualityGrade, RatingStatus, ReasoningEffort,
+    CandidateDecision, CandidateDecisionStatus, CandidateReasonCode, CapabilityLevel,
+    CapabilityRating, EvaluationStatus, ExecutionRequirements, Fallback, IntentProfile, Modality,
+    Placement, PlacementPreference, PolicyProfile, ProviderAccessClass, ReasoningEffort,
     RequestConstraints, ResourceClass, RoutingDecision, RuntimeConfig, SortKey,
 };
 
@@ -17,8 +17,8 @@ pub struct Candidate {
     pub model_profile_id: String,
     pub physical_model: String,
     pub placement: Placement,
-    pub quality_grade: QualityGrade,
-    pub rating_status: RatingStatus,
+    pub capability_level: CapabilityLevel,
+    pub evaluation_status: EvaluationStatus,
     pub resource_class: ResourceClass,
     /// Admission-time per-Attempt cost estimate. It belongs to the Candidate
     /// so fallback attempts reserve the target deployment's own amount.
@@ -31,7 +31,7 @@ pub struct Candidate {
 #[derive(Debug, Clone)]
 pub struct CandidatePlan {
     pub candidates: Vec<Candidate>,
-    pub lower_quality_candidates: Vec<Candidate>,
+    pub lower_capability_candidates: Vec<Candidate>,
     pub decision: RoutingDecision,
 }
 
@@ -66,20 +66,27 @@ pub fn plan_candidates(
         unavailable_providers,
         unavailable_deployments,
     } = context;
-    let quality_floor = constraints
-        .quality_floor
-        .map_or(intent.default_quality_floor, |requested| {
-            requested.max(intent.default_quality_floor)
+    let capability_floor = constraints
+        .capability_floor
+        .map_or(intent.default_capability_floor, |requested| {
+            requested.max(intent.default_capability_floor)
         });
     let placement_scope = constraints.placement;
     let mut eligible = Vec::new();
-    let mut lower_quality = Vec::new();
+    let mut lower_capability = Vec::new();
     let mut decisions = Vec::new();
     for (deployment_id, deployment) in &config.deployments {
         let provider = &config.providers[&deployment.provider];
         let build = &config.model_builds[&deployment.build];
         let model = &config.model_profiles[&build.profile];
         let Some(rating) = model.ratings.get(intent_id) else {
+            decisions.push(CandidateDecision {
+                deployment: deployment_id.clone(),
+                provider: deployment.provider.clone(),
+                status: CandidateDecisionStatus::Rejected,
+                rank: None,
+                reason_codes: vec![CandidateReasonCode::IntentUnassessed],
+            });
             continue;
         };
         let mut reason_codes = Vec::new();
@@ -121,7 +128,6 @@ pub fn plan_candidates(
                 provider.capability_profile.protocol,
                 infer_core::ProviderProtocol::Responses
                     | infer_core::ProviderProtocol::CodexAppServer
-                    | infer_core::ProviderProtocol::AntigravityCli
             );
         if !responses_stream_compatibility
             && !deployment
@@ -159,8 +165,8 @@ pub fn plan_candidates(
         if constraints.offline_required == Some(true) && provider.placement == Placement::Cloud {
             reason_codes.push(CandidateReasonCode::OfflineRequired);
         }
-        if rating.grade < quality_floor {
-            reason_codes.push(CandidateReasonCode::QualityBelowFloor);
+        if rating.level < capability_floor {
+            reason_codes.push(CandidateReasonCode::CapabilityBelowFloor);
         }
         if reasoning_effort.is_some_and(|effort| !deployment.supported_efforts.contains(&effort)) {
             reason_codes.push(CandidateReasonCode::ReasoningEffortUnsupported);
@@ -179,15 +185,15 @@ pub fn plan_candidates(
             model_profile_id: build.profile.clone(),
             physical_model: build.model_id.clone(),
             placement: provider.placement,
-            quality_grade: rating.grade,
-            rating_status: rating.status,
+            capability_level: rating.level,
+            evaluation_status: rating.status,
             resource_class: deployment.resource_class,
             estimated_cost_usd: deployment.estimated_cost_usd,
         };
-        let fallback_eligible = constraints.fallback == Some(Fallback::AllowLowerQuality)
-            && quality_floor > intent.default_quality_floor
-            && rating.grade >= intent.default_quality_floor
-            && reason_codes == vec![CandidateReasonCode::QualityBelowFloor];
+        let fallback_eligible = constraints.fallback == Some(Fallback::AllowLowerCapability)
+            && capability_floor > intent.default_capability_floor
+            && rating.level >= intent.default_capability_floor
+            && reason_codes == vec![CandidateReasonCode::CapabilityBelowFloor];
         let decision = CandidateDecision {
             deployment: deployment_id.clone(),
             provider: deployment.provider.clone(),
@@ -208,7 +214,7 @@ pub fn plan_candidates(
                 decision,
             ));
         } else if decision.status == CandidateDecisionStatus::FallbackEligible {
-            lower_quality.push((
+            lower_capability.push((
                 (deployment_id, deployment, provider, build, model, rating),
                 candidate,
                 decision,
@@ -224,7 +230,7 @@ pub fn plan_candidates(
             &right.0,
             &profile.order,
             constraints.prefer,
-            quality_floor,
+            capability_floor,
         )
     });
     let candidates = eligible
@@ -236,16 +242,16 @@ pub fn plan_candidates(
             candidate
         })
         .collect();
-    lower_quality.sort_by(|left, right| {
+    lower_capability.sort_by(|left, right| {
         compare_candidates(
             &left.0,
             &right.0,
             &profile.order,
             constraints.prefer,
-            quality_floor,
+            capability_floor,
         )
     });
-    let lower_quality_candidates = lower_quality
+    let lower_capability_candidates = lower_capability
         .into_iter()
         .enumerate()
         .map(|(index, (_reference, candidate, mut decision))| {
@@ -256,9 +262,9 @@ pub fn plan_candidates(
         .collect();
     CandidatePlan {
         candidates,
-        lower_quality_candidates,
+        lower_capability_candidates,
         decision: RoutingDecision {
-            quality_floor,
+            capability_floor,
             candidates: decisions,
         },
     }
@@ -283,8 +289,8 @@ pub fn candidate_for_deployment(
         model_profile_id: build.profile.clone(),
         physical_model: build.model_id.clone(),
         placement: provider.placement,
-        quality_grade: rating.grade,
-        rating_status: rating.status,
+        capability_level: rating.level,
+        evaluation_status: rating.status,
         resource_class: deployment.resource_class,
         estimated_cost_usd: deployment.estimated_cost_usd,
     })
@@ -333,7 +339,7 @@ fn compare_candidates(
     right: &CandidateRef<'_>,
     order: &[SortKey],
     preferred: Option<PlacementPreference>,
-    quality_floor: QualityGrade,
+    capability_floor: CapabilityLevel,
 ) -> Ordering {
     for key in order {
         let comparison = match key {
@@ -345,13 +351,13 @@ fn compare_candidates(
                 .partial_cmp(&right.1.estimated_cost_usd)
                 .unwrap_or(Ordering::Equal)
                 .then_with(|| left.1.resource_class.cmp(&right.1.resource_class)),
-            SortKey::Quality => right
+            SortKey::Capability => right
                 .5
-                .grade
-                .cmp(&left.5.grade)
+                .level
+                .cmp(&left.5.level)
                 .then_with(|| compare_score(right.5.score, left.5.score)),
-            SortKey::QualityFit => quality_distance(left.5.grade, quality_floor)
-                .cmp(&quality_distance(right.5.grade, quality_floor))
+            SortKey::CapabilityFit => capability_distance(left.5.level, capability_floor)
+                .cmp(&capability_distance(right.5.level, capability_floor))
                 .then_with(|| compare_score(right.5.score, left.5.score)),
             SortKey::DeadlineFit | SortKey::QueueTime => Ordering::Equal,
         };
@@ -362,16 +368,17 @@ fn compare_candidates(
     left.0.cmp(right.0)
 }
 
-fn quality_distance(grade: QualityGrade, floor: QualityGrade) -> u8 {
-    quality_rank(grade).abs_diff(quality_rank(floor))
+fn capability_distance(level: CapabilityLevel, floor: CapabilityLevel) -> u8 {
+    capability_rank(level).abs_diff(capability_rank(floor))
 }
 
-fn quality_rank(grade: QualityGrade) -> u8 {
-    match grade {
-        QualityGrade::Basic => 0,
-        QualityGrade::General => 1,
-        QualityGrade::Advanced => 2,
-        QualityGrade::Frontier => 3,
+fn capability_rank(level: CapabilityLevel) -> u8 {
+    match level {
+        CapabilityLevel::Foundational => 0,
+        CapabilityLevel::Capable => 1,
+        CapabilityLevel::Advanced => 2,
+        CapabilityLevel::Expert => 3,
+        CapabilityLevel::Exceptional => 4,
     }
 }
 
@@ -411,7 +418,7 @@ mod tests {
             [defaults]
             policy = "balanced"
             [profiles.balanced]
-            order = ["quality", "placement"]
+            order = ["capability", "placement"]
             [providers.local]
             kind = "responses"
             base_url = "http://local/v1"
@@ -428,19 +435,19 @@ mod tests {
             version = 1
             protocol = "responses"
             capabilities = ["responses", "function_tools"]
-            [intents."reasoning.deep"]
+            [intents."reasoning.solve"]
             input_modalities = ["text"]
             output_modalities = ["text"]
-            default_quality_floor = "advanced"
+            default_capability_floor = "expert"
             [model_profiles.small]
             family = "small"
-            [model_profiles.small.ratings."reasoning.deep"]
-            grade = "basic"
+            [model_profiles.small.ratings."reasoning.solve"]
+            level = "foundational"
             status = "provisional"
             [model_profiles.strong]
             family = "strong"
-            [model_profiles.strong.ratings."reasoning.deep"]
-            grade = "advanced"
+            [model_profiles.strong.ratings."reasoning.solve"]
+            level = "expert"
             status = "benchmarked"
             eval_profile = "reasoning-v1"
             score = 0.8
@@ -469,13 +476,13 @@ mod tests {
     }
 
     #[test]
-    fn quality_floor_excludes_a_weak_local_model() {
+    fn capability_floor_excludes_a_weak_local_model() {
         let config = config();
         config.validate().unwrap();
-        let intent = config.intent("reasoning.deep").unwrap();
+        let intent = config.intent("reasoning.solve").unwrap();
         let plan = plan_candidates(
             &config,
-            "reasoning.deep",
+            "reasoning.solve",
             intent,
             &config.profiles["balanced"],
             CandidatePlanningContext {
@@ -499,7 +506,48 @@ mod tests {
         assert_eq!(rejected.status, CandidateDecisionStatus::Rejected);
         assert_eq!(
             rejected.reason_codes,
-            vec![CandidateReasonCode::QualityBelowFloor]
+            vec![CandidateReasonCode::CapabilityBelowFloor]
+        );
+    }
+
+    #[test]
+    fn missing_intent_rating_is_unassessed_instead_of_unsupported() {
+        let mut config = config();
+        config
+            .model_profiles
+            .get_mut("strong")
+            .unwrap()
+            .ratings
+            .remove("reasoning.solve");
+        config.validate().unwrap();
+        let intent = config.intent("reasoning.solve").unwrap();
+        let plan = plan_candidates(
+            &config,
+            "reasoning.solve",
+            intent,
+            &config.profiles["balanced"],
+            CandidatePlanningContext {
+                constraints: &RequestConstraints::default(),
+                execution_requirements: &ExecutionRequirements::default(),
+                reasoning_effort: None,
+                allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
+                allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                unavailable_providers: &BTreeSet::new(),
+                unavailable_deployments: &BTreeSet::new(),
+            },
+        );
+
+        assert!(plan.candidates.is_empty());
+        let unassessed = plan
+            .decision
+            .candidates
+            .iter()
+            .find(|candidate| candidate.deployment == "strong_cloud")
+            .unwrap();
+        assert_eq!(unassessed.status, CandidateDecisionStatus::Rejected);
+        assert_eq!(
+            unassessed.reason_codes,
+            vec![CandidateReasonCode::IntentUnassessed]
         );
     }
 
@@ -507,10 +555,10 @@ mod tests {
     fn subscription_provider_requires_an_explicit_app_entitlement() {
         let mut config = config();
         config.providers.get_mut("cloud").unwrap().access_class = ProviderAccessClass::Subscription;
-        let intent = config.intent("reasoning.deep").unwrap();
+        let intent = config.intent("reasoning.solve").unwrap();
         let denied = plan_candidates(
             &config,
-            "reasoning.deep",
+            "reasoning.solve",
             intent,
             &config.profiles["balanced"],
             CandidatePlanningContext {
@@ -532,7 +580,7 @@ mod tests {
 
         let admitted = plan_candidates(
             &config,
-            "reasoning.deep",
+            "reasoning.solve",
             intent,
             &config.profiles["balanced"],
             CandidatePlanningContext {
@@ -560,17 +608,17 @@ mod tests {
             .get_mut("small")
             .unwrap()
             .ratings
-            .get_mut("reasoning.deep")
+            .get_mut("reasoning.solve")
             .unwrap()
-            .grade = QualityGrade::Advanced;
-        let intent = config.intent("reasoning.deep").unwrap();
+            .level = CapabilityLevel::Expert;
+        let intent = config.intent("reasoning.solve").unwrap();
         let allowed = BTreeSet::from([
             ProviderAccessClass::Standard,
             ProviderAccessClass::Subscription,
         ]);
         let plan = plan_candidates(
             &config,
-            "reasoning.deep",
+            "reasoning.solve",
             intent,
             &config.profiles["balanced"],
             CandidatePlanningContext {
@@ -597,37 +645,37 @@ mod tests {
     }
 
     #[test]
-    fn quality_fit_chooses_the_minimum_sufficient_grade() {
+    fn capability_fit_chooses_the_minimum_sufficient_level() {
         let mut config = config();
         config
             .intents
-            .get_mut("reasoning.deep")
+            .get_mut("reasoning.solve")
             .unwrap()
-            .default_quality_floor = QualityGrade::General;
+            .default_capability_floor = CapabilityLevel::Capable;
         config
             .model_profiles
             .get_mut("small")
             .unwrap()
             .ratings
-            .get_mut("reasoning.deep")
+            .get_mut("reasoning.solve")
             .unwrap()
-            .grade = QualityGrade::General;
-        let intent = config.intent("reasoning.deep").unwrap();
+            .level = CapabilityLevel::Capable;
+        let intent = config.intent("reasoning.solve").unwrap();
         let constraints = RequestConstraints::default();
         let allowed = BTreeSet::from([ProviderAccessClass::Standard]);
         let cloud_inputs = BTreeSet::from([Modality::Text]);
-        let quality_fit = PolicyProfile {
-            order: vec![SortKey::QualityFit],
+        let capability_fit = PolicyProfile {
+            order: vec![SortKey::CapabilityFit],
         };
         let strongest = PolicyProfile {
-            order: vec![SortKey::Quality],
+            order: vec![SortKey::Capability],
         };
 
         let fitted = plan_candidates(
             &config,
-            "reasoning.deep",
+            "reasoning.solve",
             intent,
-            &quality_fit,
+            &capability_fit,
             CandidatePlanningContext {
                 constraints: &constraints,
                 execution_requirements: &ExecutionRequirements::default(),
@@ -642,7 +690,7 @@ mod tests {
 
         let strongest = plan_candidates(
             &config,
-            "reasoning.deep",
+            "reasoning.solve",
             intent,
             &strongest,
             CandidatePlanningContext {
@@ -667,14 +715,14 @@ mod tests {
             .unwrap()
             .input_modalities
             .push(Modality::Image);
-        let intent = config.intent("reasoning.deep").unwrap();
+        let intent = config.intent("reasoning.solve").unwrap();
         let requirements = ExecutionRequirements {
             input_modalities: BTreeSet::from([Modality::Text, Modality::Image]),
             ..ExecutionRequirements::default()
         };
         let denied = plan_candidates(
             &config,
-            "reasoning.deep",
+            "reasoning.solve",
             intent,
             &config.profiles["balanced"],
             CandidatePlanningContext {
@@ -696,7 +744,7 @@ mod tests {
 
         let admitted = plan_candidates(
             &config,
-            "reasoning.deep",
+            "reasoning.solve",
             intent,
             &config.profiles["balanced"],
             CandidatePlanningContext {
@@ -713,12 +761,12 @@ mod tests {
     }
 
     #[test]
-    fn local_only_does_not_cross_the_quality_or_placement_boundary() {
+    fn local_only_does_not_cross_the_capability_or_placement_boundary() {
         let config = config();
         let selected = select_candidate(
             &config,
-            "reasoning.deep",
-            config.intent("reasoning.deep").unwrap(),
+            "reasoning.solve",
+            config.intent("reasoning.solve").unwrap(),
             &config.profiles["balanced"],
             &RequestConstraints {
                 placement: Some(infer_core::PlacementScope::LocalOnly),
@@ -730,17 +778,17 @@ mod tests {
     }
 
     #[test]
-    fn explicit_quality_fallback_never_drops_below_the_intent_floor() {
+    fn explicit_capability_fallback_never_drops_below_the_intent_floor() {
         let config = config();
         let plan = plan_candidates(
             &config,
-            "reasoning.deep",
-            config.intent("reasoning.deep").unwrap(),
+            "reasoning.solve",
+            config.intent("reasoning.solve").unwrap(),
             &config.profiles["balanced"],
             CandidatePlanningContext {
                 constraints: &RequestConstraints {
-                    quality_floor: Some(QualityGrade::Frontier),
-                    fallback: Some(Fallback::AllowLowerQuality),
+                    capability_floor: Some(CapabilityLevel::Exceptional),
+                    fallback: Some(Fallback::AllowLowerCapability),
                     ..Default::default()
                 },
                 execution_requirements: &ExecutionRequirements::default(),
@@ -752,12 +800,12 @@ mod tests {
             },
         );
         assert!(plan.candidates.is_empty());
-        assert_eq!(plan.lower_quality_candidates.len(), 1);
+        assert_eq!(plan.lower_capability_candidates.len(), 1);
         assert_eq!(
-            plan.lower_quality_candidates[0].deployment_id,
+            plan.lower_capability_candidates[0].deployment_id,
             "strong_cloud"
         );
-        assert!(plan.lower_quality_candidates[0].quality_grade >= QualityGrade::Advanced);
+        assert!(plan.lower_capability_candidates[0].capability_level >= CapabilityLevel::Expert);
     }
 
     #[test]
@@ -765,8 +813,8 @@ mod tests {
         let config = config();
         let plan = plan_candidates(
             &config,
-            "reasoning.deep",
-            config.intent("reasoning.deep").unwrap(),
+            "reasoning.solve",
+            config.intent("reasoning.solve").unwrap(),
             &config.profiles["balanced"],
             CandidatePlanningContext {
                 constraints: &RequestConstraints::default(),
@@ -804,8 +852,8 @@ mod tests {
         let unavailable = BTreeSet::from(["small_local".into()]);
         let plan = plan_candidates(
             &config,
-            "reasoning.deep",
-            config.intent("reasoning.deep").unwrap(),
+            "reasoning.solve",
+            config.intent("reasoning.solve").unwrap(),
             &config.profiles["balanced"],
             CandidatePlanningContext {
                 constraints: &RequestConstraints::default(),
@@ -847,8 +895,8 @@ mod tests {
             .api_key_env = Some("INFER_RUNTIME_TEST_UNSET_DEEPSEEK_KEY".into());
         let local_without_credential = select_candidate(
             &config,
-            "assistant.general",
-            config.intent("assistant.general").unwrap(),
+            "language.respond",
+            config.intent("language.respond").unwrap(),
             &config.profiles["balanced"],
             &RequestConstraints::default(),
             None,
@@ -863,8 +911,8 @@ mod tests {
             .requires_api_key = false;
         let cloud = select_candidate(
             &config,
-            "assistant.general",
-            config.intent("assistant.general").unwrap(),
+            "language.respond",
+            config.intent("language.respond").unwrap(),
             &config.profiles["balanced"],
             &RequestConstraints {
                 placement: Some(infer_core::PlacementScope::CloudOnly),
@@ -877,8 +925,8 @@ mod tests {
 
         let local = select_candidate(
             &config,
-            "assistant.general",
-            config.intent("assistant.general").unwrap(),
+            "language.respond",
+            config.intent("language.respond").unwrap(),
             &config.profiles["balanced"],
             &RequestConstraints {
                 placement: Some(infer_core::PlacementScope::LocalOnly),
@@ -891,7 +939,7 @@ mod tests {
     }
 
     #[test]
-    fn subscription_model_group_maps_quality_floor_to_model_and_effort_stays_orthogonal() {
+    fn codex_subscription_model_group_maps_capability_floor_and_effort_stays_orthogonal() {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
         let config = RuntimeConfig::load(path).unwrap();
@@ -907,10 +955,10 @@ mod tests {
         let cloud_inputs = BTreeSet::from([Modality::Text]);
         let empty = BTreeSet::new();
 
-        let general = plan_candidates(
+        let language = plan_candidates(
             &config,
-            "assistant.general",
-            config.intent("assistant.general").unwrap(),
+            "language.respond",
+            config.intent("language.respond").unwrap(),
             &config.profiles["balanced"],
             CandidatePlanningContext {
                 constraints: &constraints,
@@ -922,20 +970,20 @@ mod tests {
                 unavailable_deployments: &empty,
             },
         );
-        let general_deployments = general
+        let language_deployments = language
             .candidates
             .iter()
             .map(|candidate| candidate.deployment_id.as_str())
             .collect::<BTreeSet<_>>();
-        assert!(general_deployments.contains("codex_gpt_5_6_luna"));
-        assert!(general_deployments.contains("antigravity_gemini_3_6_flash_low"));
-        assert!(!general_deployments.contains("antigravity_gemini_3_6_flash"));
-        assert!(!general_deployments.contains("antigravity_gemini_3_6_flash_high"));
+        assert_eq!(
+            language_deployments,
+            BTreeSet::from(["codex_gpt_5_6_luna", "codex_gpt_5_6_terra"])
+        );
 
         let deep = plan_candidates(
             &config,
-            "reasoning.deep",
-            config.intent("reasoning.deep").unwrap(),
+            "reasoning.solve",
+            config.intent("reasoning.solve").unwrap(),
             &config.profiles["balanced"],
             CandidatePlanningContext {
                 constraints: &constraints,
@@ -947,13 +995,13 @@ mod tests {
                 unavailable_deployments: &empty,
             },
         );
-        assert_eq!(deep.candidates[0].deployment_id, "codex_gpt_5_6_terra");
+        assert_eq!(deep.candidates[0].deployment_id, "codex_gpt_5_6_luna");
 
         let strongest = plan_candidates(
             &config,
-            "reasoning.deep",
-            config.intent("reasoning.deep").unwrap(),
-            &config.profiles["quality-first"],
+            "reasoning.solve",
+            config.intent("reasoning.solve").unwrap(),
+            &config.profiles["capability-first"],
             CandidatePlanningContext {
                 constraints: &constraints,
                 execution_requirements: &ExecutionRequirements::default(),
@@ -965,6 +1013,29 @@ mod tests {
             },
         );
         assert_eq!(strongest.candidates[0].deployment_id, "codex_gpt_5_6_sol");
+
+        let ultra = plan_candidates(
+            &config,
+            "reasoning.solve",
+            config.intent("reasoning.solve").unwrap(),
+            &config.profiles["capability-first"],
+            CandidatePlanningContext {
+                constraints: &constraints,
+                execution_requirements: &ExecutionRequirements::default(),
+                reasoning_effort: Some(ReasoningEffort::Ultra),
+                allowed_provider_access_classes: &allowed,
+                allowed_cloud_input_modalities: &cloud_inputs,
+                unavailable_providers: &empty,
+                unavailable_deployments: &empty,
+            },
+        );
+        assert_eq!(ultra.candidates[0].deployment_id, "codex_gpt_5_6_sol");
+        assert!(ultra.decision.candidates.iter().any(|candidate| {
+            candidate.deployment == "codex_gpt_5_6_luna"
+                && candidate
+                    .reason_codes
+                    .contains(&CandidateReasonCode::ReasoningEffortUnsupported)
+        }));
     }
 
     #[test]
@@ -1035,7 +1106,7 @@ mod tests {
     }
 
     #[test]
-    fn resource_cost_prefers_the_light_model_after_quality_floor_is_met() {
+    fn resource_cost_prefers_the_light_model_after_capability_floor_is_met() {
         let config: RuntimeConfig =
             toml::from_str(include_str!("../../../config/infer.example.toml")).unwrap();
         config.validate().unwrap();
@@ -1062,8 +1133,8 @@ mod tests {
             ("audio.transcribe", "mlx_qwen3_asr_1_7b"),
             ("audio.align", "mlx_qwen3_forced_aligner_0_6b"),
             ("speech.synthesize", "mlx_qwen3_tts_custom_voice_1_7b"),
-            ("speech.voice_design", "mlx_qwen3_tts_voice_design_1_7b"),
-            ("speech.voice_clone", "mlx_qwen3_tts_base_1_7b"),
+            ("speech.design_voice", "mlx_qwen3_tts_voice_design_1_7b"),
+            ("speech.clone_voice", "mlx_qwen3_tts_base_1_7b"),
         ];
         for (intent_id, deployment_id) in expected {
             let intent = config.intent(intent_id).unwrap();

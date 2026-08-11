@@ -16,10 +16,10 @@
 
 - `audio.transcribe` → `/v1/audio/transcriptions`；
 - `audio.align` → `/v1/audio/alignments`；
-- `speech.synthesize`、`speech.voice_design` → `/v1/audio/speech`；
-- `speech.voice_clone` → `/v1/audio/voice-clones`。
+- `speech.synthesize`、`speech.design_voice` → `/v1/audio/speech`；
+- `speech.clone_voice` → `/v1/audio/voice-clones`。
 
-这些数据面共享现有 App admission、Intent/Model/Build/Deployment registry、placement/quality constraints、provider queue、deadline、Job、cancel、metrics 和 explain。物理模型仅存在于 Build/Deployment。
+这些数据面共享现有 App admission、Intent/Model/Build/Deployment registry、placement/capability constraints、provider queue、deadline、Job、cancel、metrics 和 explain。物理模型仅存在于 Build/Deployment。
 
 本机执行采用进程外、常驻的 JSON-lines MLX worker。worker 懒加载模型，默认最多缓存一个，以免五个音频模型同时占用统一内存。request id 隔离 deadline/cancel 后可能迟到的 worker 响应。
 

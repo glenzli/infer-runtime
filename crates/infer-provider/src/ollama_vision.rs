@@ -608,7 +608,7 @@ mod tests {
             .review_classification(
                 "qwen3-vl:8b",
                 ClassificationReviewRequest {
-                    model: "vision.review_classification".into(),
+                    model: "vision.classify_closed_set".into(),
                     image: png(),
                     source_revision: "photo:2".into(),
                     image_orientation: VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS.into(),

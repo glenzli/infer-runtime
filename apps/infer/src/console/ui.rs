@@ -303,10 +303,10 @@ fn render_jobs(frame: &mut Frame<'_>, area: Rect, state: &ConsoleState) {
             Line::from(vec![
                 Span::styled("policy      ", Style::default().fg(MUTED)),
                 Span::raw(format!(
-                    "{}  placement={}  quality={}  resource={}",
+                    "{}  placement={}  capability={}  resource={}",
                     value_str(detail, "policy"),
                     value_str(detail, "placement"),
-                    value_str(detail, "quality_grade"),
+                    value_str(detail, "capability_level"),
                     value_str(detail, "resource_class")
                 )),
             ]),

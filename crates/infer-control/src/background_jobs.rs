@@ -581,7 +581,7 @@ fn persisted_targets(
         .iter()
         .filter(|decision| {
             decision.status == CandidateDecisionStatus::Eligible
-                || (fallback == infer_core::Fallback::AllowLowerQuality
+                || (fallback == infer_core::Fallback::AllowLowerCapability
                     && decision.status == CandidateDecisionStatus::FallbackEligible)
         })
         .collect::<Vec<_>>();

@@ -32,7 +32,7 @@ same-origin/CSP 保护。显式创建/轮换的 Consumer token 是唯一例外�
   和原生 inventory 刷新。动作继续受 `resource_admin`、reservation
   和 lifecycle 状态机保护；
 - **Apps & Access**：登记 Consumer 身份、编辑允许提交的 Intent 以及可申请的
-  policy/placement/quality/fallback 边界，创建或轮换 runtime-managed token，并撤销 App。
+  policy/placement/capability/reasoning effort/fallback 边界，创建或轮换 runtime-managed token，并撤销 App。
   既有 token 永不回显；新 token 只展示一次，所有变更均明确等待重启；
 - **Logs**：本次控制台启动的 `inferd` stdout/stderr，默认保留最近 500 行；支持来源/
   warn/error 过滤、关键字搜索和暂停跟随，并显示会话内级别计数；

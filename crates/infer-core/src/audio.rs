@@ -99,7 +99,7 @@ impl AlignmentRequest {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpeechRequest {
-    /// Stable intent: `speech.synthesize` or `speech.voice_design`.
+    /// Stable intent: `speech.synthesize` or `speech.design_voice`.
     pub model: String,
     pub input: String,
     #[serde(default)]
@@ -152,11 +152,11 @@ impl SpeechRequest {
                 "{SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1} requires language={SPEECH_VOICE_ZH_BRIGHT_FEMALE_LANGUAGE}"
             )));
         }
-        if self.model == "speech.voice_design"
+        if self.model == "speech.design_voice"
             && self.instructions.as_deref().is_none_or(str::is_empty)
         {
             return Err(ContractError::InvalidAudio(
-                "speech.voice_design requires instructions".into(),
+                "speech.design_voice requires instructions".into(),
             ));
         }
         match self.execution_mode {
@@ -319,7 +319,7 @@ mod tests {
     #[test]
     fn specialized_speech_intents_require_their_discriminator() {
         let request = SpeechRequest {
-            model: "speech.voice_design".into(),
+            model: "speech.design_voice".into(),
             input: "hello".into(),
             voice: None,
             instructions: None,
@@ -383,7 +383,7 @@ mod tests {
         };
         assert!(request.validate().is_ok());
 
-        // Existing candidate.2 callers remain compatible until their App opts
+        // Existing callers remain compatible until their App opts
         // into an alias-only allowlist.
         request.voice = Some("Vivian".into());
         assert!(request.validate().is_ok());

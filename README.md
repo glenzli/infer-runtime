@@ -2,7 +2,7 @@
 
 > A local-first AI inference control plane for heterogeneous intelligence resources.
 
-`infer-runtime` 让应用只表达 Intent、质量、延迟、位置、隐私和回退约束，由 Runtime 负责选择
+`infer-runtime` 让应用只表达 Intent、能力下限、推理投入、延迟、位置、隐私和回退约束，由 Runtime 负责选择
 Provider 与 Deployment，并统一处理排队、配额、模型驻留、取消、故障切换和审计。
 
 它不是模型市场、Agent 框架或 AI 应用，也不试图用一个万能 JSON/Tensor 协议抹平文本、音频、
@@ -12,7 +12,7 @@ Provider 与 Deployment，并统一处理排队、配额、模型驻留、取消
 
 | 能力 | 当前实现 | 稳定性 |
 | --- | --- | --- |
-| 文本推理 | Responses-shaped unary/SSE、本地加密 background；可连接本地、云端和订阅式 Provider | `0.1.0-candidate.2`；订阅桥仍 experimental |
+| 文本推理 | Responses-shaped unary/SSE、本地加密 background；可连接本地、云端和订阅式 Provider | `0.1.0-candidate.3`；订阅桥仍 experimental |
 | 本地音频 | 转写、强制对齐、语音合成、声音设计与声音克隆等 typed 能力 | 文件接口可接入；流式 TTS/ASR 仍 experimental |
 | 本地视觉 | ONNX Runtime Session Registry；人脸检测/向量与图文语义向量等 typed 能力 | 收窄的 experimental slices |
 | 路由与执行 | Intent → Model Profile → Build → Deployment；优先队列、deadline、cancel、retry/fallback、熔断 | M1/M2 已闭环 |
@@ -91,7 +91,7 @@ credential 不会下发到页面。
 
 ```text
 protocol  = infer-runtime.consumer
-version   = 0.1.0-candidate.2
+version   = 0.1.0-candidate.3
 binding   = infer-runtime.http-loopback
 ```
 
@@ -105,7 +105,7 @@ Discovery manifest 只发布 service identity、generation、lease 和 canonical
 
 - `resource_admin = false`；
 - 允许的 Intent 清单；
-- placement、priority、quality、fallback 和成本上限；
+- placement、priority、capability、reasoning effort、fallback 和成本上限；
 - 是否允许 cloud/subscription 以及可外发的模态。
 
 不要把 `local-operator` token 交给产品应用。Managed token 只在创建或轮换时显示一次，应立即写入
@@ -135,6 +135,10 @@ curl "$INFER_BASE_URL/v1/responses" \
 [`docs/INTEGRATION.md`](docs/INTEGRATION.md) 与
 [`contracts/v0.1`](contracts/v0.1/README.md)。
 
+从 candidate.2 升级的 Consumer 请先按
+[`docs/MIGRATION-0.1.0-candidate.3.md`](docs/MIGRATION-0.1.0-candidate.3.md)
+完成 Intent、能力字段和 Discovery offer 的一次性迁移。
+
 无需凭证即可读取当前合同：
 
 ```bash
@@ -157,7 +161,7 @@ curl "$INFER_BASE_URL/infer/v1/openapi.json"
 
 ## 当前阶段
 
-当前实现是可供本机 Consumer 反馈测试的 `0.1.0-candidate.2`，不是正式 v0.1 发布版。
+当前实现是可供本机 Consumer 反馈测试的 `0.1.0-candidate.3`，不是正式 v0.1 发布版。
 M1–M4 的核心纵向切片已经闭环；完整 traces、24 小时混合 soak、更多连续 Consumer 使用与正式
 发布门槛仍在推进。ONNX 视觉、流式音频和 Codex subscription bridge 保持 experimental，不会
 借由配置存在就自动升级为稳定合同。
@@ -181,6 +185,7 @@ M1–M4 的核心纵向切片已经闭环；完整 traces、24 小时混合 soak
 | [`ROADMAP.md`](ROADMAP.md) | 阶段、依赖、风险与验收门槛 |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | 已接受决策、开放决策与 ADR 入口 |
 | [`docs/INTEGRATION.md`](docs/INTEGRATION.md) | Consumer onboarding 与各数据平面示例 |
+| [`docs/MIGRATION-0.1.0-candidate.3.md`](docs/MIGRATION-0.1.0-candidate.3.md) | candidate.2 Consumer 的 breaking migration 清单 |
 | [`docs/CONSUMER_DISCOVERY.md`](docs/CONSUMER_DISCOVERY.md) | Consumer Infra Discovery 合同 |
 | [`contracts/v0.1`](contracts/v0.1/README.md) | candidate wire contract、OpenAPI 与 fixtures |
 | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Console、资源生命周期、background 与运维流程 |

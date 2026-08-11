@@ -76,11 +76,11 @@ ONNX tensor 或 Execution Provider 专有类型。
 `POST /infer/v1/vision/face-detections`。第二个切片选择 `vision.embed_face`，数据平面为
 `vision.face_embedding`，实验路由为 `POST /infer/v1/vision/face-embeddings`。它接收同一
 输入像素坐标系中的原图与命名五点，不接受 tensor、物理 backend 或 Consumer 自对齐 crop。
-第三个切片开放 `vision.embed_image` / `vision.image_embedding` 与 `vision.embed_text` /
+第三个切片开放 `semantic.embed_image` / `vision.image_embedding` 与 `semantic.embed_text` /
 `vision.text_embedding`，实验路由分别为 `POST /infer/v1/vision/image-embeddings` 与
 `POST /infer/v1/vision/text-embeddings`。两者由同一 SigLIP checkpoint 的 image/text encoder
 满足，必须返回相同 embedding-space identity。第四个 slice 开放 `vision.describe_image` /
-`vision.image_description` 与 `vision.review_classification` / `vision.classification_review`，实验
+`vision.image_description` 与 `vision.classify_closed_set` / `vision.classification_review`，实验
 路由分别为 `POST /infer/v1/vision/image-descriptions` 与
 `POST /infer/v1/vision/classification-reviews`。它们通过 Ollama QwenVL adapter 执行，但公共
 合同不暴露 chat schema、物理 tag 或自由 tensor map。
@@ -227,13 +227,13 @@ orientation-normalized artifact 与 `source_revision`；text 请求绑定有界�
 
 采用两个职责分离的 Intent，而不是让一个自由生成 endpoint 同时解释分类和描述。
 `vision.describe_image` 接受 orientation-normalized display raster、`source_revision` 和输出语言，
-返回 bounded short description 与去重 keyword suggestions。`vision.review_classification` 另接受
+返回 bounded short description 与去重 keyword suggestions。`vision.classify_closed_set` 另接受
 `taxonomy_revision` 和最多 64 个 id/name/description 类别，只允许返回闭集 id 或
 `none|uncertain`。proposal 永远不是 adaptation feedback 或 `AiAccepted`。
 
-Consumer 以 quality floor 选择能力下限，不传 Ollama tag：当前 4B Build 为 basic/standard，
-用于 bulk/background；8B Build 为 general/heavy，用于 explicit/review。描述默认 basic，分类
-复核默认 general。两条路由都强制 local-only/offline/no-fallback，复用统一 Job/Attempt、
+Consumer 以 capability floor 选择能力下限，不传 Ollama tag：当前 4B Build 为
+foundational/standard，用于 bulk/background；8B Build 为 capable/heavy，用于 explicit/review。
+描述默认 foundational，分类复核默认 capable。两条路由都强制 local-only/offline/no-fallback，复用统一 Job/Attempt、
 deadline、取消、provider capacity 和全机 pressure；首版同步返回，background 只表达优先级，
 不形成 durable photo queue。
 
@@ -276,10 +276,10 @@ SFace CPU load/inventory/unload/对齐/归一化、严格 Core ML 拒绝/CPU fal
 以及 face 路由完整 auth → ACL → HTTP → Job/Attempt → provider 端到端测试。SigLIP 另通过
 固定 checkpoint/export、image/text graph/tokenizer 内容寻址校验、中文文本、共享 space、
 768d L2 normalization、CPU-only 实际 route 和 release 内存/吞吐测量；Shadow ACL 的真实
-managed credential 已完成两条 HTTP E2E。QwenVL 另通过 strict multipart/JSON、4B/8B quality
+managed credential 已完成两条 HTTP E2E。QwenVL 另通过 strict multipart/JSON、4B/8B capability
 routing、闭集 id 仲裁、取消与本机 native Ollama HTTP E2E；图片、类别、描述和关键词不会进入
-Job metadata 或 Console log。当前机器一次真实采样中，4B basic 描述约 32.5 秒（load 2.8 秒）、
-8B general 描述约 51.0 秒（load 6.2 秒）、warm 8B 闭集复核约 9.4 秒，8B 驻留约 7.81 GB；
+Job metadata 或 Console log。当前机器一次真实采样中，4B foundational 描述约 32.5 秒（load 2.8 秒）、
+8B capable 描述约 51.0 秒（load 6.2 秒）、warm 8B 闭集复核约 9.4 秒，8B 驻留约 7.81 GB；
 这些数据只用于 provisional admission/SLO 起点，不是跨机器承诺。所有 E2E 都验证通用 Job
 响应不包含 image、query、embedding 或生成文本。默认
 CI 继续用不依赖权重的合同测试。后续

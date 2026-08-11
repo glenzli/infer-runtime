@@ -2,7 +2,8 @@
 
 use serde::Serialize;
 
-pub const CONTRACT_VERSION: &str = "0.1.0-candidate.2";
+pub const CONTRACT_VERSION: &str = "0.1.0-candidate.3";
+pub const CAPABILITY_SCALE_VERSION: &str = "20260811.1";
 pub const CONTRACT_STABILITY: &str = "candidate";
 pub const OPENAPI_PATH: &str = "/infer/v1/openapi.json";
 pub const OPENAPI_JSON: &str = include_str!("../../../contracts/v0.1/openapi.json");
@@ -106,6 +107,7 @@ pub const EXPERIMENTAL_ROUTES: &[ContractRoute] = &[
 #[derive(Debug, Serialize)]
 pub struct ContractManifest {
     pub contract_version: &'static str,
+    pub capability_scale_version: &'static str,
     pub stability: &'static str,
     pub compatibility: &'static str,
     pub openapi_url: &'static str,
@@ -124,8 +126,9 @@ impl ContractManifest {
     pub fn current() -> Self {
         Self {
             contract_version: CONTRACT_VERSION,
+            capability_scale_version: CAPABILITY_SCALE_VERSION,
             stability: CONTRACT_STABILITY,
-            compatibility: "this revision is immutable; later candidate revisions are additive unless accompanied by migration notes",
+            compatibility: "candidate.3 intentionally breaks candidate.2 intent and capability vocabulary; later revisions require explicit migration notes for breaking changes",
             openapi_url: OPENAPI_PATH,
             consumer_routes: CONSUMER_ROUTES,
             experimental_routes: EXPERIMENTAL_ROUTES,
@@ -167,8 +170,8 @@ impl PublicErrorEnvelope {
 #[cfg(test)]
 mod tests {
     use infer_core::{
-        JobListPage, JobState, Placement, Priority, QualityGrade, RatingStatus, ResourceClass,
-        ResponsesRequest,
+        CapabilityLevel, EvaluationStatus, JobListPage, JobState, Placement, Priority,
+        ResourceClass, ResponsesRequest,
     };
     use serde_json::Value;
 
@@ -183,6 +186,11 @@ mod tests {
             document["components"]["schemas"]["ContractManifest"]["properties"]["contract_version"]
                 ["const"],
             CONTRACT_VERSION
+        );
+        assert_eq!(
+            document["components"]["schemas"]["ContractManifest"]["properties"]["capability_scale_version"]
+                ["const"],
+            CAPABILITY_SCALE_VERSION
         );
         assert!(
             document["components"]["schemas"]["ContractManifest"]["required"]
@@ -269,17 +277,18 @@ mod tests {
             &[Placement::Local, Placement::TrustedNode, Placement::Cloud],
         );
         assert_enum(
-            &document["components"]["schemas"]["JobSnapshot"]["properties"]["quality_grade"]["enum"],
+            &document["components"]["schemas"]["JobSnapshot"]["properties"]["capability_level"]["enum"],
             &[
-                QualityGrade::Basic,
-                QualityGrade::General,
-                QualityGrade::Advanced,
-                QualityGrade::Frontier,
+                CapabilityLevel::Foundational,
+                CapabilityLevel::Capable,
+                CapabilityLevel::Advanced,
+                CapabilityLevel::Expert,
+                CapabilityLevel::Exceptional,
             ],
         );
         assert_enum(
-            &document["components"]["schemas"]["JobSnapshot"]["properties"]["rating_status"]["enum"],
-            &[RatingStatus::Provisional, RatingStatus::Benchmarked],
+            &document["components"]["schemas"]["JobSnapshot"]["properties"]["evaluation_status"]["enum"],
+            &[EvaluationStatus::Provisional, EvaluationStatus::Benchmarked],
         );
         assert_enum(
             &document["components"]["schemas"]["JobSnapshot"]["properties"]["resource_class"]["enum"],

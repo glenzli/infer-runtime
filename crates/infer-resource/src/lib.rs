@@ -948,11 +948,11 @@ mod tests {
             [intents."text.summarize"]
             input_modalities = ["text"]
             output_modalities = ["text"]
-            default_quality_floor = "basic"
+            default_capability_floor = "foundational"
             [model_profiles.small]
             family = "qwen"
             [model_profiles.small.ratings."text.summarize"]
-            grade = "basic"
+            level = "foundational"
             status = "provisional"
             [model_builds.small]
             profile = "small"

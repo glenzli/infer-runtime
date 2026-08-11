@@ -1,9 +1,12 @@
 # infer-runtime v0.1 consumer contract
 
-当前可供外部应用反馈测试的合同版本是 `0.1.0-candidate.2`；`candidate.1` 保持冻结。它不是正式发布标签，但已经有
+当前可供外部应用反馈测试的合同版本是 `0.1.0-candidate.3`；`candidate.1` 与 `candidate.2`
+保持冻结。它不是正式发布标签，但已经有
 固定的路由、请求字段、最小响应字段、错误 envelope、示例和运行时身份。机器可读规范见
 [openapi.json](openapi.json)，示例见 [fixtures](fixtures)。第一次接入请从
 [外部应用接入指南](../../docs/INTEGRATION.md) 开始；本文件仍是兼容边界的权威说明。
+从 candidate.2 升级必须先完成
+[candidate.3 migration](../../docs/MIGRATION-0.1.0-candidate.3.md)。
 
 本机位置发现使用独立的
 [`infer-runtime.consumer` Infra Discovery offer](../../docs/CONSUMER_DISCOVERY.md)。offer 的
@@ -43,7 +46,7 @@ route 的请求仍严格拒绝未知字段。
 
 ## 兼容策略
 
-- `0.1.0-candidate.1` 与当前 `0.1.0-candidate.2` 一旦交给 consumer 就视为不可变；规范、fixture 或 wire 行为变化必须产生新的 candidate revision。
+- `0.1.0-candidate.1`、`candidate.2` 与当前 `candidate.3` 一旦交给 consumer 就视为不可变；规范、fixture 或 wire 行为变化必须产生新的 candidate revision。
 - 新 candidate 默认只允许增加可选字段、响应字段或新 endpoint。Consumer 必须忽略响应中的未知字段。
 - 若反馈期确实证明需要破坏性修正，必须提升 revision、写明 migration，并与已登记 consumer 协调；不得静默修改原 revision。
 - 正式 `v0.1.0` 后，破坏公开 wire 的变化进入新的 API/合同版本。Provider SPI、CLI 文本输出和 operator experimental 路由不受此承诺约束。
@@ -53,7 +56,7 @@ route 的请求仍严格拒绝未知字段。
 
 这是 OpenAI Responses 风格的无状态子集，不是对完整 OpenAI 平台行为的承诺：
 
-- `model` 是稳定 Intent（如 `text.summarize`、`assistant.general`），不是物理模型名；
+- `model` 是稳定 Intent（如 `text.summarize`、`language.respond`），不是物理模型名；
 - 支持的请求字段以 OpenAPI 为准；未知顶层字段会返回 `400 invalid_request_error`；
 - `previous_response_id`、`conversation`、`store=true` 不受支持；
 - `background=true` 当前仅用于非流式、显式 `local_only` 的持久文本任务；
@@ -70,10 +73,10 @@ route 的请求仍严格拒绝未知字段。
 | `infer.provider_access_class` | `standard` / `subscription`（仅可缩窄 App ACL） |
 | `infer.prefer` | `local` / `trusted_node` / `cloud` |
 | `infer.offline_required` | `true` / `false` |
-| `infer.quality_floor` | `basic` / `general` / `advanced` / `frontier` |
+| `infer.capability_floor` | `foundational` / `capable` / `advanced` / `expert` / `exceptional` |
 | `infer.latency` | `interactive` / `balanced` / `throughput` |
 | `infer.max_cost_usd` | 非负小数 |
-| `infer.fallback` | `none` / `equivalent` / `allow_lower_quality` |
+| `infer.fallback` | `none` / `equivalent` / `allow_lower_capability` |
 | `infer.deadline_ms` | 正整数毫秒 |
 
 最小调用：
@@ -113,7 +116,7 @@ Multipart 端点按任务分别接受字段，拼写错误、重复字段、错�
 Consumer 开始接入时记录 daemon commit 与 `contract_version`，至少反馈：
 
 1. 非流式成功、SSE 成功和客户端取消；
-2. Intent/placement/quality/fallback 的实际使用组合；
+2. Intent/placement/capability/reasoning effort/fallback 的实际使用组合；
 3. 400、401、409、429、503、504 是否能只依赖 status + `error.code` 正确处理；
 4. background create/retrieve/cancel（若启用）；
 5. Job list/get/explain 能否支撑问题定位；
