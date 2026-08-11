@@ -16,7 +16,7 @@ const viewCopy = {
   overview: ["运行总览", "查看本机推理设施的实时状态与重要变化。"],
   statistics: ["统计与预算", "观察吞吐、队列、失败和资源使用趋势。"],
   jobs: ["任务与执行", "检查 Job、Intent、物理 Deployment 与运行状态。"],
-  models: ["模型与资源", "管理 Provider、模型驻留、Inventory 与压力策略。"],
+  models: ["模型与资源", "按 Intent 与能力浏览模型，并管理驻留、Inventory 与压力策略。"],
   access: ["Apps 与访问", "创建 Consumer 身份，管理调用权限、令牌轮换与撤销。"],
   logs: ["实时日志", "筛选并跟踪由本控制台启动的 inferd 进程输出。"],
   config: ["Runtime 配置", "在浏览器中校验配置，并通过显式重启应用变更。"],
@@ -266,17 +266,44 @@ function renderResources() {
   setText("resident-count", String(resident.length));
   setText("reservation-count", String(reservations));
   setText("eviction-count", String(targets.length));
-  setText("resource-summary", `${models.length} 个受管 Deployment · ${resident.length} 个驻留`);
-  setText("resource-detail", pressure.last_error || `主机压力 ${pressureLabel(pressureLevel)}，可用内存 ${free ?? "未知"}%`);
-
-  const allProviders = Array.isArray(providers) ? providers : [];
-  const cards = allProviders.map(provider => providerCard(provider, resourceMap.get(provider.id)));
+  const allProviders = Array.isArray(providers) ? [...providers] : [];
   for (const nativeProvider of resourceProviders) {
     if (!allProviders.some(provider => provider.id === nativeProvider.provider)) {
-      cards.push(providerCard({ id: nativeProvider.provider, kind: nativeProvider.kind, placement: "local", configured: true }, nativeProvider));
+      allProviders.push({ id: nativeProvider.provider, kind: nativeProvider.kind, placement: "local", configured: true });
     }
   }
-  document.getElementById("resource-providers").innerHTML = cards.length ? cards.join("") : `<article class="panel empty-state">${escapeHtml(endpointError("resources") || "暂无资源数据")}</article>`;
+  syncModelIntentFilter(allProviders);
+  const filters = modelFilters();
+  const providerCatalog = allProviders.map(provider => {
+    const resource = resourceMap.get(provider.id);
+    const deployments = providerDeployments(provider, resource);
+    return {
+      provider,
+      resource,
+      deployments,
+      visible: deployments.filter(deployment => deploymentMatchesModelFilters(deployment, provider, filters)),
+    };
+  });
+  const filterActive = hasActiveModelFilters(filters);
+  const visibleCatalog = providerCatalog.filter(entry => entry.visible.length || (!filterActive && !entry.deployments.length));
+  const cards = visibleCatalog.map(entry => providerCard(
+    entry.provider,
+    entry.resource,
+    entry.visible,
+    entry.deployments.length,
+    filters,
+  ));
+  const totalDeployments = providerCatalog.reduce((sum, entry) => sum + entry.deployments.length, 0);
+  const visibleDeployments = providerCatalog.reduce((sum, entry) => sum + entry.visible.length, 0);
+  const visibleProviders = providerCatalog.filter(entry => entry.visible.length).length;
+  setText("model-filter-count", `${visibleDeployments} / ${totalDeployments} 个 Deployment · ${visibleProviders} 个 Provider`);
+  setText("resource-summary", `${visibleDeployments} / ${totalDeployments} 个 Deployment · ${resident.length} 个驻留`);
+  const filterSummary = modelFilterSummary(filters);
+  const pressureSummary = pressure.last_error || `主机压力 ${pressureLabel(pressureLevel)}，可用内存 ${free ?? "未知"}%`;
+  setText("resource-detail", filterSummary ? `${filterSummary} · ${pressureSummary}` : pressureSummary);
+  document.getElementById("resource-providers").innerHTML = cards.length
+    ? cards.join("")
+    : `<article class="panel empty-state">${escapeHtml(endpointError("resources") || (totalDeployments ? "没有匹配当前筛选条件的模型。" : "暂无资源数据"))}</article>`;
 
   const evictionMode = document.getElementById("eviction-mode");
   evictionMode.textContent = recommendation.status === "planned" ? "有建议" : "只读";
@@ -291,19 +318,23 @@ function renderResources() {
   }
 }
 
-function providerCard(provider, resource) {
+function providerDeployments(provider, resource) {
   const lifecycleModels = resource?.model_lifecycle || [];
-  const lifecycleByDeployment = new Map(lifecycleModels.map(model => [model.deployment, model]));
   const configuredDeployments = Array.isArray(provider.deployments) ? provider.deployments : [];
-  const deployments = configuredDeployments.length
+  return configuredDeployments.length
     ? configuredDeployments
     : lifecycleModels.map(model => ({ id: model.deployment, model: model.model_id }));
+}
+
+function providerCard(provider, resource, deployments, totalDeployments, filters) {
+  const lifecycleModels = resource?.model_lifecycle || [];
+  const lifecycleByDeployment = new Map(lifecycleModels.map(model => [model.deployment, model]));
   const available = resource?.available_deployments?.length || 0;
   const providerState = provider.circuit_open ? "熔断" : resource?.state || (provider.configured ? "configured" : "unconfigured");
   const rows = deployments.length ? deployments.map(deployment => {
     const lifecycle = lifecycleByDeployment.get(deployment.id);
     const modelIdentity = deployment.model || lifecycle?.model_id || "—";
-    const coverage = deploymentCoverage(deployment);
+    const coverage = deploymentCoverage(deployment, filters);
     const details = [compactModelIdentity(modelIdentity), deployment.model_profile, coverage]
       .filter(Boolean)
       .join(" · ");
@@ -319,17 +350,77 @@ function providerCard(provider, resource) {
   const probe = deployments.length && ["responses", "codex_app_server"].includes(provider.kind) ? `<button class="mini-button" data-provider-probe="${escapeAttribute(provider.id)}">兼容性 Probe</button>` : "";
   const catalog = provider.kind === "codex_app_server" ? `<button class="mini-button" data-provider-models="${escapeAttribute(provider.id)}">动态 Inventory</button>` : "";
   const access = provider.access_class && provider.access_class !== "standard" ? ` · ${provider.access_class}` : "";
-  const availability = `${deployments.length} admitted${lifecycleModels.length ? ` · ${available} available` : ""}`;
+  const filtered = deployments.length !== totalDeployments ? `${deployments.length}/${totalDeployments} matched` : `${totalDeployments} admitted`;
+  const availability = `${filtered}${lifecycleModels.length ? ` · ${available} available` : ""}`;
   const modes = provider.execution_modes?.join(" / ") || "unary";
   const tools = catalog || probe ? `<div class="provider-tools">${catalog}${probe}</div>` : "";
   return `<article class="panel provider-card"><div class="provider-card-header"><div><strong>${escapeHtml(provider.id)}</strong><small>${escapeHtml(provider.kind || "unknown")} · ${escapeHtml(provider.placement || "—")}${escapeHtml(access)} · ${escapeHtml(modes)} · ${escapeHtml(availability)}</small></div><span class="status-chip ${statusClass(providerState)}">${escapeHtml(providerState)}</span>${tools}</div>${rows}</article>`;
 }
 
-function deploymentCoverage(deployment) {
-  const ratings = Object.entries(deployment.ratings || {});
+function deploymentCoverage(deployment, filters = { intent: "all", capability: "all" }) {
+  const ratings = Object.entries(deployment.ratings || {}).filter(([intent, rating]) =>
+    (filters.intent === "all" || intent === filters.intent)
+      && (filters.capability === "all" || rating.level === filters.capability));
   if (!ratings.length) return "";
   const labels = ratings.map(([intent, rating]) => `${intent}:${rating.level || "—"}`);
-  return labels.length <= 2 ? labels.join(" / ") : `${labels.slice(0, 2).join(" / ")} +${labels.length - 2}`;
+  return labels.length <= 3 ? labels.join(" / ") : `${labels.slice(0, 3).join(" / ")} +${labels.length - 3}`;
+}
+
+function syncModelIntentFilter(providers) {
+  const select = document.getElementById("model-intent-filter");
+  const intents = [...new Set(providers.flatMap(provider =>
+    (provider.deployments || []).flatMap(deployment => Object.keys(deployment.ratings || {}))))].sort();
+  const signature = intents.join("\n");
+  if (select.dataset.options === signature) return;
+  const selected = select.value;
+  select.innerHTML = `<option value="all">全部 Intent (${intents.length})</option>${intents.map(intent =>
+    `<option value="${escapeAttribute(intent)}">${escapeHtml(intent)}</option>`).join("")}`;
+  select.value = intents.includes(selected) ? selected : "all";
+  select.dataset.options = signature;
+}
+
+function modelFilters() {
+  return {
+    query: document.getElementById("model-search").value.trim().toLowerCase(),
+    intent: document.getElementById("model-intent-filter").value,
+    capability: document.getElementById("model-capability-filter").value,
+    placement: document.getElementById("model-placement-filter").value,
+  };
+}
+
+function hasActiveModelFilters(filters) {
+  return Boolean(filters.query) || [filters.intent, filters.capability, filters.placement].some(value => value !== "all");
+}
+
+function deploymentMatchesModelFilters(deployment, provider, filters) {
+  if (filters.placement !== "all" && provider.placement !== filters.placement) return false;
+  const ratings = Object.entries(deployment.ratings || {});
+  const scopedRatings = filters.intent === "all"
+    ? ratings
+    : ratings.filter(([intent]) => intent === filters.intent);
+  if (filters.intent !== "all" && !scopedRatings.length) return false;
+  if (filters.capability !== "all" && !scopedRatings.some(([, rating]) => rating.level === filters.capability)) return false;
+  if (!filters.query) return true;
+  const haystack = [
+    provider.id,
+    provider.kind,
+    provider.placement,
+    deployment.id,
+    deployment.model,
+    deployment.model_profile,
+    deployment.build,
+    ...ratings.flatMap(([intent, rating]) => [intent, rating.level, rating.status]),
+  ].filter(Boolean).join(" ").toLowerCase();
+  return haystack.includes(filters.query);
+}
+
+function modelFilterSummary(filters) {
+  const parts = [];
+  if (filters.intent !== "all") parts.push(`Intent ${filters.intent}`);
+  if (filters.capability !== "all") parts.push(`档位 ${filters.capability}`);
+  if (filters.placement !== "all") parts.push(`位置 ${filters.placement}`);
+  if (filters.query) parts.push(`搜索“${filters.query}”`);
+  return parts.join(" · ");
 }
 
 function modelStateLabel(state) {
@@ -518,6 +609,17 @@ document.addEventListener("click", event => {
 document.getElementById("refresh-button").addEventListener("click", () => refreshAll());
 document.getElementById("job-search").addEventListener("input", renderJobs);
 document.getElementById("job-filter").addEventListener("change", renderJobs);
+document.getElementById("model-search").addEventListener("input", renderResources);
+document.getElementById("model-intent-filter").addEventListener("change", renderResources);
+document.getElementById("model-capability-filter").addEventListener("change", renderResources);
+document.getElementById("model-placement-filter").addEventListener("change", renderResources);
+document.getElementById("model-filter-reset").addEventListener("click", () => {
+  document.getElementById("model-search").value = "";
+  document.getElementById("model-intent-filter").value = "all";
+  document.getElementById("model-capability-filter").value = "all";
+  document.getElementById("model-placement-filter").value = "all";
+  renderResources();
+});
 document.getElementById("log-search").addEventListener("input", renderLogs);
 document.getElementById("log-filter").addEventListener("change", renderLogs);
 document.getElementById("log-follow").addEventListener("change", renderLogs);

@@ -386,6 +386,10 @@ status = "provisional"
 level = "foundational"
 status = "provisional"
 
+[model_profiles.qwen3_5_4b.ratings."language.respond"]
+level = "foundational"
+status = "provisional"
+
 [model_profiles.qwen3_vl_4b]
 family = "qwen3-vl"
 
@@ -479,7 +483,9 @@ status = "provisional"
 
 # Codex subscription ratings are provisional routing policy, not vendor model
 # rankings. Luna is the advanced entry, Terra the expert default, and Sol is
-# reserved for exceptional reasoning in this first admission set.
+# exceptional across its admitted language, reasoning, and multimodal intents.
+# Vision-specific uncertainty remains visible in the provisional evidence
+# status instead of silently lowering the multimodal capability level.
 [model_profiles.codex_gpt_5_6_luna]
 family = "gpt-5.6"
 
@@ -517,12 +523,16 @@ status = "provisional"
 [model_profiles.codex_gpt_5_6_sol]
 family = "gpt-5.6"
 
+[model_profiles.codex_gpt_5_6_sol.ratings."language.respond"]
+level = "exceptional"
+status = "provisional"
+
 [model_profiles.codex_gpt_5_6_sol.ratings."reasoning.solve"]
 level = "exceptional"
 status = "provisional"
 
 [model_profiles.codex_gpt_5_6_sol.ratings."multimodal.respond"]
-level = "expert"
+level = "exceptional"
 status = "provisional"
 
 [model_profiles.qwen3_asr_1_7b]

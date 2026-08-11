@@ -195,6 +195,19 @@
             <div><strong id="resource-summary">正在读取本地资源</strong><span id="resource-detail" class="muted">模型 inventory 不会在刷新时自动装卸。</span></div>
             <button class="button" data-action="resources-refresh">刷新本地 Inventory</button>
           </div>
+          <article class="panel model-catalog-filter" aria-labelledby="model-filter-title">
+            <div class="model-filter-heading">
+              <div><div class="eyebrow">CAPABILITY CATALOG</div><h3 id="model-filter-title">按 Intent 与能力查看模型</h3></div>
+              <span id="model-filter-count" class="muted" aria-live="polite">等待模型目录</span>
+            </div>
+            <div class="model-filter-grid" role="search" aria-label="筛选模型能力目录">
+              <label class="model-filter-field model-filter-search"><span>搜索</span><input id="model-search" class="input" type="search" placeholder="模型、Deployment 或 Provider"></label>
+              <label class="model-filter-field"><span>Intent</span><select id="model-intent-filter" class="input"><option value="all">全部 Intent</option></select></label>
+              <label class="model-filter-field"><span>评估档位</span><select id="model-capability-filter" class="input"><option value="all">全部档位</option><option value="foundational">Foundational</option><option value="capable">Capable</option><option value="advanced">Advanced</option><option value="expert">Expert</option><option value="exceptional">Exceptional</option></select></label>
+              <label class="model-filter-field"><span>位置</span><select id="model-placement-filter" class="input"><option value="all">本地与云端</option><option value="local">Local</option><option value="cloud">Cloud</option><option value="trusted_node">Trusted node</option></select></label>
+              <button id="model-filter-reset" class="button ghost model-filter-reset" type="button">清除筛选</button>
+            </div>
+          </article>
           <div id="resource-providers" class="provider-grid"></div>
           <article class="panel table-panel">
             <div class="panel-heading"><div><div class="eyebrow">EVICTION POLICY</div><h3>清退建议</h3></div><span id="eviction-mode" class="status-chip neutral">只读</span></div>

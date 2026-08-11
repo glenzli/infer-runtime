@@ -1051,31 +1051,48 @@ impl Runtime {
             .providers
             .iter()
             .map(|(id, provider)| {
-                let deployments = self
-                    .config
-                    .deployments
-                    .iter()
-                    .filter(|(_, deployment)| deployment.provider == *id)
-                    .map(|(deployment_id, deployment)| {
-                        let build = &self.config.model_builds[&deployment.build];
-                        let profile = &self.config.model_profiles[&build.profile];
-                        ProviderDeploymentSnapshot {
-                            id: deployment_id.clone(),
-                            build: deployment.build.clone(),
-                            model_profile: build.profile.clone(),
-                            model_family: profile.family.clone(),
-                            model: if std::path::Path::new(&build.model_id).is_absolute() {
-                                profile.family.clone()
-                            } else {
-                                build.model_id.clone()
-                            },
-                            resource_class: deployment.resource_class,
-                            supported_efforts: deployment.supported_efforts.clone(),
-                            execution_modes: deployment.supported_execution_modes.clone(),
-                            ratings: profile.ratings.clone(),
-                        }
-                    })
-                    .collect::<Vec<_>>();
+                let deployments =
+                    self.config
+                        .deployments
+                        .iter()
+                        .filter(|(_, deployment)| deployment.provider == *id)
+                        .map(|(deployment_id, deployment)| {
+                            let build = &self.config.model_builds[&deployment.build];
+                            let profile = &self.config.model_profiles[&build.profile];
+                            let ratings = profile
+                                .ratings
+                                .iter()
+                                .filter(|(intent_id, _)| {
+                                    self.config.intents.get(*intent_id).is_some_and(|intent| {
+                                        intent.input_modalities.iter().all(|modality| {
+                                            build.input_modalities.contains(modality)
+                                        }) && intent.output_modalities.iter().all(|modality| {
+                                            build.output_modalities.contains(modality)
+                                        }) && intent
+                                            .required_features
+                                            .iter()
+                                            .all(|feature| build.features.contains(feature))
+                                    })
+                                })
+                                .map(|(intent_id, rating)| (intent_id.clone(), rating.clone()))
+                                .collect();
+                            ProviderDeploymentSnapshot {
+                                id: deployment_id.clone(),
+                                build: deployment.build.clone(),
+                                model_profile: build.profile.clone(),
+                                model_family: profile.family.clone(),
+                                model: if std::path::Path::new(&build.model_id).is_absolute() {
+                                    profile.family.clone()
+                                } else {
+                                    build.model_id.clone()
+                                },
+                                resource_class: deployment.resource_class,
+                                supported_efforts: deployment.supported_efforts.clone(),
+                                execution_modes: deployment.supported_execution_modes.clone(),
+                                ratings,
+                            }
+                        })
+                        .collect::<Vec<_>>();
                 let mut execution_modes = self
                     .config
                     .deployments
@@ -2168,7 +2185,9 @@ fn sse_error(code: &str, message: &str) -> Bytes {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use infer_core::{LocalInventoryConfig, LocalInventoryKind, QuotaLimitConfig, RuntimeConfig};
+    use infer_core::{
+        CapabilityLevel, LocalInventoryConfig, LocalInventoryKind, QuotaLimitConfig, RuntimeConfig,
+    };
     use infer_payload::EncryptedPayloadSpool;
     use infer_provider::Provider;
     use infer_resource::EvictionApplyRequest;
@@ -2422,6 +2441,47 @@ mod tests {
             previous_response_id: None,
             conversation: None,
         }
+    }
+
+    #[test]
+    fn symbiont_capability_override_shape_allows_through_expert() {
+        let mut config = config();
+        let app = config.apps.get_mut("test-app").unwrap();
+        app.request_overrides.capability_floor = vec![
+            CapabilityLevel::Foundational,
+            CapabilityLevel::Capable,
+            CapabilityLevel::Advanced,
+            CapabilityLevel::Expert,
+        ];
+
+        for capability in [
+            CapabilityLevel::Foundational,
+            CapabilityLevel::Capable,
+            CapabilityLevel::Advanced,
+            CapabilityLevel::Expert,
+        ] {
+            validate_overrides(
+                app,
+                &RequestConstraints {
+                    capability_floor: Some(capability),
+                    ..RequestConstraints::default()
+                },
+            )
+            .unwrap();
+        }
+
+        assert!(matches!(
+            validate_overrides(
+                app,
+                &RequestConstraints {
+                    capability_floor: Some(CapabilityLevel::Exceptional),
+                    ..RequestConstraints::default()
+                },
+            ),
+            Err(RuntimeError::OverrideNotAllowed {
+                field: "infer.capability_floor"
+            })
+        ));
     }
 
     fn resource_config() -> RuntimeConfig {
@@ -3386,6 +3446,26 @@ mod tests {
         assert_eq!(inventory[1]["deployments"][0]["id"], "qwen_local");
         assert_eq!(inventory[1]["deployments"][0]["model"], "qwen");
         assert!(!inventory.to_string().contains("/Users/example"));
+    }
+
+    #[tokio::test]
+    async fn provider_inventory_hides_ratings_that_the_build_cannot_execute() {
+        let mut config = config();
+        config
+            .model_builds
+            .get_mut("qwen_local")
+            .unwrap()
+            .input_modalities = vec![infer_core::Modality::Image];
+        let runtime = Runtime::with_providers(config, BTreeMap::new());
+        let inventory = serde_json::to_value(runtime.provider_snapshots()).unwrap();
+        let local = inventory
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|provider| provider["id"] == "local")
+            .unwrap();
+
+        assert_eq!(local["deployments"][0]["ratings"], json!({}));
     }
 
     #[tokio::test]

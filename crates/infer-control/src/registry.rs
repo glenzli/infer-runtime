@@ -977,7 +977,11 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert_eq!(
             language_deployments,
-            BTreeSet::from(["codex_gpt_5_6_luna", "codex_gpt_5_6_terra"])
+            BTreeSet::from([
+                "codex_gpt_5_6_luna",
+                "codex_gpt_5_6_sol",
+                "codex_gpt_5_6_terra",
+            ])
         );
 
         let deep = plan_candidates(
@@ -1036,6 +1040,144 @@ mod tests {
                     .reason_codes
                     .contains(&CandidateReasonCode::ReasoningEffortUnsupported)
         }));
+    }
+
+    #[test]
+    fn language_capability_floors_exclude_weaker_models_and_select_exact_tiers() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let config = RuntimeConfig::load(path).unwrap();
+        let intent = config.intent("language.respond").unwrap();
+        let allowed = BTreeSet::from([
+            ProviderAccessClass::Standard,
+            ProviderAccessClass::Subscription,
+        ]);
+        let cloud_inputs = BTreeSet::from([Modality::Text]);
+        let empty = BTreeSet::new();
+
+        let plan = |capability_floor| {
+            let constraints = RequestConstraints {
+                capability_floor: Some(capability_floor),
+                max_cost_usd: Some(0.0),
+                ..RequestConstraints::default()
+            };
+            plan_candidates(
+                &config,
+                "language.respond",
+                intent,
+                &config.profiles["balanced"],
+                CandidatePlanningContext {
+                    constraints: &constraints,
+                    execution_requirements: &ExecutionRequirements::default(),
+                    reasoning_effort: None,
+                    allowed_provider_access_classes: &allowed,
+                    allowed_cloud_input_modalities: &cloud_inputs,
+                    unavailable_providers: &empty,
+                    unavailable_deployments: &empty,
+                },
+            )
+        };
+
+        let advanced = plan(CapabilityLevel::Advanced);
+        assert_eq!(
+            advanced.candidates.first().unwrap().deployment_id,
+            "codex_gpt_5_6_luna"
+        );
+        let capable_local = advanced
+            .decision
+            .candidates
+            .iter()
+            .find(|candidate| candidate.deployment == "ollama_qwen3_6_35b")
+            .unwrap();
+        assert_eq!(capable_local.status, CandidateDecisionStatus::Rejected);
+        assert_eq!(
+            capable_local.reason_codes,
+            vec![CandidateReasonCode::CapabilityBelowFloor]
+        );
+
+        let expert = plan(CapabilityLevel::Expert);
+        assert_eq!(
+            expert.candidates.first().unwrap().deployment_id,
+            "codex_gpt_5_6_terra"
+        );
+        let advanced_luna = expert
+            .decision
+            .candidates
+            .iter()
+            .find(|candidate| candidate.deployment == "codex_gpt_5_6_luna")
+            .unwrap();
+        assert_eq!(advanced_luna.status, CandidateDecisionStatus::Rejected);
+        assert_eq!(
+            advanced_luna.reason_codes,
+            vec![CandidateReasonCode::CapabilityBelowFloor]
+        );
+
+        let exceptional = plan(CapabilityLevel::Exceptional);
+        assert_eq!(
+            exceptional.candidates.first().unwrap().deployment_id,
+            "codex_gpt_5_6_sol"
+        );
+        let expert_terra = exceptional
+            .decision
+            .candidates
+            .iter()
+            .find(|candidate| candidate.deployment == "codex_gpt_5_6_terra")
+            .unwrap();
+        assert_eq!(expert_terra.status, CandidateDecisionStatus::Rejected);
+        assert_eq!(
+            expert_terra.reason_codes,
+            vec![CandidateReasonCode::CapabilityBelowFloor]
+        );
+    }
+
+    #[test]
+    fn exceptional_multimodal_routes_to_sol_and_rejects_terra() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let config = RuntimeConfig::load(path).unwrap();
+        let intent = config.intent("multimodal.respond").unwrap();
+        let constraints = RequestConstraints {
+            capability_floor: Some(CapabilityLevel::Exceptional),
+            max_cost_usd: Some(0.0),
+            ..RequestConstraints::default()
+        };
+        let allowed = BTreeSet::from([ProviderAccessClass::Subscription]);
+        let cloud_inputs = BTreeSet::from([Modality::Text, Modality::Image]);
+        let empty = BTreeSet::new();
+        let plan = plan_candidates(
+            &config,
+            "multimodal.respond",
+            intent,
+            &config.profiles["balanced"],
+            CandidatePlanningContext {
+                constraints: &constraints,
+                execution_requirements: &ExecutionRequirements {
+                    input_modalities: BTreeSet::from([Modality::Text, Modality::Image]),
+                    ..ExecutionRequirements::default()
+                },
+                reasoning_effort: None,
+                allowed_provider_access_classes: &allowed,
+                allowed_cloud_input_modalities: &cloud_inputs,
+                unavailable_providers: &empty,
+                unavailable_deployments: &empty,
+            },
+        );
+
+        assert_eq!(
+            plan.candidates.first().unwrap().deployment_id,
+            "codex_gpt_5_6_sol"
+        );
+        let terra = plan
+            .decision
+            .candidates
+            .iter()
+            .find(|candidate| candidate.deployment == "codex_gpt_5_6_terra")
+            .unwrap();
+        assert_eq!(terra.status, CandidateDecisionStatus::Rejected);
+        assert_eq!(
+            terra.reason_codes,
+            vec![CandidateReasonCode::CapabilityBelowFloor]
+        );
     }
 
     #[test]

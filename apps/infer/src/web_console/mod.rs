@@ -689,6 +689,16 @@ mod tests {
         assert!(!ACCESS_JS.contains("全部 Intent（兼容模式）"));
     }
 
+    #[test]
+    fn bundled_model_catalog_exposes_intent_and_capability_filters() {
+        assert!(INDEX_HTML.contains("id=\"model-intent-filter\""));
+        assert!(INDEX_HTML.contains("id=\"model-capability-filter\""));
+        assert!(INDEX_HTML.contains("id=\"model-placement-filter\""));
+        assert!(APP_JS.contains("function deploymentMatchesModelFilters"));
+        assert!(APP_JS.contains("deployment.ratings"));
+        assert!(APP_JS.contains("model-filter-count"));
+    }
+
     #[tokio::test]
     async fn mutating_routes_reject_cross_origin_requests_without_session_proof() {
         let response = router(test_state())
