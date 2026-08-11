@@ -2,6 +2,8 @@
 members = [
   "crates/infer-auth",
   "crates/infer-artifact",
+  "crates/infer-artifact-lease",
+  "crates/infer-raw-foundation",
   "crates/infer-core",
   "crates/infer-payload",
   "crates/infer-store",

@@ -316,6 +316,37 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
 > 当前状态：foundation、同步人脸、SigLIP image/text embedding 与 QwenVL typed understanding
 > slices 已实现并进入 experimental feedback；视觉 durable 与 stable promotion 尚未开放。
 
+### M6.1：RawNIND 同机制品租约与实验执行纵切
+
+该工作包先关闭 D-102 的同机实验切片，再以独立发布门交付 RawNIND 模型纵切：
+
+1. **Phase 0 / 合同冻结**：Shadow 保留 decoder、RawFrame staging、Recipe/source revision、
+   `.shadowrawf` verifier/cache/recovery/publish 与 UI；Infer 后续只接管 immutable Build adapter、
+   ONNX Session、admission、cancel/progress 和 Attempt provenance。RGGB normalization、tensor、
+   tiling/overlap/blending 与两遍 global gain 随 Build adapter，不进入本轮实现。
+2. **Phase 1 / Unix FD lease**：认证控制面预发 App/Job/generation-bound ticket；owner-only Unix
+   socket 以 `SCM_RIGHTS` 接受 read-only input + empty exclusive writable output，形成 TTL/one-shot
+   lease。拒绝路径、symlink/device、hard link、same-file、错误 open flags、过期 generation 与
+   scope mismatch；cancel/revoke/drop 关闭句柄。
+3. **Acceptance fixture**：确定性大文件只通过 64 KiB stripe buffer copy/hash；receipt 明确报告
+   bytes/digest/maximum explicit buffer 与零 algorithmic full-payload buffer。真实 benchmark 继续测 copy volume、
+   private dirty memory 与 warm overhead，不能只凭代码结构宣称零拷贝。
+4. **Windows gate**：冻结 Named Pipe + peer identity + duplicated HANDLE 共同语义；实现、reparse/
+   file-id/access-mask 测试和真实 Windows smoke 完成前保持 blocked。
+
+**Phase 1 stop/go（已通过）**：Unix peer/FD/TTL/one-shot/revoke/expiry/cleanup 与有界 fixture 全部
+通过后才进入 Phase 2；这条顺序约束保留为后续大制品 Provider 的先例。
+
+**Phase 2 当前 checkpoint（实现与发布门已通过）**：typed descriptor + single sample FD、两遍
+32-tile CPU adapter、lease-owned `.shadowrawf` writer、production composition、candidate.3 route、
+exact Build/Deployment 与 Shadow 最小 ACL 已接线。ORT 1.27.0 使用独立 experimental Build/cache
+identity；旧 1.24.4 cache 不复用。真实 HTTP/UDS/ORT E2E 已验证成功执行、精确 graph/revision
+provenance、pending cancel、in-flight cancel 与终态 `cancelled`。synthetic comparator 达到 exact payload/stripe/pixel parity，
+max-abs=RMSE=0；流式 writer 的显式整图输出 buffer 为 0、滚动累积器最多 824/2048 rows；实测
+wall 与 RSS 在 legacy 同量级，single-tile in-flight cancel 约 1.7ms。Shadow strict client 已绑定
+专用 Provider 与 exact graph/revision identity。剩余 promotion 门是扩大真实性能样本、24 小时 soak、
+真实照片域质量评估和 Windows handle 实现；这些不阻塞本机 candidate.3 experimental feedback。
+
 ### 目标
 
 在已验证的文件音频和 M4 Resource Manager 上，逐个加入独立数据协议族与执行族，继续验证

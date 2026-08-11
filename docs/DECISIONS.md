@@ -184,8 +184,14 @@
 
 ### D-102：大 payload 的传输与所有权
 
-- **状态**：Proposed，M6 前关闭
-- **当前进展**：本地音频已采用 25 MiB 有界 multipart + executor 临时目录，payload 不进入 Job metadata。跨节点/云端仍推荐根据 locality 选择直传或预签名对象，并在 M5/M6 前关闭剩余决策。
+- **状态**：Accepted for an experimental same-host handle-lease foundation；跨节点/云端仍 Proposed
+- **当前进展**：本地音频继续采用 25 MiB 有界 multipart + executor 临时目录。大尺寸 RAW/Bayer/线性 RGB 不进入普通 HTTP、SQLite 或 durable spool；同机实验切片采用已认证控制面预发 registration ticket，再经 owner-only Unix socket + `SCM_RIGHTS` 传递一个只读输入 FD 与一个空、独占可写输出 FD。租约绑定 owner UID、App、Job、daemon generation、TTL 且只能消费一次；wire 不接受路径。mmap 只是实现策略，不进入协议。
+- **Windows 边界**：共同语义冻结为 owner-only Named Pipe + peer identity + restricted duplicated HANDLE；当前尚无 Windows 实机实现与验证，保持 blocked，不得宣称跨平台完成。
+- **当前进展**：Unix lease lifecycle 门已通过；后续独立门交付了 candidate.3
+  `raw.materialize_foundation`、专用 Provider、exact Build/Deployment、最小 ACL 与真实 ORT 1.27 E2E。
+  它仍是单一 RawNIND typed capability，不扩张 D-102 的通用边界。
+- **非目标**：这不是通用大制品市场、任意路径服务、对象仓库、跨节点 payload 协议或万能 tensor-map。
+- **ADR**：[ADR-0016](adr/0016-local-ephemeral-artifact-leases.md)
 
 ### D-103：第三方 Provider 扩展方式
 

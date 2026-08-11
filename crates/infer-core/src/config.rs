@@ -31,6 +31,10 @@ pub struct RuntimeConfig {
     /// builds so one verified runtime can serve many deployments.
     #[serde(default)]
     pub runtimes: NativeRuntimesConfig,
+    /// Optional RawNIND typed execution assembly. Disabled by default and
+    /// fail-closed unless the exact local graph and ORT 1.27 runtime exist.
+    #[serde(default)]
+    pub raw_foundation: RawFoundationConfig,
     /// Credential storage policy. Secret values are never serialized into the
     /// runtime config or its persistence snapshot.
     #[serde(default)]
@@ -66,6 +70,18 @@ pub struct RuntimeConfig {
     pub deployments: BTreeMap<String, DeploymentConfig>,
     #[serde(default)]
     pub apps: BTreeMap<String, AppConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawFoundationConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    pub graph: Option<String>,
+    pub graph_sha256: Option<String>,
+    pub runtime_library: Option<String>,
+    pub runtime_version: Option<String>,
+    pub socket_directory: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, serde::Serialize)]
@@ -915,9 +931,117 @@ impl RuntimeConfig {
         self.validate_intents()?;
         self.validate_models()?;
         self.validate_deployments()?;
+        self.validate_raw_foundation()?;
         self.validate_apps()?;
         self.validate_quota()?;
         self.validate_resources()?;
+        Ok(())
+    }
+
+    fn validate_raw_foundation(&self) -> Result<(), ContractError> {
+        if !self.raw_foundation.enabled {
+            return Ok(());
+        }
+        let raw = &self.raw_foundation;
+        let required = [
+            raw.graph.as_deref(),
+            raw.graph_sha256.as_deref(),
+            raw.runtime_library.as_deref(),
+            raw.runtime_version.as_deref(),
+            raw.socket_directory.as_deref(),
+        ];
+        if required
+            .into_iter()
+            .any(|value| value.is_none_or(str::is_empty))
+        {
+            return Err(configuration(
+                "enabled raw_foundation requires graph, graph_sha256, runtime_library, runtime_version, and socket_directory",
+            ));
+        }
+        let digest = raw.graph_sha256.as_deref().unwrap_or_default();
+        if digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(configuration(
+                "raw_foundation.graph_sha256 must be SHA-256 hex",
+            ));
+        }
+        if raw.runtime_version.as_deref() != Some("1.27.0") {
+            return Err(configuration(
+                "experimental RawNIND Build requires raw_foundation.runtime_version = 1.27.0",
+            ));
+        }
+        let intent = self
+            .intents
+            .get("raw.materialize_foundation")
+            .ok_or_else(|| {
+                configuration("enabled raw_foundation requires intent raw.materialize_foundation")
+            })?;
+        if intent.data_plane != "raw.foundation"
+            || intent.input_modalities != [Modality::Image]
+            || intent.output_modalities != [Modality::Image]
+            || intent.default_capability_floor != CapabilityLevel::Foundational
+            || intent.default_policy.as_deref() != Some("local-first")
+            || !intent
+                .required_features
+                .iter()
+                .any(|feature| feature == "rawnind_foundation_ort127_exp1")
+        {
+            return Err(configuration(
+                "raw.materialize_foundation must preserve the frozen RAW data-plane, modalities, and feature identity",
+            ));
+        }
+        let profile = self.model_profiles.get("rawnind").ok_or_else(|| {
+            configuration("enabled raw_foundation requires model profile rawnind")
+        })?;
+        let rating = profile
+            .ratings
+            .get("raw.materialize_foundation")
+            .ok_or_else(|| {
+                configuration("model profile rawnind must rate raw.materialize_foundation")
+            })?;
+        if profile.family != "rawnind"
+            || rating.level != CapabilityLevel::Foundational
+            || rating.status != EvaluationStatus::Benchmarked
+            || rating.eval_profile.as_deref().is_none_or(str::is_empty)
+        {
+            return Err(configuration(
+                "RawNIND activation requires a benchmarked foundational rating with eval_profile evidence",
+            ));
+        }
+        let build = self
+            .model_builds
+            .get("rawnind_ort127_exp1")
+            .ok_or_else(|| {
+                configuration("enabled raw_foundation requires model build rawnind_ort127_exp1")
+            })?;
+        if build.profile != "rawnind"
+            || build.model_id != "darktable-ai/rawnind-public-bayer"
+            || build.variant.as_deref() != Some("onnxruntime-1.27.0-cpu-fp32")
+            || build.input_modalities != [Modality::Image]
+            || build.output_modalities != [Modality::Image]
+            || !build
+                .features
+                .iter()
+                .any(|feature| feature == "rawnind_foundation_ort127_exp1")
+        {
+            return Err(configuration(
+                "RawNIND activation requires the exact rawnind_ort127_exp1 Build identity",
+            ));
+        }
+        let deployment = self.deployments.get("rawnind_ort127_exp1").ok_or_else(|| {
+            configuration("enabled raw_foundation requires deployment rawnind_ort127_exp1")
+        })?;
+        if deployment.provider != "raw-foundation-local"
+            || deployment.build != "rawnind_ort127_exp1"
+            || deployment.resource_class != ResourceClass::Heavy
+            || deployment.estimated_cost_usd != 0.0
+            || !deployment
+                .supported_execution_modes
+                .contains(&ExecutionMode::Unary)
+        {
+            return Err(configuration(
+                "RawNIND activation requires unary deployment rawnind_ort127_exp1 on raw-foundation-local",
+            ));
+        }
         Ok(())
     }
 
@@ -1022,7 +1146,7 @@ impl RuntimeConfig {
                         "Codex App Server provider {id} needs command"
                     )));
                 }
-                "responses" | "codex_app_server" | "audio_worker" | "onnx" => {}
+                "responses" | "codex_app_server" | "audio_worker" | "onnx" | "raw_foundation" => {}
                 _ => {
                     return Err(configuration(format!(
                         "provider {id} has unsupported kind {}",
@@ -1035,6 +1159,10 @@ impl RuntimeConfig {
                 "codex_app_server" => ProviderProtocol::CodexAppServer,
                 "audio_worker" => ProviderProtocol::AudioWorker,
                 "onnx" => ProviderProtocol::Onnx,
+                // The specialized RawFoundationControl owns graph execution;
+                // this provider contributes only scheduling/admission and
+                // uses the same verified native runtime protocol family.
+                "raw_foundation" => ProviderProtocol::Onnx,
                 _ => unreachable!("provider kind was validated above"),
             };
             if provider.capability_profile.version != 1
@@ -1191,6 +1319,7 @@ impl RuntimeConfig {
                         | "vision.text_embedding"
                         | "vision.image_description"
                         | "vision.classification_review"
+                        | "raw.foundation"
                 )
                 || intent.input_modalities.is_empty()
                 || intent.output_modalities.is_empty()
@@ -1406,21 +1535,7 @@ impl RuntimeConfig {
             let model = &self.model_profiles[&build.profile];
             for intent_id in model.ratings.keys() {
                 let data_plane = self.intents[intent_id].data_plane.as_str();
-                let compatible = match provider.kind.as_str() {
-                    "responses" => {
-                        data_plane == "responses"
-                            || (matches!(
-                                data_plane,
-                                "vision.image_description" | "vision.classification_review"
-                            ) && provider.local_inventory.as_ref().is_some_and(|inventory| {
-                                inventory.kind == LocalInventoryKind::OllamaTags
-                            }))
-                    }
-                    "codex_app_server" => data_plane == "responses",
-                    "audio_worker" => data_plane.starts_with("audio."),
-                    "onnx" => data_plane.starts_with("vision."),
-                    _ => false,
-                };
+                let compatible = provider_serves_data_plane(provider, data_plane);
                 if !compatible {
                     return Err(configuration(format!(
                         "deployment {id} provider kind {} cannot serve {data_plane}",
@@ -1698,6 +1813,28 @@ impl ProviderConfig {
     }
 }
 
+fn provider_serves_data_plane(provider: &ProviderConfig, data_plane: &str) -> bool {
+    match provider.kind.as_str() {
+        "responses" => {
+            data_plane == "responses"
+                || (matches!(
+                    data_plane,
+                    "vision.image_description" | "vision.classification_review"
+                ) && provider
+                    .local_inventory
+                    .as_ref()
+                    .is_some_and(|inventory| inventory.kind == LocalInventoryKind::OllamaTags))
+        }
+        "codex_app_server" => data_plane == "responses",
+        "audio_worker" => data_plane.starts_with("audio."),
+        "onnx" => data_plane.starts_with("vision."),
+        // Raw foundation execution is a typed ONNX graph contract with a
+        // dedicated controller and API, not a generic tensor surface.
+        "raw_foundation" => data_plane == "raw.foundation",
+        _ => false,
+    }
+}
+
 fn configuration(message: impl Into<String>) -> ContractError {
     ContractError::Configuration(message.into())
 }
@@ -1735,7 +1872,7 @@ mod tests {
 
     use super::{
         BuiltinTool, ObserverAccess, ProviderCapability, ProviderProtocol, QuotaLimitConfig,
-        RuntimeConfig,
+        RuntimeConfig, provider_serves_data_plane,
     };
 
     #[test]
@@ -2087,6 +2224,78 @@ mod tests {
         assert!(config.validate().is_ok());
         config.resources.pressure.refresh_interval_ms = 3_600_001;
         assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn raw_foundation_activation_requires_exact_ort127_identity() {
+        let source = format!(
+            "{}\n{}",
+            include_str!("../../../config/infer.example.toml"),
+            r#"
+[intents."raw.materialize_foundation"]
+data_plane = "raw.foundation"
+input_modalities = ["image"]
+output_modalities = ["image"]
+required_features = ["rawnind_foundation_ort127_exp1"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[model_profiles.rawnind]
+family = "rawnind"
+
+[model_profiles.rawnind.ratings."raw.materialize_foundation"]
+level = "foundational"
+status = "benchmarked"
+eval_profile = "rawnind-config-test-v1"
+
+[model_builds.rawnind_ort127_exp1]
+profile = "rawnind"
+model_id = "darktable-ai/rawnind-public-bayer"
+variant = "onnxruntime-1.27.0-cpu-fp32"
+input_modalities = ["image"]
+output_modalities = ["image"]
+features = ["rawnind_foundation_ort127_exp1"]
+
+[deployments.rawnind_ort127_exp1]
+provider = "raw-foundation-local"
+build = "rawnind_ort127_exp1"
+resource_class = "heavy"
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary"]
+"#
+        );
+        let mut config: RuntimeConfig = toml::from_str(&source).unwrap();
+        config.raw_foundation.enabled = true;
+        assert!(config.validate().is_err());
+
+        config.raw_foundation.graph = Some("/models/model_bayer.onnx".into());
+        config.raw_foundation.graph_sha256 = Some("a".repeat(64));
+        config.raw_foundation.runtime_library = Some("/runtimes/libonnxruntime.dylib".into());
+        config.raw_foundation.runtime_version = Some("1.27.0".into());
+        config.raw_foundation.socket_directory = Some("/tmp/infer-runtime/raw".into());
+        assert!(config.validate().is_ok());
+
+        config.raw_foundation.runtime_version = Some("1.24.4".into());
+        assert!(config.validate().is_err());
+
+        config.raw_foundation.runtime_version = Some("1.27.0".into());
+        config.deployments.remove("rawnind_ort127_exp1");
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn raw_foundation_provider_is_data_plane_scoped() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let config = RuntimeConfig::load(path).unwrap();
+        let onnx = &config.providers["onnx-local"];
+        let raw = &config.providers["raw-foundation-local"];
+
+        assert!(!provider_serves_data_plane(onnx, "raw.foundation"));
+        assert!(provider_serves_data_plane(onnx, "vision.image_embedding"));
+        assert!(!provider_serves_data_plane(onnx, "audio.transcription"));
+        assert!(provider_serves_data_plane(raw, "raw.foundation"));
+        assert!(!provider_serves_data_plane(raw, "vision.image_embedding"));
     }
 
     #[test]

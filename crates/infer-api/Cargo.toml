@@ -9,10 +9,12 @@ axum.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
 infer-control = { path = "../infer-control" }
+infer-artifact-lease = { path = "../infer-artifact-lease" }
 infer-core = { path = "../infer-core" }
 infer-payload = { path = "../infer-payload" }
 infer-provider = { path = "../infer-provider" }
 infer-resource = { path = "../infer-resource" }
+infer-raw-foundation = { path = "../infer-raw-foundation" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -22,6 +24,10 @@ tracing.workspace = true
 http-body-util.workspace = true
 image.workspace = true
 infer-auth = { path = "../infer-auth" }
+infer-artifact-lease = { path = "../infer-artifact-lease" }
+infer-raw-foundation = { path = "../infer-raw-foundation" }
+libc.workspace = true
+sha2.workspace = true
 tempfile.workspace = true
 toml.workspace = true
 tower.workspace = true

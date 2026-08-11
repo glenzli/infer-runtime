@@ -1,6 +1,11 @@
 //! Composition root for the local infer-runtime daemon.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    fs,
+    io::Read,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::Context;
 use clap::Parser;
@@ -10,6 +15,7 @@ use infer_observer::{
     DiscoveryOffer, DiscoveryRuntime, DiscoveryService, RegistrationLease, RegistrationSpec,
     SnapshotProvider, UnixJsonObserverServer, consumer_http_offer,
 };
+use sha2::{Digest, Sha256};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -35,6 +41,7 @@ async fn main() -> anyhow::Result<()> {
         .context("load inferd configuration")?;
     let bind = config.server.bind.clone();
     let observer_config = config.observer.clone();
+    let raw_config = config.raw_foundation.clone();
     let runtime = Runtime::from_config(config)
         .await
         .map_err(anyhow::Error::msg)?;
@@ -44,6 +51,49 @@ async fn main() -> anyhow::Result<()> {
     let consumer_address = listener
         .local_addr()
         .context("read bound inferd Consumer address")?;
+    #[cfg(unix)]
+    let (raw_control, raw_socket) = if raw_config.enabled {
+        let graph = required_path(raw_config.graph.as_deref(), "raw_foundation.graph")?;
+        verify_sha256(
+            &graph,
+            raw_config.graph_sha256.as_deref().unwrap_or_default(),
+        )?;
+        let runtime_library = required_path(
+            raw_config.runtime_library.as_deref(),
+            "raw_foundation.runtime_library",
+        )?;
+        let socket_directory = required_path(
+            raw_config.socket_directory.as_deref(),
+            "raw_foundation.socket_directory",
+        )?;
+        prepare_owner_only_directory(&socket_directory)?;
+        let generation = runtime.observer_identity().service.generation;
+        let socket_path = socket_directory.join(format!("rawnind-{generation}.sock"));
+        let registry = Arc::new(infer_artifact_lease::ArtifactLeaseRegistry::new(
+            unsafe { libc::geteuid() },
+            generation,
+        )?);
+        let control = infer_control::RawFoundationControl::new(
+            Arc::clone(&runtime),
+            Arc::clone(&registry),
+            socket_path.clone(),
+            &graph,
+            &runtime_library,
+        )?;
+        let service = infer_artifact_lease::ArtifactLeaseUnixService::start(socket_path, registry)?;
+        (Some(control), Some(service))
+    } else {
+        (None, None)
+    };
+    #[cfg(not(unix))]
+    let raw_control: Option<Arc<infer_control::RawFoundationControl>> = {
+        if raw_config.enabled {
+            anyhow::bail!(
+                "raw_foundation requires Unix SCM_RIGHTS artifact leases on this release"
+            );
+        }
+        None
+    };
     let (observer_socket, registration) = if observer_config.enabled {
         let discovery_runtime = DiscoveryRuntime::from_environment()?;
         let identity = runtime.observer_identity();
@@ -75,7 +125,11 @@ async fn main() -> anyhow::Result<()> {
         (None, None)
     };
     info!(address = %bind, "inferd started");
-    let serve_result = axum::serve(listener, infer_api::router(runtime))
+    let api = raw_control.map_or_else(
+        || infer_api::router(Arc::clone(&runtime)),
+        |raw| infer_api::router_with_raw(Arc::clone(&runtime), raw),
+    );
+    let serve_result = axum::serve(listener, api)
         .with_graceful_shutdown(shutdown_signal())
         .await;
     if let Some(registration) = registration {
@@ -90,7 +144,53 @@ async fn main() -> anyhow::Result<()> {
             .await
             .context("stop infer-runtime.status Unix socket")?;
     }
+    #[cfg(unix)]
+    if let Some(raw_socket) = raw_socket {
+        raw_socket.shutdown();
+    }
     serve_result?;
+    Ok(())
+}
+
+fn required_path(value: Option<&str>, field: &str) -> anyhow::Result<PathBuf> {
+    let path = PathBuf::from(value.context(format!("{field} is required"))?);
+    if !path.is_absolute() {
+        anyhow::bail!("{field} must be absolute");
+    }
+    Ok(path)
+}
+
+fn verify_sha256(path: &Path, expected: &str) -> anyhow::Result<()> {
+    let mut file = fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let actual = format!("{:x}", hasher.finalize());
+    if actual != expected {
+        anyhow::bail!("raw_foundation graph digest mismatch");
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn prepare_owner_only_directory(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    fs::create_dir_all(path)?;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.is_dir()
+        || metadata.file_type().is_symlink()
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.permissions().mode() & 0o777 != 0o700
+    {
+        anyhow::bail!("raw_foundation socket directory is not owner-only");
+    }
     Ok(())
 }
 

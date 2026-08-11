@@ -665,7 +665,36 @@ GET  /infer/v1/explain/{response_id}
 Provider probe、资源 load/unload、eviction、maintenance lease、budget 和进程 metrics 属于
 operator experimental surface，不是普通 consumer 合同。
 
-## 11. 接入完成门槛
+## 11. RawNIND foundation（candidate.3 experimental）
+
+`raw.materialize_foundation` 是本机、typed、无路径的大制品纵切，不是通用 tensor 或文件市场。
+Consumer 仍通过 Infra Discovery 精确选择 `infer-runtime.consumer@0.1.0-candidate.3` 与
+`infer-runtime.http-loopback`；短期 UDS endpoint 只在 bearer 鉴权成功的 lease grant 中返回，
+不新增 Discovery offer。
+
+完整顺序固定为：
+
+1. `POST /infer/v1/raw/foundations/leases` 创建 Job 与 30 秒、one-shot ticket；
+2. 向返回的 owner-only UDS 发送 `infer.artifact-lease.register@20260811.1` 单行 JSON 和两个
+   SCM_RIGHTS FD（只读 Bayer 输入、空的非 append 可写输出）；
+3. `POST /infer/v1/raw/foundations` 只发送 `{job_id,lease_id}`；
+4. 可用 `POST /infer/v1/raw/foundations/{job_id}/cancel` 取消并 revoke scope。
+
+UDS 请求和响应均为最多 4096 bytes（含 LF）的单行 UTF-8 JSON；客户端发送后 half-close，
+服务端返回一行并 EOF。App id 只能从 bearer 推导。路径、Bayer bytes、输出 bytes、ticket 和 lease
+均不得进入 Job metadata、SQLite 或普通日志。
+
+当前唯一允许的实验 Build 是 `rawnind_ort127_exp1`：CPU、FP32、ONNX Runtime 1.27.0。
+Deployment 只有在 `raw_foundation.enabled=true`、graph/runtime 文件存在且 graph SHA-256 精确匹配、
+owner-only socket directory 可建立、Provider/Build/Deployment 路由完整时才会随 daemon 启动；任一
+条件失败都应让进程 fail closed，而不是静默回退到 legacy 1.24.4 或改写 Shadow cache identity。
+成功响应的 `provenance` 还必须由 Consumer 严格核对
+`provider=raw-foundation-local`、`deployment/model_build=rawnind_ort127_exp1`、exact model revision、
+graph SHA-256、ORT version、actual EP、precision、implementation revision 与 cache identity。未知响应
+字段允许忽略，但上述冻结身份缺失或漂移必须拒绝发布制品。pending 与 running Job 都可取消；运行中
+取消返回 HTTP 409 + `error.code=cancelled`，最终 Job state 同样为 `cancelled`。
+
+## 12. 接入完成门槛
 
 在开始真实反馈测试前，至少确认：
 

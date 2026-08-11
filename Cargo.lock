@@ -1189,14 +1189,18 @@ dependencies = [
  "futures-util",
  "http-body-util",
  "image",
+ "infer-artifact-lease",
  "infer-auth",
  "infer-control",
  "infer-core",
  "infer-payload",
  "infer-provider",
+ "infer-raw-foundation",
  "infer-resource",
+ "libc",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "toml",
@@ -1209,6 +1213,19 @@ name = "infer-artifact"
 version = "0.1.0"
 dependencies = [
  "infer-core",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "infer-artifact-lease"
+version = "0.1.0"
+dependencies = [
+ "libc",
  "serde",
  "serde_json",
  "sha2",
@@ -1237,11 +1254,13 @@ dependencies = [
  "bytes",
  "futures-util",
  "infer-artifact",
+ "infer-artifact-lease",
  "infer-auth",
  "infer-core",
  "infer-observer",
  "infer-payload",
  "infer-provider",
+ "infer-raw-foundation",
  "infer-resource",
  "infer-store",
  "rusqlite",
@@ -1322,6 +1341,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "infer-raw-foundation"
+version = "0.1.0"
+dependencies = [
+ "infer-artifact-lease",
+ "libc",
+ "ndarray",
+ "ort",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio-util",
+]
+
+[[package]]
 name = "infer-resource"
 version = "0.1.0"
 dependencies = [
@@ -1356,9 +1391,12 @@ dependencies = [
  "axum",
  "clap",
  "infer-api",
+ "infer-artifact-lease",
  "infer-control",
  "infer-core",
  "infer-observer",
+ "libc",
+ "sha2",
  "tokio",
  "tracing",
  "tracing-subscriber",

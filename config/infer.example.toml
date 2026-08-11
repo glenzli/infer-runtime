@@ -37,6 +37,11 @@ version = "1.27.0"
 preferred_execution_providers = ["coreml", "cpu"]
 allow_cpu_fallback = true
 
+# Optional typed RAW foundation assembly. Keep disabled until the exact graph,
+# digest, ORT 1.27 library, Deployment, and Consumer ACL are configured.
+[raw_foundation]
+enabled = false
+
 # SQLite stores only runtime metadata: config snapshots, Job/Attempt state,
 # reservations, and the usage ledger. It never stores API key values or
 # request/audio payloads. Relative paths resolve from the daemon's cwd.
@@ -156,6 +161,17 @@ protocol = "onnx"
 
 [providers.onnx-local.local_inventory]
 kind = "onnx_sessions"
+
+[providers.raw-foundation-local]
+kind = "raw_foundation"
+placement = "local"
+max_concurrency = 1
+max_queue = 8
+priority_aging_ms = 10000
+
+[providers.raw-foundation-local.capability_profile]
+version = 1
+protocol = "onnx"
 
 # DeepSeek V4 Flash now implements the stateless Responses endpoint directly.
 # Pro stays catalogued below but receives no deployment until the same endpoint

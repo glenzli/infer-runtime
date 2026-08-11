@@ -4,6 +4,7 @@ mod audio_streaming;
 pub mod contract;
 mod image_understanding;
 mod observer;
+pub mod raw_foundation;
 mod vision;
 
 #[cfg(test)]
@@ -146,6 +147,16 @@ pub fn router(runtime: Arc<Runtime>) -> Router {
         .layer(DefaultBodyLimit::max(MAX_AUDIO_UPLOAD_BYTES + 1024 * 1024))
         .layer(middleware::from_fn(log_request))
         .with_state(ApiState { runtime })
+}
+
+/// Production composition with the typed RAW routes. Construction remains
+/// fail-closed in `inferd`; callers cannot reach these routes unless the exact
+/// configured graph/runtime assembly has passed startup verification.
+pub fn router_with_raw(
+    runtime: Arc<Runtime>,
+    raw: Arc<infer_control::RawFoundationControl>,
+) -> Router {
+    router(Arc::clone(&runtime)).merge(raw_foundation::router(runtime, raw))
 }
 
 async fn log_request(request: Request, next: Next) -> axum::response::Response {

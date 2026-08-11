@@ -9,6 +9,7 @@ mod metrics;
 mod observer;
 mod pressure_observation;
 mod provider_health;
+mod raw_foundation;
 mod registry;
 mod resource_control;
 mod resource_monitor;
@@ -74,6 +75,10 @@ pub use infer_observer::{ObserverIdentity, ObserverSnapshot};
 pub use infer_provider::AudioExecutionOutput;
 pub use infer_provider::ProviderProbeReport;
 pub use metrics::{MetricsSnapshot as ControlMetricsSnapshot, ProviderQueueMetrics};
+pub use raw_foundation::{
+    RawFoundationCancellation, RawFoundationControl, RawFoundationControlError,
+    RawFoundationLeaseGrant, RawFoundationProvenance, RawFoundationResponse,
+};
 pub use resource_control::AuditedEvictionActionResult;
 pub use resource_monitor::{
     EvictionMonitorOutcome, EvictionMonitorSnapshot, MaintenanceLease, MaintenanceLeaseError,
@@ -451,6 +456,10 @@ impl Runtime {
                         .insert(id.clone(), Arc::clone(&adapter) as DynTextEmbeddingExecutor);
                     native_controllers.insert(id.clone(), adapter as DynNativeModelController);
                 }
+                // RawFoundationControl owns its native graph and execution
+                // lifecycle. This provider exists only to reuse common Job,
+                // admission, scheduling, reservation, and provenance state.
+                "raw_foundation" => {}
                 _ => unreachable!("provider kind was validated"),
             }
             schedulers.insert(id.clone(), scheduler_for(provider));

@@ -625,6 +625,31 @@ tokenizer；两个 immutable Builds 绑定相同 768d L2/cosine space。当前�
 `matched|none|uncertain`。4B 是 foundational/standard bulk 候选，8B 是 capable/heavy 明确复核候选；
 Consumer 只请求 Intent 与 capability floor，不绑定 Ollama tag。MLX audio 继续保持独立数据面。
 
+### 9.2 同机大制品句柄租约与 RawNIND（experimental）
+
+普通 Consumer HTTP 继续只承担认证、Job admission、取消和小型 receipt。大尺寸 RAW/Bayer、线性
+RGB 或其他本机制品不得以 multipart、路径或 durable payload 穿过该 binding。认证控制面可先
+签发一个短期 registration ticket；同一用户的 Consumer 再通过独立 owner-only Unix socket，
+以 `SCM_RIGHTS` 传递已经打开的只读输入 FD 和空、独占可写输出 FD。Runtime 校验 peer effective
+UID、regular-file/owner/link/access flags、input/output inode identity、daemon generation、TTL、
+App 和 Job scope，并将 ticket 转换为只能消费一次的 opaque lease。
+
+`infer-artifact-lease` 是独立 semantic owner：它只拥有 ticket、handle、lease、revoke、expiry 和
+bounded fixture lifecycle；`infer-artifact` 仍只拥有模型制品，`infer-payload` 仍只拥有已批准的
+加密 durable payload，Job/SQLite/log 不保存路径或内容。mmap 可以在 adapter 内使用，但不是 wire
+合同。输出 partial 由 Consumer 创建并最终拥有；Runtime 关闭句柄后只返回小型 receipt，不能
+rename、publish 或接管应用 cache。
+
+Phase 1 的 bounded copy/hash fixture 已关闭 lease lifecycle 门；Phase 2 已在同一边界上增加
+`raw.materialize_foundation`、专用 `raw-foundation-local` Provider、exact RawNIND Build/Deployment、
+Shadow 最小 ACL 与真实 HTTP → SCM_RIGHTS → ORT 1.27 E2E。响应固定披露 graph digest、exact
+revision、runtime、EP、precision、implementation/cache identity；运行中取消会终止模型并把 Job
+收敛为 `cancelled`。该能力仍是 candidate.3 experimental，不是通用文件或 tensor API。
+
+Windows 的共同语义仍是 owner-only Named Pipe、验证 peer identity、受限 `DuplicateHandle` 与相同
+one-shot lease；当前只冻结合同，尚未实现或验证，因此启用 RawNIND 的非 Unix daemon 必须 fail
+closed。详见 [ADR-0016](docs/adr/0016-local-ephemeral-artifact-leases.md)。
+
 ## 10. 调度策略
 
 ### 10.1 优先级与公平性

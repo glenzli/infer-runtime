@@ -10,11 +10,13 @@ async-stream.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
 infer-artifact = { path = "../infer-artifact" }
+infer-artifact-lease = { path = "../infer-artifact-lease" }
 infer-core = { path = "../infer-core" }
 infer-observer = { path = "../infer-observer" }
 infer-payload = { path = "../infer-payload" }
 infer-provider = { path = "../infer-provider" }
 infer-resource = { path = "../infer-resource" }
+infer-raw-foundation = { path = "../infer-raw-foundation" }
 infer-store = { path = "../infer-store" }
 serde.workspace = true
 serde_json.workspace = true
