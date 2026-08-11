@@ -21,6 +21,88 @@ os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 
 MODEL_CACHE: OrderedDict[tuple[str, str], Any] = OrderedDict()
 MAX_LOADED_MODELS = max(1, int(os.environ.get("INFER_AUDIO_MAX_LOADED_MODELS", "1")))
+FFMPEG_DIRECTORY_ENV = "INFER_AUDIO_FFMPEG_DIR"
+REQUIRED_AUDIO_TOOLS = ("ffmpeg", "ffprobe")
+MACOS_AUDIO_TOOL_DIRECTORIES = (Path("/opt/homebrew/bin"), Path("/usr/local/bin"))
+
+
+class AudioDependencyUnavailable(RuntimeError):
+    """A required local decoder dependency is unavailable."""
+
+
+def _contains_audio_tools(directory: Path) -> bool:
+    return all(
+        (directory / tool).is_file() and os.access(directory / tool, os.X_OK)
+        for tool in REQUIRED_AUDIO_TOOLS
+    )
+
+
+def _unique_directories(directories: list[Path]) -> list[Path]:
+    unique: list[Path] = []
+    observed: set[str] = set()
+    for directory in directories:
+        identity = os.path.normcase(os.path.normpath(str(directory)))
+        if identity in observed:
+            continue
+        observed.add(identity)
+        unique.append(directory)
+    return unique
+
+
+def _configure_audio_tools(
+    *,
+    inherited_path: str | None = None,
+    configured_directory: str | None = None,
+    platform_directories: tuple[Path, ...] | None = None,
+) -> Path:
+    """Resolve one trusted directory containing both ffmpeg and ffprobe.
+
+    GUI-owned macOS processes commonly receive only the system PATH. An
+    explicit override is authoritative; otherwise preserve inherited entries
+    and check the two conventional Homebrew prefixes on macOS.
+    """
+
+    inherited_path = (
+        os.environ.get("PATH", "") if inherited_path is None else inherited_path
+    )
+    configured_directory = (
+        os.environ.get(FFMPEG_DIRECTORY_ENV)
+        if configured_directory is None
+        else configured_directory
+    )
+    inherited_directories = [
+        Path(entry) for entry in inherited_path.split(os.pathsep) if entry
+    ]
+
+    if configured_directory:
+        configured = Path(configured_directory).expanduser()
+        if not configured.is_absolute() or not _contains_audio_tools(configured):
+            raise AudioDependencyUnavailable(
+                f"audio_dependency_unavailable: {FFMPEG_DIRECTORY_ENV} must name "
+                "an absolute directory containing executable ffmpeg and ffprobe"
+            )
+        resolved = configured
+    else:
+        if platform_directories is None:
+            platform_directories = (
+                MACOS_AUDIO_TOOL_DIRECTORIES if sys.platform == "darwin" else ()
+            )
+        candidates = _unique_directories(
+            inherited_directories + list(platform_directories)
+        )
+        resolved = next(
+            (directory for directory in candidates if _contains_audio_tools(directory)),
+            None,
+        )
+        if resolved is None:
+            raise AudioDependencyUnavailable(
+                "audio_dependency_unavailable: executable ffmpeg and ffprobe are "
+                f"required; install ffmpeg or set {FFMPEG_DIRECTORY_ENV}"
+            )
+
+    child_path = _unique_directories([resolved] + inherited_directories)
+    os.environ["PATH"] = os.pathsep.join(str(directory) for directory in child_path)
+    return resolved
 
 
 def _load_model(category: str, model_path: str) -> Any:
@@ -231,6 +313,14 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> int:
+    try:
+        _configure_audio_tools()
+        dependency_error: AudioDependencyUnavailable | None = None
+    except AudioDependencyUnavailable as error:
+        # Keep the worker alive so every request receives one bounded protocol
+        # error instead of an EOF plus a Python traceback.
+        dependency_error = error
+
     for line in sys.stdin:
         if not line.strip():
             continue
@@ -238,6 +328,15 @@ def main() -> int:
         try:
             request = json.loads(line)
             request_id = str(request.get("request_id", request_id))
+            if dependency_error is not None:
+                response = {
+                    "request_id": request_id,
+                    "ok": False,
+                    "error": str(dependency_error),
+                }
+                sys.stdout.write(json.dumps(response, ensure_ascii=False) + "\n")
+                sys.stdout.flush()
+                continue
             if request.get("operation") == "speech_stream":
                 try:
                     _speech_stream(request)
