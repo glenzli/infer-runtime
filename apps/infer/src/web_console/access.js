@@ -86,9 +86,9 @@
     const permission = summarizePermission(app.request_overrides || {});
     const policy = app.allowed_policies?.length ? app.allowed_policies.join(", ") : "不允许请求覆盖策略";
     const intents = app.allowed_intents === null || app.allowed_intents === undefined
-      ? app.app_id === "local-operator"
-        ? "全部 Intent（本机 Operator）"
-        : "全部 Intent（兼容配置）"
+      ? app.resource_admin
+        ? "全部 Intent（显式 Operator 授权）"
+        : "禁止提交推理任务（未配置 ACL）"
       : app.allowed_intents.length ? app.allowed_intents.join(", ") : "禁止提交推理任务";
     const providerAccess = app.allowed_provider_access_classes?.length
       ? app.allowed_provider_access_classes.join(", ")

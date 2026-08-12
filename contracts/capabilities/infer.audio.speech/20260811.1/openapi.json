@@ -1,0 +1,208 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.audio.speech",
+    "version": "20260811.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.audio.speech@20260811.1",
+  "paths": {
+    "/v1/audio/speech": {
+      "post": {
+        "operationId": "createSpeech",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SpeechCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpeechRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generated audio. x-infer-job-id and x-infer-model identify the execution.",
+            "headers": {
+              "x-infer-job-id": {
+                "$ref": "#/components/headers/InferJobId"
+              },
+              "x-infer-model": {
+                "$ref": "#/components/headers/InferModel"
+              },
+              "x-infer-audio-format": {
+                "$ref": "#/components/headers/InferAudioFormat"
+              },
+              "x-infer-sample-rate-hz": {
+                "$ref": "#/components/headers/InferSampleRate"
+              },
+              "x-infer-channels": {
+                "$ref": "#/components/headers/InferChannels"
+              }
+            },
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/mpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/flac": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/ogg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "headers": {
+      "InferAudioFormat": {
+        "description": "Streamed sample representation; currently pcm_s16le",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "InferChannels": {
+        "description": "Audio channel count fixed before the first body byte",
+        "schema": {
+          "type": "integer"
+        }
+      },
+      "InferJobId": {
+        "description": "Runtime job/response identity",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "InferModel": {
+        "description": "Logical intent requested by the caller",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "InferSampleRate": {
+        "description": "Audio sample rate fixed before the first body byte",
+        "schema": {
+          "type": "integer"
+        }
+      }
+    },
+    "parameters": {
+      "SpeechCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.audio.speech@20260811.1"
+        }
+      }
+    },
+    "schemas": {
+      "Metadata": {
+        "type": "object",
+        "default": {},
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Application metadata plus documented infer.* routing constraints. Unknown reserved infer.* keys are rejected."
+      },
+      "SpeechFormat": {
+        "type": "string",
+        "enum": [
+          "wav",
+          "mp3",
+          "flac",
+          "opus",
+          "pcm"
+        ],
+        "default": "wav"
+      },
+      "SpeechRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model",
+          "input"
+        ],
+        "properties": {
+          "model": {
+            "enum": [
+              "speech.synthesize",
+              "speech.design_voice"
+            ]
+          },
+          "input": {
+            "type": "string",
+            "minLength": 1
+          },
+          "voice": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "instructions": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "speed": {
+            "type": "number",
+            "minimum": 0.25,
+            "maximum": 4,
+            "default": 1
+          },
+          "response_format": {
+            "$ref": "#/components/schemas/SpeechFormat"
+          },
+          "execution_mode": {
+            "enum": [
+              "unary",
+              "server_stream"
+            ],
+            "default": "unary",
+            "description": "server_stream requires response_format=pcm and returns append-only PCM chunks"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/Metadata"
+          }
+        }
+      }
+    }
+  }
+}

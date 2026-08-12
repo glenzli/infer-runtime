@@ -32,4 +32,6 @@ v0.1 SLO：provider 空闲时 admission-to-dispatch p95 ≤ 25 ms；首个 provi
 
 ## 复审触发条件
 
-若首个真实 consumer 暴露当前 schema 无法表达的需求，提升 contract candidate revision；不得用应用专用 alias 绕过公共 Intent 和约束模型。
+若真实 Consumer 暴露当前 schema 无法表达的需求，按 owner 提升对应的日期化 Capability；只有
+Discovery/Auth/Job/Error 等共同骨架发生 breaking change 才提升 Consumer Core。不得用应用专用
+alias 绕过公共 Intent 和约束模型。

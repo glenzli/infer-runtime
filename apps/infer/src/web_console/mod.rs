@@ -684,9 +684,9 @@ mod tests {
         assert!(!APP_CSS.contains("gradient("));
         assert!(!ACCESS_JS.contains("localStorage"));
         assert!(!ACCESS_JS.contains("sessionStorage"));
-        assert!(ACCESS_JS.contains("全部 Intent（本机 Operator）"));
-        assert!(ACCESS_JS.contains("全部 Intent（兼容配置）"));
-        assert!(!ACCESS_JS.contains("全部 Intent（兼容模式）"));
+        assert!(ACCESS_JS.contains("全部 Intent（显式 Operator 授权）"));
+        assert!(ACCESS_JS.contains("禁止提交推理任务（未配置 ACL）"));
+        assert!(!ACCESS_JS.contains("兼容配置"));
     }
 
     #[test]

@@ -1,0 +1,328 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.raw-foundation",
+    "version": "20260811.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.raw-foundation@20260811.1",
+  "paths": {
+    "/infer/v1/raw/foundations/leases": {
+      "post": {
+        "operationId": "createRawFoundationLease",
+        "x-infer-stability": "experimental",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RawFoundationCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RawFoundationLeaseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "One-shot owner-scoped FD registration ticket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawFoundationLeaseGrant"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/infer/v1/raw/foundations": {
+      "post": {
+        "operationId": "executeRawFoundation",
+        "x-infer-stability": "experimental",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RawFoundationCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RawFoundationExecuteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Materialization receipt; pixel payload remains on leased descriptors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawFoundationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/infer/v1/raw/foundations/{job_id}/cancel": {
+      "post": {
+        "operationId": "cancelRawFoundation",
+        "x-infer-stability": "experimental",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RawFoundationCapability"
+          },
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancellation receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RawFoundationCancellation"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "RawFoundationCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.raw-foundation@20260811.1"
+        }
+      }
+    },
+    "schemas": {
+      "RawFoundationCancellation": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "object",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "const": "raw.foundation.cancellation"
+          },
+          "status": {
+            "const": "cancelled"
+          }
+        }
+      },
+      "RawFoundationExecuteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "job_id",
+          "lease_id"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "lease_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "RawFoundationLeaseGrant": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "object",
+          "job_id",
+          "ticket_id",
+          "expires_at_unix_ms",
+          "daemon_generation",
+          "binding"
+        ]
+      },
+      "RawFoundationLeaseRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model",
+          "priority",
+          "source_revision",
+          "source",
+          "staging"
+        ],
+        "properties": {
+          "model": {
+            "const": "raw.materialize_foundation"
+          },
+          "priority": {
+            "enum": [
+              "interactive",
+              "background"
+            ]
+          },
+          "deadline_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 3600000
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "source": {
+            "$ref": "#/components/schemas/RawFoundationSource"
+          },
+          "staging": {
+            "$ref": "#/components/schemas/RawFoundationStaging"
+          }
+        }
+      },
+      "RawFoundationResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "object",
+          "status",
+          "source_revision",
+          "artifact",
+          "provenance"
+        ]
+      },
+      "RawFoundationSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sha256",
+          "size_bytes",
+          "pixel_contract_sha256"
+        ],
+        "properties": {
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483648
+          },
+          "pixel_contract_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      },
+      "RawFoundationStaging": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema",
+          "width",
+          "height",
+          "cfa",
+          "black_levels",
+          "white_levels",
+          "sample_format",
+          "sample_bytes",
+          "decoded_samples_sha256",
+          "decoder_provider_id",
+          "decoder_provider_version"
+        ],
+        "properties": {
+          "schema": {
+            "const": "infer.raw-foundation-staging@20260811.1"
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 4,
+            "maximum": 100000
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 4,
+            "maximum": 100000
+          },
+          "cfa": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 4
+          },
+          "black_levels": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            }
+          },
+          "white_levels": {
+            "type": "array",
+            "minItems": 4,
+            "maxItems": 4,
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            }
+          },
+          "sample_format": {
+            "const": "uint16-le-row-major-active-bayer"
+          },
+          "sample_bytes": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "decoded_samples_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "decoder_provider_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "decoder_provider_version": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      }
+    }
+  }
+}

@@ -19,6 +19,15 @@ Model and Provider names may appear in an explicitly labelled example or immutab
 They must not be presented as the current host inventory, measured capability, or recommended
 default merely because they are available on a developer machine.
 
+Every portable Build example declares its supply-chain owner through `provenance.source_kind`.
+`provider_managed` means infer-runtime calls an independently managed service/cache and neither
+owns nor redistributes its weights; `user_managed` means the operator installed the artifact.
+`unreviewed` license status is intentionally honest and must never be rendered as an affirmative
+license grant. Runtime-downloaded or bundled Builds require immutable source/digest evidence and a
+verified license receipt before configuration validation succeeds.
+Legacy local configuration that omits this field remains loadable but projects `unknown`; the
+runtime never guesses ownership from a model id.
+
 ## Files that stay local
 
 | Local data | Location or pattern | Reason |

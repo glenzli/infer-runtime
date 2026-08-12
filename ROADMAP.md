@@ -2,7 +2,7 @@
 
 | 属性 | 值 |
 | --- | --- |
-| 状态 | M1、M2 已完成，M3 核心闭环完成，M4 退出门槛完成；`candidate.1`、`candidate.2` 已冻结，当前 `0.1.0-candidate.3` 以显式 migration 收敛 Intent/capability taxonomy，随后继续 observability/24h soak/真实 consumer 门槛；M6 的 ONNX foundation、同步人脸、SigLIP 图文向量与 QwenVL typed understanding 已作为发布外 experimental slices 落地，不扩大 v0.1 |
+| 状态 | M1、M2 已完成，M3 核心闭环完成，M4 退出门槛完成；现行 Consumer 接入面已收敛为日期化 `infer-runtime.consumer-core@20260813.1`、独立 Capability Catalog 与官方 SDK，历史 candidate 合同仅保留为迁移档案；下一退出门槛是四个真实 Consumer 完成 hard cut、统一切换与 soak。M6 的 ONNX foundation、同步人脸、SigLIP 图文向量与 QwenVL typed understanding 已作为发布外 experimental slices 落地，不扩大 v0.1 |
 | 规划方式 | 以可演示的纵向能力和退出门槛推进，不以日期代替完成定义 |
 | 首个发布目标 | 单机文本 + 本地文件音频推理控制平面 MVP |
 
@@ -61,7 +61,7 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
 
 - 已完成：Git 仓库、Cargo workspace、领域合同、Responses compatibility profile、fake provider、配置和本地 daemon/CLI 基线；
 - 已完成：严格 lint、workspace 测试、本机 loopback API 冒烟，以及 CLI fixture → Ollama 的一次真实 Responses 调用；
-- 已完成：`candidate.1` 冻结基线、additive `candidate.2` 及 breaking `candidate.3` OpenAPI、golden fixtures、运行时 contract manifest、严格 JSON/multipart/query/config 失败纪律、route-level contract tests 与 candidate.2→candidate.3 migration；
+- 已完成：历史 `candidate.1/2/3/4` 演进、日期化 Consumer Core `20260813.1`、独立 Capability Catalog、官方 Rust SDK、golden fixtures、运行时 contract manifest、严格 JSON/multipart/query/config 失败纪律与 route-level contract tests；
 - 待完成：CI 和自动化端到端 acceptance scenario。
 
 ### 工作包
@@ -163,7 +163,8 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
   owner-only 文件和无 key 本机 bootstrap；provider key 仍只由 daemon secret environment 注入）
 - 完整 metrics、traces/audit events；
 - CLI：`queue`、`budget`、`usage`、`providers`、`explain`；（均已有对应控制 API/CLI 命令）
-- OpenAI SDK 集成说明；只有控制 API 出现真实重复需求时才建立轻量 Infer Client SDK；
+- 官方 Rust `infer-runtime-client` 已建立；后续按真实 Consumer 需求补语言绑定，不复制 Discovery、
+  鉴权、合同握手和错误解析；
 - 运维文档：安装、配置、备份/迁移、故障排查。
 
 ### 退出门槛
@@ -178,7 +179,9 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
 
 ### 当前反馈阶段
 
-- 已冻结 candidate.1/candidate.2 consumer route/schema/error 合同；candidate.3 以 migration 替换 Intent/capability 词汇，并继续把 operator resource/provider 管理面明确留在 experimental；
+- 现行外部骨架已冻结为 `infer-runtime.consumer-core@20260813.1`，typed 数据平面由独立
+  Capability Catalog/version 管理；历史 candidate 合同只保留为迁移档案，operator
+  resource/provider 管理面继续留在 experimental；
 - 已完成本地浏览器 `infer console` 接入期管理面：可 attach 或会话内启停 daemon，异步投影
   Jobs/provider（含 MLX audio）/resources，提供滚动 Statistics、可过滤/搜索日志、Job explain/
   cancel、显式 lifecycle load/unload/probe/refresh 和严格配置校验/原子保存；runtime credential
@@ -194,8 +197,10 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
   最小权限保持不变。重启认证表后的真实 `audio.transcribe -> audio.align` 已通过，两个 Job
   均为 `app_id=echo`、local MLX deployment 和单次成功 Attempt，合同、provider、deployment 与
   model build 证据已写入 Echo Catalog。该证据开启 consumer 反馈期，但尚不替代连续 SLO/soak 门槛；
-- 下一步由首个真实 consumer 按 contract manifest 登记版本，覆盖非流式、SSE、取消、错误和 explain；
-- 反馈导致的任何 wire 变化都提升 candidate revision，原 revision 不原地修改；
+- 下一步由 Echo、Shadow、Shape、Symbiont-d 统一迁到官方 SDK，覆盖非流式、SSE、取消、错误和
+  explain；所有租户就绪前不切换当前 daemon；
+- Core breaking 才发布新的日期化 Core；单能力 breaking 只提升对应 Capability 日期版本，已发布
+  身份不原地修改；
 - 正式发布不抢跑，继续等待 24 小时混合 soak、SLO、trace 与连续使用证据；常驻系统服务、
   跨会话指标/日志持久化和 MLX worker cache residency 观测不是外部 consumer 接入前置条件，
   分别在出现真实运维需求与资源合同证据后推进。
@@ -436,8 +441,8 @@ SLO 和至少一个真实应用集成。不能只新增 Intent 枚举或共享 S
 
 Shape 已冻结生成式多输入图片编辑需求，但当前 Runtime 没有任何已验证的 raster-output
 Provider/Build/Deployment，因此本工作包只登记依赖，不创建 Intent、route、ACL 或 mock executor。
-实现时必须按 D-111 additive 发布 `0.1.0-candidate.4` 或更高 revision 与
-`infer.image.edit@20260811.1`，使用独立 `POST /v1/images/edits` strict multipart 数据面；不能
+实现时必须按 D-111 additive 发布独立的 `infer.image.edit@<date-revision>` Capability Schema，
+使用独立 `POST /v1/images/edits` strict multipart 数据面；不需要升级 Consumer Core，也不能
 复用只返回文本的 `/v1/responses` 或 QwenVL understanding route。
 
 开放顺序固定为：真实执行面与 artifact/Build identity → 有界 source/mask/reference parser →

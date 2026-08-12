@@ -12,7 +12,7 @@ Provider 与 Deployment，并统一处理排队、配额、模型驻留、取消
 
 | 能力 | 当前实现 | 稳定性 |
 | --- | --- | --- |
-| 文本推理 | Responses-shaped unary/SSE、本地加密 background；可连接本地、云端和订阅式 Provider | `0.1.0-candidate.3`；订阅桥仍 experimental |
+| 文本推理 | Responses-shaped unary/SSE、本地加密 background；可连接本地、云端和订阅式 Provider | `infer.responses@20260812.1`；订阅桥仍 experimental |
 | 本地音频 | 转写、强制对齐、语音合成、声音设计与声音克隆等 typed 能力 | 文件接口可接入；流式 TTS/ASR 仍 experimental |
 | 本地视觉 | ONNX Runtime Session Registry；人脸检测/向量与图文语义向量等 typed 能力 | 收窄的 experimental slices |
 | 路由与执行 | Intent → Model Profile → Build → Deployment；优先队列、deadline、cancel、retry/fallback、熔断 | M1/M2 已闭环 |
@@ -90,14 +90,21 @@ credential 不会下发到页面。
 本机应用应读取 [Infra Discovery](docs/CONSUMER_DISCOVERY.md) registration，精确选择：
 
 ```text
-protocol  = infer-runtime.consumer
-version   = 0.1.0-candidate.3
+protocol  = infer-runtime.consumer-core
+versions  = [20260813.1]
 binding   = infer-runtime.http-loopback
 ```
 
 Discovery manifest 只发布 service identity、每次启动都会变化的 generation 和 endpoint offer，
 不包含 lease、heartbeat、App ID、token 或 ACL。manifest 只是候选入口；Consumer 必须以实际连接
-判断可用性。显式 endpoint override 可用于开发；固定 `127.0.0.1:8787` 只应作为迁移 fallback。
+判断可用性。产品不保留固定端口 fallback；显式 endpoint override 只用于开发与诊断。
+Consumer 在所有请求发送
+`Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1`；类型化能力请求还发送 Catalog
+给出的精确 `Infer-Capability-Contract`。
+
+推荐直接使用官方 [`infer-runtime-client`](crates/infer-runtime-client/README.md)。SDK 统一实现
+Discovery、generation 重发现、owner-only token、proxy/redirect 禁用、Core/Capability 握手与稳定
+错误解析，产品不再各自复制这些代码。
 
 ### 2. 创建最小权限 App
 
@@ -119,6 +126,8 @@ Consumer 自己的 owner-only secret store，不得进入源码、项目文件�
 ```bash
 curl "$INFER_BASE_URL/v1/responses" \
   -H "Authorization: Bearer $INFER_API_KEY" \
+  -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  -H 'Infer-Capability-Contract: infer.responses@20260812.1' \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "text.summarize",
@@ -133,17 +142,20 @@ curl "$INFER_BASE_URL/v1/responses" \
 请求字段严格校验；响应可增加未知字段。程序应根据 HTTP status 与 `error.code` 分支，不解析
 `error.message`。完整字段、SSE、background、音频和实验视觉协议见
 [`docs/INTEGRATION.md`](docs/INTEGRATION.md) 与
-[`contracts/v0.1`](contracts/v0.1/README.md)。
+[`contracts/consumer-core/20260813.1`](contracts/consumer-core/20260813.1/README.md)。
 
-从 candidate.2 升级的 Consumer 请先按
-[`docs/MIGRATION-0.1.0-candidate.3.md`](docs/MIGRATION-0.1.0-candidate.3.md)
-完成 Intent、能力字段和 Discovery offer 的一次性迁移。
+旧 candidate Consumer 必须按
+[`Core hard migration`](docs/MIGRATION-CONSUMER-CORE-20260813.1.md) 整体迁移；最终 Runtime 不发布
+candidate offer，也不接受缺失 Core/Capability 握手的业务请求。
 
-无需凭证即可读取当前合同：
+合同与 OpenAPI 都无需 bearer；合同和 Catalog probe 必须携带唯一的 Core header：
 
 ```bash
 curl "$INFER_BASE_URL/health"
-curl "$INFER_BASE_URL/infer/v1/contract"
+curl -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  "$INFER_BASE_URL/infer/v1/contract"
+curl -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  "$INFER_BASE_URL/infer/v1/capabilities"
 curl "$INFER_BASE_URL/infer/v1/openapi.json"
 ```
 
@@ -161,7 +173,8 @@ curl "$INFER_BASE_URL/infer/v1/openapi.json"
 
 ## 当前阶段
 
-当前实现是可供本机 Consumer 反馈测试的 `0.1.0-candidate.3`，不是正式 v0.1 发布版。
+当前实现正在收口 `infer-runtime.consumer-core@20260813.1` 的本机 Consumer hard migration，
+不是正式对外发布版。
 M1–M4 的核心纵向切片已经闭环；完整 traces、24 小时混合 soak、更多连续 Consumer 使用与正式
 发布门槛仍在推进。ONNX 视觉、流式音频和 Codex subscription bridge 保持 experimental，不会
 借由配置存在就自动升级为稳定合同。
@@ -185,9 +198,11 @@ M1–M4 的核心纵向切片已经闭环；完整 traces、24 小时混合 soak
 | [`ROADMAP.md`](ROADMAP.md) | 阶段、依赖、风险与验收门槛 |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | 已接受决策、开放决策与 ADR 入口 |
 | [`docs/INTEGRATION.md`](docs/INTEGRATION.md) | Consumer onboarding 与各数据平面示例 |
-| [`docs/MIGRATION-0.1.0-candidate.3.md`](docs/MIGRATION-0.1.0-candidate.3.md) | candidate.2 Consumer 的 breaking migration 清单 |
+| [`docs/CORE-CONTRACT-20260813.1.md`](docs/CORE-CONTRACT-20260813.1.md) | 日期化 Consumer Core 身份与稳定边界 |
+| [`docs/CAPABILITY-CATALOG-20260813.1.md`](docs/CAPABILITY-CATALOG-20260813.1.md) | 独立演进的类型化能力目录与版本规则 |
+| [`docs/MIGRATION-CONSUMER-CORE-20260813.1.md`](docs/MIGRATION-CONSUMER-CORE-20260813.1.md) | 所有 candidate Consumer 的一次性 hard migration |
 | [`docs/CONSUMER_DISCOVERY.md`](docs/CONSUMER_DISCOVERY.md) | Consumer Infra Discovery 合同 |
-| [`contracts/v0.1`](contracts/v0.1/README.md) | candidate wire contract、OpenAPI 与 fixtures |
+| [`contracts/consumer-core/20260813.1`](contracts/consumer-core/20260813.1/README.md) | 当前 Core OpenAPI、fixtures 与机器合同 |
 | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Console、资源生命周期、background 与运维流程 |
 | [`docs/STATUS_PROTOCOL.md`](docs/STATUS_PROTOCOL.md) | 只读 status socket、snapshot 与 Discovery offer |
 | [`docs/REPOSITORY_BOUNDARY.md`](docs/REPOSITORY_BOUNDARY.md) | 可提交源码与本机配置、凭据、模型和运行状态的边界 |

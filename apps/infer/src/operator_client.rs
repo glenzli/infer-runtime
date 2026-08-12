@@ -77,7 +77,7 @@ impl OperatorClient {
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_owned(),
             api_key,
-            http: Client::builder()
+            http: crate::consumer_http_client_builder()
                 .timeout(Duration::from_secs(2))
                 .build()
                 .context("build operator HTTP client")?,

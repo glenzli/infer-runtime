@@ -1,0 +1,1522 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "infer-runtime aggregate schema source",
+    "version": "20260813.1",
+    "description": "Dated Consumer Core for application integration. Every protected Consumer request sends exactly one Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1. A typed capability request also sends the exact Infer-Capability-Contract selected from the Capability Catalog. Operator resource and provider administration routes are intentionally excluded."
+  },
+  "servers": [
+    { "url": "http://127.0.0.1:8787" }
+  ],
+  "security": [
+    { "bearerAuth": [], "consumerContract": [] }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Runtime process is reachable",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Health" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/infer/v1/contract": {
+      "get": {
+        "operationId": "getContractManifest",
+        "security": [{ "consumerContract": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/ConsumerContract" }],
+        "responses": {
+          "200": {
+            "description": "Active external contract identity",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ContractManifest" }
+              }
+            }
+          },
+          "426": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/capabilities": {
+      "get": {
+        "operationId": "getCapabilityCatalog",
+        "security": [{ "consumerContract": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/ConsumerContract" }],
+        "responses": {
+          "200": {
+            "description": "Additive typed capability catalog",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CapabilityCatalog" }
+              }
+            }
+          },
+          "426": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/openapi.json": {
+      "get": {
+        "operationId": "getOpenApi",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "This OpenAPI document",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/infer/v1/capability-schemas/{capability_id}/{version}/openapi.json": {
+      "get": {
+        "operationId": "getCapabilitySchema",
+        "security": [],
+        "parameters": [
+          {
+            "name": "capability_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "minLength": 1 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable capability-scoped OpenAPI document",
+            "content": {
+              "application/json": {
+                "schema": { "type": "object" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/responses": {
+      "post": {
+        "operationId": "createResponse",
+        "description": "Submit the supported stateless subset of an OpenAI Responses request. The model field is an infer-runtime intent, not a physical deployment ID.",
+        "parameters": [{ "$ref": "#/components/parameters/ResponsesCapability" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ResponsesRequest" },
+              "examples": {
+                "minimal": { "$ref": "#/components/examples/ResponsesRequest" }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Completed response, or an SSE stream when stream=true",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ResponseObject" }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "SSE event/data frames. Provider event types are forwarded after response identity normalization; runtime-generated failures use event: error."
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Durable local background job accepted",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BackgroundResponse" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/responses/{response_id}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/ResponseId" }
+      ],
+      "get": {
+        "operationId": "getResponse",
+        "description": "Get a durable background response owned by the authenticated application.",
+        "parameters": [{ "$ref": "#/components/parameters/ResponsesCapability" }],
+        "responses": {
+          "200": {
+            "description": "Current or completed background response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BackgroundResponse" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/responses/{response_id}/cancel": {
+      "parameters": [
+        { "$ref": "#/components/parameters/ResponseId" }
+      ],
+      "post": {
+        "operationId": "cancelResponse",
+        "description": "Request cancellation of a durable background response.",
+        "parameters": [{ "$ref": "#/components/parameters/ResponsesCapability" }],
+        "responses": {
+          "200": {
+            "description": "Background response after cancellation",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BackgroundResponse" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/audio/transcriptions": {
+      "post": {
+        "operationId": "createTranscription",
+        "parameters": [{ "$ref": "#/components/parameters/TranscriptionCapability" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/TranscriptionForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transcription result; text/plain is used when response_format=text",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TranscriptionResponse" }
+              },
+              "text/plain": { "schema": { "type": "string" } }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/audio/transcriptions/stream": {
+      "get": {
+        "operationId": "openTranscriptionStream",
+        "parameters": [{ "$ref": "#/components/parameters/TranscriptionStreamCapability" }],
+        "summary": "Open an experimental duplex PCM transcription session",
+        "description": "Upgrade to WebSocket. The first text frame is session.configure, binary frames carry pcm_s16le audio, and input_audio.commit/input_audio.finish produce revisable transcript events. The current MLX adapter discloses transcription_mode=commit_redecode rather than claiming native incremental ASR.",
+        "x-infer-stability": "experimental",
+        "x-infer-websocket": {
+          "clientMessages": ["session.configure", "binary pcm_s16le", "input_audio.commit", "input_audio.finish", "session.cancel"],
+          "serverMessages": ["session.created", "transcript.partial", "transcript.final", "session.completed", "error"]
+        },
+        "responses": {
+          "101": { "description": "WebSocket protocol switch" },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/audio/alignments": {
+      "post": {
+        "operationId": "createAlignment",
+        "parameters": [{ "$ref": "#/components/parameters/AlignmentCapability" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/AlignmentForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Forced-alignment result",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AlignmentResponse" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/audio/speech": {
+      "post": {
+        "operationId": "createSpeech",
+        "parameters": [{ "$ref": "#/components/parameters/SpeechCapability" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SpeechRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generated audio. x-infer-job-id and x-infer-model identify the execution.",
+            "headers": {
+              "x-infer-job-id": { "$ref": "#/components/headers/InferJobId" },
+              "x-infer-model": { "$ref": "#/components/headers/InferModel" },
+              "x-infer-audio-format": { "$ref": "#/components/headers/InferAudioFormat" },
+              "x-infer-sample-rate-hz": { "$ref": "#/components/headers/InferSampleRate" },
+              "x-infer-channels": { "$ref": "#/components/headers/InferChannels" }
+            },
+            "content": {
+              "audio/wav": { "schema": { "type": "string", "format": "binary" } },
+              "audio/mpeg": { "schema": { "type": "string", "format": "binary" } },
+              "audio/flac": { "schema": { "type": "string", "format": "binary" } },
+              "audio/ogg": { "schema": { "type": "string", "format": "binary" } },
+              "application/octet-stream": { "schema": { "type": "string", "format": "binary" } }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/v1/audio/voice-clones": {
+      "post": {
+        "operationId": "createVoiceClone",
+        "parameters": [{ "$ref": "#/components/parameters/VoiceCloneCapability" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/VoiceCloneForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generated audio. x-infer-job-id and x-infer-model identify the execution.",
+            "headers": {
+              "x-infer-job-id": { "$ref": "#/components/headers/InferJobId" },
+              "x-infer-model": { "$ref": "#/components/headers/InferModel" }
+            },
+            "content": {
+              "audio/wav": { "schema": { "type": "string", "format": "binary" } },
+              "audio/mpeg": { "schema": { "type": "string", "format": "binary" } },
+              "audio/flac": { "schema": { "type": "string", "format": "binary" } },
+              "audio/ogg": { "schema": { "type": "string", "format": "binary" } },
+              "application/octet-stream": { "schema": { "type": "string", "format": "binary" } }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/vision/image-descriptions": {
+      "post": {
+        "operationId": "createImageDescription",
+        "description": "Experimental synchronous local-only typed image description. The request is not durable background payload.",
+        "parameters": [{ "$ref": "#/components/parameters/ImageDescriptionCapability" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/ImageDescriptionForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bounded description and keyword proposal",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ImageDescriptionResponse" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/vision/classification-reviews": {
+      "post": {
+        "operationId": "createClassificationReview",
+        "description": "Experimental synchronous local-only review against a Consumer-owned closed category set.",
+        "parameters": [{ "$ref": "#/components/parameters/ClassificationReviewCapability" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": { "$ref": "#/components/schemas/ClassificationReviewForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Assistant classification proposal; never user feedback",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ClassificationReviewResponse" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/vision/face-detections": {
+      "post": {
+        "operationId": "createFaceDetection",
+        "x-infer-stability": "experimental",
+        "parameters": [{ "$ref": "#/components/parameters/FaceDetectionCapability" }],
+        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/FaceDetectionForm" } } } },
+        "responses": {
+          "200": { "description": "Face boxes and five-point landmarks in decoded input pixels", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FaceDetectionResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/vision/face-embeddings": {
+      "post": {
+        "operationId": "createFaceEmbedding",
+        "x-infer-stability": "experimental",
+        "parameters": [{ "$ref": "#/components/parameters/FaceEmbeddingCapability" }],
+        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/FaceEmbeddingForm" } } } },
+        "responses": {
+          "200": { "description": "Sensitive biometric face embedding", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FaceEmbeddingResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/vision/image-embeddings": {
+      "post": {
+        "operationId": "createImageEmbedding",
+        "x-infer-stability": "experimental",
+        "parameters": [{ "$ref": "#/components/parameters/ImageEmbeddingCapability" }],
+        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/ImageEmbeddingForm" } } } },
+        "responses": {
+          "200": { "description": "Normalized image embedding", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ImageEmbeddingResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/vision/text-embeddings": {
+      "post": {
+        "operationId": "createVisionTextEmbedding",
+        "x-infer-stability": "experimental",
+        "parameters": [{ "$ref": "#/components/parameters/VisionTextEmbeddingCapability" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/VisionTextEmbeddingRequest" } } } },
+        "responses": {
+          "200": { "description": "Normalized text embedding in the paired image space", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/TextEmbeddingResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/text/query-embeddings": {
+      "post": {
+        "operationId": "createQueryEmbeddings",
+        "x-infer-stability": "experimental",
+        "parameters": [{ "$ref": "#/components/parameters/RetrievalEmbeddingCapability" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RetrievalEmbeddingRequest" } } } },
+        "responses": {
+          "200": { "description": "Query embeddings", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RetrievalEmbeddingResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/text/document-embeddings": {
+      "post": {
+        "operationId": "createDocumentEmbeddings",
+        "x-infer-stability": "experimental",
+        "parameters": [{ "$ref": "#/components/parameters/RetrievalEmbeddingCapability" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RetrievalEmbeddingRequest" } } } },
+        "responses": {
+          "200": { "description": "Document embeddings", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RetrievalEmbeddingResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/text/rerank": {
+      "post": {
+        "operationId": "rerankDocuments",
+        "x-infer-stability": "experimental",
+        "parameters": [{ "$ref": "#/components/parameters/RetrievalRerankCapability" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RetrievalRerankRequest" } } } },
+        "responses": {
+          "200": { "description": "Ranked candidate identities", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RetrievalRerankResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/documents/ocr": {
+      "post": {
+        "operationId": "createDocumentOcr",
+        "x-infer-stability": "experimental",
+        "parameters": [{ "$ref": "#/components/parameters/DocumentOcrCapability" }],
+        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/DocumentOcrForm" } } } },
+        "responses": {
+          "200": { "description": "Bounded text lines with polygons", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DocumentOcrResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/raw/foundations/leases": {
+      "post": {
+        "operationId": "createRawFoundationLease",
+        "x-infer-stability": "experimental",
+        "parameters": [{ "$ref": "#/components/parameters/RawFoundationCapability" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RawFoundationLeaseRequest" } } } },
+        "responses": {
+          "201": { "description": "One-shot owner-scoped FD registration ticket", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RawFoundationLeaseGrant" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/raw/foundations": {
+      "post": {
+        "operationId": "executeRawFoundation",
+        "x-infer-stability": "experimental",
+        "parameters": [{ "$ref": "#/components/parameters/RawFoundationCapability" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RawFoundationExecuteRequest" } } } },
+        "responses": {
+          "200": { "description": "Materialization receipt; pixel payload remains on leased descriptors", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RawFoundationResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/raw/foundations/{job_id}/cancel": {
+      "post": {
+        "operationId": "cancelRawFoundation",
+        "x-infer-stability": "experimental",
+        "parameters": [
+          { "$ref": "#/components/parameters/RawFoundationCapability" },
+          { "name": "job_id", "in": "path", "required": true, "schema": { "type": "string", "minLength": 1 } }
+        ],
+        "responses": {
+          "200": { "description": "Cancellation receipt", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RawFoundationCancellation" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/jobs": {
+      "get": {
+        "operationId": "listJobs",
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 100 } },
+          { "name": "cursor", "in": "query", "description": "Opaque continuation cursor", "schema": { "type": "string" } },
+          { "name": "priority", "in": "query", "schema": { "$ref": "#/components/schemas/Priority" } },
+          { "name": "state", "in": "query", "schema": { "$ref": "#/components/schemas/JobState" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Application-scoped job page",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JobListPage" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/jobs/{response_id}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/ResponseId" }
+      ],
+      "get": {
+        "operationId": "getJob",
+        "responses": {
+          "200": {
+            "description": "Full application-scoped job snapshot",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/JobSnapshot" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/jobs/{response_id}/cancel": {
+      "parameters": [
+        { "$ref": "#/components/parameters/ResponseId" }
+      ],
+      "post": {
+        "operationId": "cancelJob",
+        "responses": {
+          "200": {
+            "description": "Cancellation was accepted",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/CancelResult" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/explain/{response_id}": {
+      "parameters": [
+        { "$ref": "#/components/parameters/ResponseId" }
+      ],
+      "get": {
+        "operationId": "explainJob",
+        "responses": {
+          "200": {
+            "description": "Admission-time routing and attempt evidence",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ExplainResult" }
+              }
+            }
+          },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Application credential configured in infer-runtime"
+      },
+      "consumerContract": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Infer-Consumer-Contract",
+        "description": "Required exactly once with value infer-runtime.consumer-core@20260813.1. Missing, duplicate, or other values return HTTP 426 consumer_core_unsupported."
+      }
+    },
+    "parameters": {
+      "ConsumerContract": {
+        "name": "Infer-Consumer-Contract",
+        "in": "header",
+        "required": true,
+        "description": "The only accepted dated Consumer Core identity.",
+        "schema": { "const": "infer-runtime.consumer-core@20260813.1" }
+      },
+      "ResponsesCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.responses@20260812.1" }
+      },
+      "TranscriptionCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.audio.transcription@20260811.1" }
+      },
+      "TranscriptionStreamCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.audio.transcription-stream@20260811.1" }
+      },
+      "AlignmentCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.audio.alignment@20260811.1" }
+      },
+      "SpeechCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.audio.speech@20260811.1" }
+      },
+      "VoiceCloneCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.audio.voice-clone@20260811.1" }
+      },
+      "ImageDescriptionCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.vision.image-description@20260811.1" }
+      },
+      "ClassificationReviewCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.vision.classification-review@20260811.1" }
+      },
+      "FaceDetectionCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.vision.face-detection@20260811.1" }
+      },
+      "FaceEmbeddingCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.vision.face-embedding@20260811.1" }
+      },
+      "ImageEmbeddingCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.vision.image-embedding@20260811.1" }
+      },
+      "VisionTextEmbeddingCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.vision.text-embedding@20260811.1" }
+      },
+      "RetrievalEmbeddingCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.text.embedding@20260812.1" }
+      },
+      "RetrievalRerankCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.text.rerank@20260812.1" }
+      },
+      "DocumentOcrCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.document.ocr@20260812.1" }
+      },
+      "RawFoundationCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.raw-foundation@20260811.1" }
+      },
+      "ResponseId": {
+        "name": "response_id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string", "minLength": 1 }
+      }
+    },
+    "headers": {
+      "InferJobId": {
+        "description": "Runtime job/response identity",
+        "schema": { "type": "string" }
+      },
+      "InferModel": {
+        "description": "Logical intent requested by the caller",
+        "schema": { "type": "string" }
+      },
+      "InferAudioFormat": {
+        "description": "Streamed sample representation; currently pcm_s16le",
+        "schema": { "type": "string" }
+      },
+      "InferSampleRate": {
+        "description": "Audio sample rate fixed before the first body byte",
+        "schema": { "type": "integer" }
+      },
+      "InferChannels": {
+        "description": "Audio channel count fixed before the first body byte",
+        "schema": { "type": "integer" }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Stable error envelope; code is machine-actionable and message is diagnostic text",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorEnvelope" },
+            "examples": {
+              "invalidRequest": { "$ref": "#/components/examples/Error" }
+            }
+          }
+        }
+      }
+    },
+    "examples": {
+      "ResponsesRequest": {
+        "value": {
+          "model": "text.summarize",
+          "input": "Summarize this text.",
+          "metadata": {
+            "infer.placement": "local_only",
+            "infer.priority": "normal"
+          }
+        }
+      },
+      "Error": {
+        "value": {
+          "error": {
+            "message": "request body does not match the documented schema",
+            "type": "invalid_request_error",
+            "code": "invalid_request_error"
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["status", "service"],
+        "properties": {
+          "status": { "const": "ok" },
+          "service": { "const": "inferd" }
+        }
+      },
+      "ContractManifest": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["schema", "schema_version", "core_contract", "supported_core_contracts", "capability_catalog", "openapi_url", "openapi_sha256", "error_codes", "consumer_routes"],
+        "properties": {
+          "schema": { "const": "infer-runtime.consumer-core" },
+          "schema_version": { "const": "20260813.1" },
+          "core_contract": { "const": "infer-runtime.consumer-core@20260813.1" },
+          "supported_core_contracts": {
+            "type": "array",
+            "prefixItems": [
+              { "const": "infer-runtime.consumer-core@20260813.1" }
+            ],
+            "items": false,
+            "minItems": 1,
+            "maxItems": 1
+          },
+          "capability_catalog": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["schema", "schema_version", "url"],
+            "properties": {
+              "schema": { "const": "infer-runtime.capability-catalog" },
+              "schema_version": { "const": "20260813.1" },
+              "url": { "const": "/infer/v1/capabilities" }
+            }
+          },
+          "openapi_url": { "const": "/infer/v1/openapi.json" },
+          "openapi_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "error_codes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/components/schemas/PublicErrorCode" } },
+          "consumer_routes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": ["method", "path"],
+              "properties": {
+                "method": { "type": "string" },
+                "path": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "CapabilityCatalog": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["schema", "schema_version", "core_contract", "capabilities"],
+        "properties": {
+          "schema": { "const": "infer-runtime.capability-catalog" },
+          "schema_version": { "const": "20260813.1" },
+          "core_contract": { "const": "infer-runtime.consumer-core@20260813.1" },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "schema_version", "stability", "schema", "routes"],
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "schema_version": {
+                  "type": "string",
+                  "pattern": "^[0-9]{8}\\.[1-9][0-9]*$",
+                  "description": "Exactly one immutable schema version per Catalog record. The same capability id may have several records during a migration window."
+                },
+                "stability": { "enum": ["stable", "experimental"] },
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": ["format", "url", "sha256"],
+                  "properties": {
+                    "format": { "const": "openapi-3.1" },
+                    "url": {
+                      "type": "string",
+                      "pattern": "^/infer/v1/capability-schemas/[A-Za-z0-9._-]+/[0-9]{8}\\.[1-9][0-9]*/openapi\\.json$"
+                    },
+                    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                  }
+                },
+                "routes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "required": ["method", "path"],
+                    "properties": {
+                      "method": { "type": "string" },
+                      "path": { "type": "string" },
+                      "execution_modes": { "type": "array", "items": { "type": "string" } }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ResponsesRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["model", "input"],
+        "properties": {
+          "model": { "type": "string", "minLength": 1, "description": "Stable intent profile, never a physical deployment ID" },
+          "input": {},
+          "instructions": {},
+          "stream": { "type": "boolean", "default": false },
+          "background": { "type": "boolean", "default": false },
+          "metadata": {
+            "allOf": [{ "$ref": "#/components/schemas/Metadata" }],
+            "description": "The named-routing capability accepts at most one of infer.deployment_ids or infer.model_profile_ids. Its value is an ordered comma-separated list of 1-16 Runtime-owned IDs. The App routing ACL must authorize every ID; the request is a hard narrowing and never expands the App security ceiling."
+          },
+          "tools": { "type": "array", "items": {} },
+          "reasoning": { "$ref": "#/components/schemas/Reasoning" },
+          "temperature": { "type": ["number", "null"] },
+          "top_p": { "type": ["number", "null"] },
+          "max_output_tokens": { "type": ["integer", "null"], "minimum": 0, "maximum": 4294967295 },
+          "truncation": { "type": ["string", "null"] },
+          "store": { "enum": [false, null], "description": "Only false or null is accepted" },
+          "previous_response_id": { "type": "null", "description": "Stateful chaining is not supported" },
+          "conversation": { "type": "null", "description": "Conversation state is not supported" }
+        }
+      },
+      "Metadata": {
+        "type": "object",
+        "default": {},
+        "additionalProperties": { "type": "string" },
+        "description": "Application metadata plus documented infer.* routing constraints. Unknown reserved infer.* keys are rejected."
+      },
+      "Reasoning": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "effort": {
+            "type": ["string", "null"],
+            "enum": ["none", "low", "medium", "high", "xhigh", "max", "ultra", null]
+          }
+        }
+      },
+      "ResponseObject": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "object", "created_at", "model"],
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "const": "response" },
+          "created_at": { "type": "integer" },
+          "model": { "type": "string", "description": "Logical intent, not physical deployment" },
+          "status": { "type": "string" },
+          "output": { "type": "array" },
+          "parallel_tool_calls": { "type": "boolean" },
+          "tool_choice": {},
+          "tools": { "type": "array" }
+        }
+      },
+      "BackgroundResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/ResponseObject" },
+          {
+            "type": "object",
+            "required": ["background", "status", "output"],
+            "properties": {
+              "background": { "const": true },
+              "status": { "enum": ["queued", "in_progress", "completed", "failed", "cancelled", "incomplete"] },
+              "output": { "type": "array" },
+              "error": { "type": ["object", "null"] }
+            }
+          }
+        ]
+      },
+      "TranscriptionForm": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": { "^infer\\.": { "type": "string" } },
+        "required": ["model", "file"],
+        "properties": {
+          "model": { "const": "audio.transcribe" },
+          "file": { "type": "string", "format": "binary" },
+          "language": { "type": "string" },
+          "prompt": { "type": "string" },
+          "response_format": { "enum": ["json", "text", "verbose_json"] },
+          "temperature": { "type": "number", "minimum": 0 },
+          "metadata": { "type": "string", "description": "JSON object whose values are strings" }
+        }
+      },
+      "AlignmentForm": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": { "^infer\\.": { "type": "string" } },
+        "required": ["model", "file", "text"],
+        "properties": {
+          "model": { "const": "audio.align" },
+          "file": { "type": "string", "format": "binary" },
+          "text": { "type": "string", "minLength": 1 },
+          "language": { "type": "string" },
+          "metadata": { "type": "string", "description": "JSON object whose values are strings" }
+        }
+      },
+      "SpeechRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["model", "input"],
+        "properties": {
+          "model": { "enum": ["speech.synthesize", "speech.design_voice"] },
+          "input": { "type": "string", "minLength": 1 },
+          "voice": { "type": ["string", "null"] },
+          "instructions": { "type": ["string", "null"] },
+          "language": { "type": ["string", "null"] },
+          "speed": { "type": "number", "minimum": 0.25, "maximum": 4, "default": 1 },
+          "response_format": { "$ref": "#/components/schemas/SpeechFormat" },
+          "execution_mode": {
+            "enum": ["unary", "server_stream"],
+            "default": "unary",
+            "description": "server_stream requires response_format=pcm and returns append-only PCM chunks"
+          },
+          "metadata": { "$ref": "#/components/schemas/Metadata" }
+        }
+      },
+      "TranscriptionSessionConfigure": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "session"],
+        "properties": {
+          "type": { "const": "session.configure" },
+          "session": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["model", "input_audio_format", "sample_rate_hz", "channels"],
+            "properties": {
+              "model": { "const": "audio.transcribe" },
+              "input_audio_format": { "const": "pcm_s16le" },
+              "sample_rate_hz": { "type": "integer", "minimum": 8000, "maximum": 48000 },
+              "channels": { "type": "integer", "minimum": 1, "maximum": 2 },
+              "language": { "type": ["string", "null"] },
+              "prompt": { "type": ["string", "null"] },
+              "temperature": { "type": ["number", "null"], "minimum": 0 },
+              "metadata": { "$ref": "#/components/schemas/Metadata" }
+            }
+          }
+        }
+      },
+      "VoiceCloneForm": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": { "^infer\\.": { "type": "string" } },
+        "required": ["model", "input", "reference_audio", "reference_text"],
+        "properties": {
+          "model": { "const": "speech.clone_voice" },
+          "input": { "type": "string", "minLength": 1 },
+          "reference_audio": { "type": "string", "format": "binary" },
+          "reference_text": { "type": "string", "minLength": 1 },
+          "language": { "type": "string" },
+          "response_format": { "$ref": "#/components/schemas/SpeechFormat" },
+          "metadata": { "type": "string", "description": "JSON object whose values are strings" }
+        }
+      },
+      "ImageDescriptionForm": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": { "^infer\\.": { "type": "string" } },
+        "required": ["model", "image", "source_revision", "image_orientation", "language"],
+        "properties": {
+          "model": { "const": "vision.describe_image" },
+          "image": { "type": "string", "format": "binary", "description": "JPEG/PNG, at most 20 MiB and 40 megapixels decoded" },
+          "source_revision": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "image_orientation": { "const": "display_pixels_orientation_normalized" },
+          "language": { "type": "string", "minLength": 1, "maxLength": 35 },
+          "metadata": { "type": "string", "description": "JSON object whose values are strings; placement/offline/fallback are forced local-only/true/none" }
+        }
+      },
+      "ClassificationReviewForm": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": { "^infer\\.": { "type": "string" } },
+        "required": ["model", "image", "source_revision", "image_orientation", "taxonomy_revision", "categories"],
+        "properties": {
+          "model": { "const": "vision.classify_closed_set" },
+          "image": { "type": "string", "format": "binary", "description": "JPEG/PNG, at most 20 MiB and 40 megapixels decoded" },
+          "source_revision": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "image_orientation": { "const": "display_pixels_orientation_normalized" },
+          "taxonomy_revision": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "categories": { "type": "string", "maxLength": 65536, "description": "JSON array of 1..64 ClassificationCategory objects" },
+          "metadata": { "type": "string", "description": "JSON object whose values are strings; placement/offline/fallback are forced local-only/true/none" }
+        }
+      },
+      "ClassificationCategory": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "description": { "type": "string", "minLength": 1, "maxLength": 1024 }
+        }
+      },
+      "ImageGeometry": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["width", "height", "orientation"],
+        "properties": {
+          "width": { "type": "integer", "minimum": 1 },
+          "height": { "type": "integer", "minimum": 1 },
+          "orientation": { "const": "display_pixels_orientation_normalized" }
+        }
+      },
+      "ImageUnderstandingProvenance": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["job_id", "provider", "deployment", "model_profile", "model_build", "physical_model", "runtime", "schema_revision", "prompt_revision"],
+        "properties": {
+          "job_id": { "type": "string" },
+          "provider": { "type": "string" },
+          "deployment": { "type": "string" },
+          "model_profile": { "type": "string" },
+          "model_build": { "type": "string" },
+          "physical_model": { "type": "string" },
+          "runtime": { "const": "ollama_native_chat" },
+          "schema_revision": { "type": "string" },
+          "prompt_revision": { "type": "string" },
+          "total_duration_ms": { "type": "integer", "minimum": 0 },
+          "load_duration_ms": { "type": "integer", "minimum": 0 },
+          "prompt_eval_count": { "type": "integer", "minimum": 0 },
+          "eval_count": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "ImageDescriptionResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "object", "created_at", "status", "source_revision", "language", "image", "result", "provenance"],
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "const": "vision.image_description" },
+          "created_at": { "type": "integer", "minimum": 0 },
+          "status": { "const": "completed" },
+          "source_revision": { "type": "string" },
+          "language": { "type": "string" },
+          "image": { "$ref": "#/components/schemas/ImageGeometry" },
+          "result": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["description", "keyword_suggestions"],
+            "properties": {
+              "description": { "type": "string", "minLength": 1, "maxLength": 1024 },
+              "keyword_suggestions": { "type": "array", "maxItems": 16, "items": { "type": "string", "minLength": 1, "maxLength": 128 } }
+            }
+          },
+          "provenance": { "$ref": "#/components/schemas/ImageUnderstandingProvenance" }
+        }
+      },
+      "ClassificationReviewResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "object", "created_at", "status", "source_revision", "taxonomy_revision", "image", "suggestion", "provenance"],
+        "properties": {
+          "id": { "type": "string" },
+          "object": { "const": "vision.classification_review" },
+          "created_at": { "type": "integer", "minimum": 0 },
+          "status": { "const": "completed" },
+          "source_revision": { "type": "string" },
+          "taxonomy_revision": { "type": "string" },
+          "image": { "$ref": "#/components/schemas/ImageGeometry" },
+          "suggestion": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["disposition"],
+            "properties": {
+              "disposition": { "enum": ["matched", "none", "uncertain"] },
+              "category_id": { "type": "string", "minLength": 1, "maxLength": 128 }
+            }
+          },
+          "provenance": { "$ref": "#/components/schemas/ImageUnderstandingProvenance" }
+        }
+      },
+      "VisionImageFormBase": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": { "^infer\\.": { "type": "string" } },
+        "required": ["model", "image", "source_revision"],
+        "properties": {
+          "model": { "type": "string", "minLength": 1 },
+          "image": { "type": "string", "format": "binary", "description": "JPEG/PNG, 1 byte through 20 MiB; decoded images are bounded to 40 megapixels" },
+          "source_revision": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "metadata": { "type": "string", "description": "JSON object whose values are strings; Runtime forces local_only, offline_required=true, fallback=none" }
+        }
+      },
+      "FaceDetectionForm": {
+        "allOf": [
+          { "$ref": "#/components/schemas/VisionImageFormBase" },
+          { "type": "object", "properties": { "model": { "const": "vision.detect_faces" } } }
+        ]
+      },
+      "FaceEmbeddingForm": {
+        "allOf": [
+          { "$ref": "#/components/schemas/VisionImageFormBase" },
+          {
+            "type": "object",
+            "required": ["landmarks"],
+            "properties": {
+              "model": { "const": "vision.embed_face" },
+              "landmarks": { "type": "string", "description": "JSON FivePointLandmarks in decoded, unrotated input pixel coordinates" }
+            }
+          }
+        ]
+      },
+      "ImageEmbeddingForm": {
+        "allOf": [
+          { "$ref": "#/components/schemas/VisionImageFormBase" },
+          {
+            "type": "object",
+            "required": ["image_orientation"],
+            "properties": {
+              "model": { "const": "vision.embed_image" },
+              "image_orientation": { "const": "display_pixels_orientation_normalized" }
+            }
+          }
+        ]
+      },
+      "VisionTextEmbeddingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["model", "text", "query_revision"],
+        "properties": {
+          "model": { "const": "vision.embed_text" },
+          "text": { "type": "string", "minLength": 1, "maxLength": 4096 },
+          "query_revision": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "language": { "type": ["string", "null"], "maxLength": 35 },
+          "metadata": { "$ref": "#/components/schemas/Metadata" }
+        }
+      },
+      "Point": {
+        "type": "object", "additionalProperties": true, "required": ["x", "y"],
+        "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+      },
+      "FivePointLandmarks": {
+        "type": "object", "additionalProperties": true,
+        "required": ["right_eye", "left_eye", "nose_tip", "right_mouth_corner", "left_mouth_corner"],
+        "properties": {
+          "right_eye": { "$ref": "#/components/schemas/Point" },
+          "left_eye": { "$ref": "#/components/schemas/Point" },
+          "nose_tip": { "$ref": "#/components/schemas/Point" },
+          "right_mouth_corner": { "$ref": "#/components/schemas/Point" },
+          "left_mouth_corner": { "$ref": "#/components/schemas/Point" }
+        }
+      },
+      "VisionProvenance": {
+        "type": "object", "additionalProperties": true,
+        "required": ["job_id", "provider", "deployment", "model_build", "artifact_sha256", "preprocessing_identity", "postprocessing_identity", "runtime", "requested_execution_provider", "actual_execution_provider", "precision"],
+        "properties": {
+          "job_id": { "type": "string" }, "provider": { "type": "string" }, "deployment": { "type": "string" },
+          "model_build": { "type": "string" }, "artifact_sha256": { "type": "string" },
+          "preprocessing_identity": { "type": "string" }, "postprocessing_identity": { "type": "string" },
+          "runtime": { "type": "string" }, "requested_execution_provider": { "type": "string" },
+          "actual_execution_provider": { "type": "string" }, "execution_provider_fallback_reason": { "type": ["string", "null"] },
+          "precision": { "type": "string" }
+        }
+      },
+      "SemanticEmbedding": {
+        "type": "object", "additionalProperties": true,
+        "required": ["values", "dimensions", "normalized", "distance_metric", "space"],
+        "properties": {
+          "values": { "type": "array", "items": { "type": "number" } },
+          "dimensions": { "type": "integer", "minimum": 1 }, "normalized": { "type": "boolean" },
+          "distance_metric": { "type": "string" }, "space": { "type": "string" }
+        }
+      },
+      "FaceDetectionResponse": {
+        "type": "object", "additionalProperties": true,
+        "required": ["id", "object", "created_at", "status", "source_revision", "image", "detections", "provenance"],
+        "properties": {
+          "id": { "type": "string" }, "object": { "type": "string" }, "created_at": { "type": "integer" }, "status": { "type": "string" },
+          "source_revision": { "type": "string" }, "image": { "$ref": "#/components/schemas/ImageGeometry" },
+          "detections": { "type": "array", "items": { "type": "object", "additionalProperties": true, "required": ["bounding_box", "landmarks", "confidence"], "properties": { "bounding_box": { "type": "object" }, "landmarks": { "$ref": "#/components/schemas/FivePointLandmarks" }, "confidence": { "type": "number" } } } },
+          "provenance": { "$ref": "#/components/schemas/VisionProvenance" }
+        }
+      },
+      "FaceEmbeddingResponse": {
+        "type": "object", "additionalProperties": true,
+        "required": ["id", "object", "created_at", "status", "source_revision", "data_classification", "embedding", "eligibility", "provenance"],
+        "properties": {
+          "id": { "type": "string" }, "object": { "type": "string" }, "created_at": { "type": "integer" }, "status": { "type": "string" },
+          "source_revision": { "type": "string" }, "data_classification": { "const": "sensitive_biometric" },
+          "embedding": { "$ref": "#/components/schemas/SemanticEmbedding" }, "eligibility": { "type": "object", "additionalProperties": true },
+          "provenance": { "$ref": "#/components/schemas/VisionProvenance" }
+        }
+      },
+      "ImageEmbeddingResponse": {
+        "type": "object", "additionalProperties": true,
+        "required": ["id", "object", "created_at", "status", "source_revision", "image", "embedding", "provenance"],
+        "properties": {
+          "id": { "type": "string" }, "object": { "type": "string" }, "created_at": { "type": "integer" }, "status": { "type": "string" },
+          "source_revision": { "type": "string" }, "image": { "$ref": "#/components/schemas/ImageGeometry" },
+          "embedding": { "$ref": "#/components/schemas/SemanticEmbedding" }, "provenance": { "$ref": "#/components/schemas/VisionProvenance" }
+        }
+      },
+      "TextEmbeddingResponse": {
+        "type": "object", "additionalProperties": true,
+        "required": ["id", "object", "created_at", "status", "query_revision", "embedding", "provenance"],
+        "properties": {
+          "id": { "type": "string" }, "object": { "type": "string" }, "created_at": { "type": "integer" }, "status": { "type": "string" },
+          "query_revision": { "type": "string" }, "language": { "type": ["string", "null"] },
+          "embedding": { "$ref": "#/components/schemas/SemanticEmbedding" }, "provenance": { "$ref": "#/components/schemas/VisionProvenance" }
+        }
+      },
+      "RetrievalTextInput": {
+        "type": "object", "additionalProperties": false, "required": ["id", "text", "source_revision"],
+        "properties": { "id": { "type": "string", "minLength": 1, "maxLength": 128 }, "text": { "type": "string", "minLength": 1, "maxLength": 32768 }, "source_revision": { "type": "string", "minLength": 1, "maxLength": 256 } }
+      },
+      "RetrievalEmbeddingRequest": {
+        "type": "object", "additionalProperties": false, "required": ["model", "inputs"],
+        "properties": { "model": { "type": "string", "minLength": 1 }, "inputs": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/components/schemas/RetrievalTextInput" } }, "metadata": { "$ref": "#/components/schemas/Metadata" } }
+      },
+      "RetrievalRerankRequest": {
+        "type": "object", "additionalProperties": false, "required": ["model", "query", "candidates"],
+        "properties": { "model": { "type": "string", "minLength": 1 }, "query": { "$ref": "#/components/schemas/RetrievalTextInput" }, "candidates": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/components/schemas/RetrievalTextInput" } }, "top_n": { "type": ["integer", "null"], "minimum": 1, "maximum": 64 }, "metadata": { "$ref": "#/components/schemas/Metadata" } }
+      },
+      "RetrievalProvenance": {
+        "type": "object", "additionalProperties": true,
+        "required": ["job_id", "provider", "deployment", "model_build", "model_revision", "artifact_sha256", "tokenizer_identity", "runtime", "precision"],
+        "properties": { "job_id": { "type": "string" }, "provider": { "type": "string" }, "deployment": { "type": "string" }, "model_build": { "type": "string" }, "model_revision": { "type": "string" }, "artifact_sha256": { "type": "string" }, "tokenizer_identity": { "type": "string" }, "instruction_revision": { "type": ["string", "null"] }, "runtime": { "type": "string" }, "precision": { "type": "string" }, "embedding_space": { "type": ["string", "null"] } }
+      },
+      "RetrievalEmbeddingResponse": {
+        "type": "object", "additionalProperties": true, "required": ["id", "object", "created_at", "status", "data", "provenance"],
+        "properties": { "id": { "type": "string" }, "object": { "type": "string" }, "created_at": { "type": "integer" }, "status": { "type": "string" }, "data": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["id", "source_revision", "embedding"], "properties": { "id": { "type": "string" }, "source_revision": { "type": "string" }, "embedding": { "$ref": "#/components/schemas/SemanticEmbedding" } } } }, "provenance": { "$ref": "#/components/schemas/RetrievalProvenance" } }
+      },
+      "RetrievalRerankResponse": {
+        "type": "object", "additionalProperties": true, "required": ["id", "object", "created_at", "status", "query_revision", "results", "score_semantics", "provenance"],
+        "properties": { "id": { "type": "string" }, "object": { "type": "string" }, "created_at": { "type": "integer" }, "status": { "type": "string" }, "query_revision": { "type": "string" }, "results": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["candidate_id", "source_revision", "score", "rank"], "properties": { "candidate_id": { "type": "string" }, "source_revision": { "type": "string" }, "score": { "type": "number" }, "rank": { "type": "integer", "minimum": 0 } } } }, "score_semantics": { "type": "string" }, "provenance": { "$ref": "#/components/schemas/RetrievalProvenance" } }
+      },
+      "DocumentOcrForm": {
+        "allOf": [
+          { "$ref": "#/components/schemas/VisionImageFormBase" },
+          { "type": "object", "required": ["image_orientation"], "properties": { "model": { "const": "document.ocr" }, "image_orientation": { "const": "display_pixels_orientation_normalized" } } }
+        ]
+      },
+      "DocumentOcrResponse": {
+        "type": "object", "additionalProperties": true, "required": ["id", "object", "created_at", "status", "source_revision", "image", "lines", "provenance"],
+        "properties": { "id": { "type": "string" }, "object": { "type": "string" }, "created_at": { "type": "integer" }, "status": { "type": "string" }, "source_revision": { "type": "string" }, "image": { "$ref": "#/components/schemas/ImageGeometry" }, "lines": { "type": "array", "maxItems": 4096, "items": { "type": "object", "additionalProperties": false, "required": ["polygon", "text", "confidence"], "properties": { "polygon": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "$ref": "#/components/schemas/Point" } }, "text": { "type": "string" }, "confidence": { "type": "number" } } } }, "provenance": { "type": "object", "additionalProperties": true } }
+      },
+      "RawFoundationSource": {
+        "type": "object", "additionalProperties": false, "required": ["sha256", "size_bytes", "pixel_contract_sha256"],
+        "properties": { "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "size_bytes": { "type": "integer", "minimum": 1, "maximum": 2147483648 }, "pixel_contract_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
+      },
+      "RawFoundationStaging": {
+        "type": "object", "additionalProperties": false,
+        "required": ["schema", "width", "height", "cfa", "black_levels", "white_levels", "sample_format", "sample_bytes", "decoded_samples_sha256", "decoder_provider_id", "decoder_provider_version"],
+        "properties": { "schema": { "const": "infer.raw-foundation-staging@20260811.1" }, "width": { "type": "integer", "minimum": 4, "maximum": 100000 }, "height": { "type": "integer", "minimum": 4, "maximum": 100000 }, "cfa": { "type": "string", "minLength": 4, "maxLength": 4 }, "black_levels": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "type": "integer", "minimum": 0, "maximum": 65535 } }, "white_levels": { "type": "array", "minItems": 4, "maxItems": 4, "items": { "type": "integer", "minimum": 0, "maximum": 65535 } }, "sample_format": { "const": "uint16-le-row-major-active-bayer" }, "sample_bytes": { "type": "integer", "minimum": 1 }, "decoded_samples_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "decoder_provider_id": { "type": "string", "minLength": 1, "maxLength": 256 }, "decoder_provider_version": { "type": "string", "minLength": 1, "maxLength": 256 } }
+      },
+      "RawFoundationLeaseRequest": {
+        "type": "object", "additionalProperties": false, "required": ["model", "priority", "source_revision", "source", "staging"],
+        "properties": { "model": { "const": "raw.materialize_foundation" }, "priority": { "enum": ["interactive", "background"] }, "deadline_ms": { "type": ["integer", "null"], "minimum": 1, "maximum": 3600000 }, "source_revision": { "type": "string", "minLength": 1, "maxLength": 256 }, "source": { "$ref": "#/components/schemas/RawFoundationSource" }, "staging": { "$ref": "#/components/schemas/RawFoundationStaging" } }
+      },
+      "RawFoundationExecuteRequest": {
+        "type": "object", "additionalProperties": false, "required": ["job_id", "lease_id"],
+        "properties": { "job_id": { "type": "string", "minLength": 1 }, "lease_id": { "type": "string", "minLength": 1 } }
+      },
+      "RawFoundationLeaseGrant": { "type": "object", "additionalProperties": true, "required": ["object", "job_id", "ticket_id", "expires_at_unix_ms", "daemon_generation", "binding"] },
+      "RawFoundationResponse": { "type": "object", "additionalProperties": true, "required": ["id", "object", "status", "source_revision", "artifact", "provenance"] },
+      "RawFoundationCancellation": { "type": "object", "additionalProperties": true, "required": ["id", "object", "status"], "properties": { "id": { "type": "string" }, "object": { "const": "raw.foundation.cancellation" }, "status": { "const": "cancelled" } } },
+      "SpeechFormat": {
+        "type": "string",
+        "enum": ["wav", "mp3", "flac", "opus", "pcm"],
+        "default": "wav"
+      },
+      "TranscriptionResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "model", "text"],
+        "properties": {
+          "id": { "type": "string" },
+          "model": { "const": "audio.transcribe" },
+          "text": { "type": "string" },
+          "language": { "type": ["string", "null"] },
+          "segments": {},
+          "usage": {}
+        }
+      },
+      "AlignmentResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "model", "text", "language", "items"],
+        "properties": {
+          "id": { "type": "string" },
+          "model": { "const": "audio.align" },
+          "text": { "type": "string" },
+          "language": { "type": "string" },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["text", "start", "end"],
+              "properties": {
+                "text": { "type": "string" },
+                "start": { "type": "number", "minimum": 0 },
+                "end": { "type": "number", "minimum": 0 }
+              }
+            }
+          }
+        }
+      },
+      "Priority": {
+        "type": "string",
+        "enum": ["interactive", "normal", "background"]
+      },
+      "JobState": {
+        "type": "string",
+        "enum": ["queued", "running", "succeeded", "failed", "cancelled", "expired"]
+      },
+      "JobListItem": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "app_id", "intent", "provider", "deployment", "state", "priority", "created_at_ms", "updated_at_ms"],
+        "properties": {
+          "id": { "type": "string" },
+          "app_id": { "type": "string" },
+          "intent": { "type": "string" },
+          "provider": { "type": "string" },
+          "deployment": { "type": "string" },
+          "state": { "$ref": "#/components/schemas/JobState" },
+          "priority": { "$ref": "#/components/schemas/Priority" },
+          "created_at_ms": { "type": "integer" },
+          "updated_at_ms": { "type": "integer" }
+        }
+      },
+      "JobListPage": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["jobs"],
+        "properties": {
+          "jobs": { "type": "array", "items": { "$ref": "#/components/schemas/JobListItem" } },
+          "next_cursor": { "type": "string", "description": "Opaque continuation cursor" }
+        }
+      },
+      "JobSnapshot": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "app_id", "intent", "consumer_core_contract", "provider", "deployment", "model_profile", "model_build", "physical_model", "placement", "capability_level", "evaluation_status", "resource_class", "state", "policy", "priority", "constraints", "routing", "attempts", "error"],
+        "properties": {
+          "id": { "type": "string" },
+          "app_id": { "type": "string" },
+          "intent": { "type": "string" },
+          "consumer_core_contract": { "type": "string", "description": "Exact admitted Core identity; historical internally recovered Jobs may expose a legacy identity." },
+          "capability_contract": { "type": ["string", "null"] },
+          "provider": { "type": "string" },
+          "deployment": { "type": "string" },
+          "model_profile": { "type": "string" },
+          "model_build": { "type": "string" },
+          "physical_model": { "type": "string" },
+          "placement": { "enum": ["local", "trusted_node", "cloud"] },
+          "capability_level": { "enum": ["foundational", "capable", "advanced", "expert", "exceptional"] },
+          "evaluation_status": { "enum": ["provisional", "benchmarked"] },
+          "resource_class": { "enum": ["light", "standard", "heavy", "extreme"] },
+          "state": { "$ref": "#/components/schemas/JobState" },
+          "policy": { "type": "string" },
+          "priority": { "$ref": "#/components/schemas/Priority" },
+          "constraints": { "type": "object", "additionalProperties": true },
+          "routing": { "$ref": "#/components/schemas/RoutingDecision" },
+          "attempts": { "type": "array", "items": { "$ref": "#/components/schemas/Attempt" } },
+          "error": { "type": ["string", "null"] }
+        }
+      },
+      "RoutingDecision": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["capability_floor", "candidates"],
+        "properties": {
+          "capability_floor": { "enum": ["foundational", "capable", "advanced", "expert", "exceptional"] },
+          "named_route": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "required": ["kind", "ordered_ids"],
+            "properties": {
+              "kind": { "enum": ["deployment", "model_profile"] },
+              "ordered_ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+              }
+            }
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["deployment", "provider", "status"],
+              "properties": {
+                "deployment": { "type": "string" },
+                "provider": { "type": "string" },
+                "status": { "enum": ["eligible", "fallback_eligible", "rejected"] },
+                "rank": { "type": "integer", "minimum": 0 },
+                "reason_codes": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          }
+        }
+      },
+      "Attempt": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["number", "provider", "deployment", "outcome", "trigger"],
+        "properties": {
+          "number": { "type": "integer", "minimum": 0 },
+          "provider": { "type": "string" },
+          "deployment": { "type": "string" },
+          "outcome": { "enum": ["running", "succeeded", "failed", "interrupted"] },
+          "trigger": { "enum": ["initial", "retry", "fallback", "recovery"] },
+          "error_kind": { "type": "string" },
+          "error": { "type": "string" }
+        }
+      },
+      "CancelResult": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "cancelled"],
+        "properties": {
+          "id": { "type": "string" },
+          "cancelled": { "const": true }
+        }
+      },
+      "ExplainResult": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["response_id", "intent", "consumer_core_contract", "capability_contract", "routing", "attempts", "state"],
+        "properties": {
+          "response_id": { "type": "string" },
+          "intent": { "type": "string" },
+          "consumer_core_contract": { "type": "string" },
+          "capability_contract": { "type": ["string", "null"] },
+          "routing": { "$ref": "#/components/schemas/RoutingDecision" },
+          "attempts": { "type": "array", "items": { "$ref": "#/components/schemas/Attempt" } },
+          "state": { "$ref": "#/components/schemas/JobState" }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["error"],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["message", "type", "code"],
+            "properties": {
+              "message": { "type": "string", "description": "Diagnostic text; not a stable machine discriminator" },
+              "type": { "const": "invalid_request_error" },
+              "code": { "$ref": "#/components/schemas/PublicErrorCode" }
+            }
+          }
+        }
+      },
+      "PublicErrorCode": {
+        "type": "string",
+        "description": "Stable machine-actionable error code. Additions are additive; renames or removals require a Core or Capability revision.",
+        "enum": [
+          "invalid_api_key", "not_found", "invalid_request_error", "consumer_core_unsupported",
+          "capability_contract_unsupported", "internal_error", "observer_credential_restricted",
+          "observer_access_required", "policy_violation", "intent_forbidden", "route_target_forbidden",
+          "resource_admin_required"
+        ]
+      }
+    }
+  }
+}

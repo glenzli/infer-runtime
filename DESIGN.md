@@ -596,8 +596,8 @@ MVP adapter：
   一个 Provider，把显式准入的 Sol/Terra/Luna 建模为多个 Deployment；`model/list` 只刷新动态
   inventory。bridge 支持有界 text/image input 和 append-only text SSE；模型每次必须实际声明
   image modality。它不进入 HTTP Responses adapter 的条件分支；仅开放独立 App ACL 保护的标准
-  hosted Web Search experimental 子集，不开放 function tool 执行或其他 Agent 能力；它不回填
-  当前 candidate.3 OpenAPI。
+  hosted Web Search experimental 子集，不开放 function tool 执行或其他 Agent 能力；它只在
+  拥有独立 Capability Schema 后进入 Catalog，不扩张 Consumer Core。
 
 MVP Responses profile 支持 `model`、`input`、`instructions`、`stream`、function tools、`temperature`、`top_p`、`max_output_tokens`、`truncation` 和 usage。function tools 只描述模型可以返回的 tool calls；runtime 不执行工具或接管 tool loop，调用方负责后续交互。MVP 是无状态调用：`previous_response_id`、`conversation` 及服务端 conversation state 明确返回 unsupported。字段集合以后只能通过 profile 和合同测试扩展。
 
@@ -644,7 +644,8 @@ Phase 1 的 bounded copy/hash fixture 已关闭 lease lifecycle 门；Phase 2 �
 `raw.materialize_foundation`、专用 `raw-foundation-local` Provider、exact RawNIND Build/Deployment、
 Shadow 最小 ACL 与真实 HTTP → SCM_RIGHTS → ORT 1.27 E2E。响应固定披露 graph digest、exact
 revision、runtime、EP、precision、implementation/cache identity；运行中取消会终止模型并把 Job
-收敛为 `cancelled`。该能力仍是 candidate.3 experimental，不是通用文件或 tensor API。
+收敛为 `cancelled`。该能力仍是 `infer.raw-foundation@20260811.1` experimental，不是通用文件
+或 tensor API。
 
 Windows 的共同语义仍是 owner-only Named Pipe、验证 peer identity、受限 `DuplicateHandle` 与相同
 one-shot lease；当前只冻结合同，尚未实现或验证，因此启用 RawNIND 的非 Unix daemon 必须 fail
@@ -854,6 +855,19 @@ App policy、quota 和审计都依赖可信 `app_id`。不能让任意客户端�
 ### 14.3 配置与 policy reload
 
 TOML 是 Intent、Model Profile、Model Build、Deployment、Provider、App policy、quota 和 policy profiles 的配置真源。CLI 提供 `config validate`、`config reload`、`config effective` 和 `policy explain`。reload 必须完整验证后原子切换；已 admission 的 Job 固定记录并使用原 config/policy version，不因热重载改变执行语义。MVP 不执行任意脚本或通用 policy DSL。
+
+Model Build 另外记录统一的供应链事实。`provenance.source_kind` 区分 unknown、用户安装、Provider
+管理、组织管理、Runtime 显式下载和随发行包捆绑；来源、revision 和 artifact digest 均属于
+Build 身份。`license.status` 只记录 operator 已掌握的证据，可以明确为 `unreviewed` 或
+`unknown`，Runtime 不从模型名称、Hub metadata 或 Provider cache 推断法律结论。只有
+`runtime_downloadable` / `runtime_bundled` 才要求 immutable source/digest 与 verified license
+receipt 全部存在，否则配置 fail closed。普通 `user_managed` / `provider_managed` Build 不因
+升级而被 Runtime 擅自下载、复制或重新分发。
+
+内置 Provider family 的装配由独立 composition owner 负责，将已验证配置转换为 typed
+executors、native controller 和 scheduler。它不改变 Provider SPI，也不是动态插件加载器；
+Provider 实例与准入 Build 仍是配置数据。外部 Provider package/protocol 暂不建设，待至少
+两个无法合理由内置 family 承载的真实实现共同证明需求后再复审。
 
 下面是当前 M3 schema 的语义示例。未设置的 quota 字段没有隐式限制；每次
 Attempt 在同一个 SQLite transaction 内同时检查 global、provider 与 App
@@ -1149,13 +1163,17 @@ infer-runtime/
 
 ## 19. 版本与兼容性
 
-- `/v1/responses` 兼容 profile、控制 API 和错误码显式版本化；
-- consumer contract 以 `contracts/v0.1/openapi.json`、golden fixtures 和 daemon 的
-  `/infer/v1/contract` 为共同身份；`0.1.0-candidate.1` 与 `candidate.2` 已冻结，当前
-  `0.1.0-candidate.3` 通过显式 migration 引入新的 Intent/capability vocabulary；
-- Responses、文件音频、app-scoped Job 控制属于 candidate consumer surface；metrics、provider
-  probe 和 resource lifecycle/eviction 属于 experimental operator surface，不共享稳定性承诺；
-- capability schema 可新增可选字段，破坏性变更使用新版本；
+- Consumer 共同骨架以 `infer-runtime.consumer-core@20260813.1`、日期化 OpenAPI、fixtures 和
+  `/infer/v1/contract` 为共同身份；旧 candidate wire 不再由新 Runtime 支持；
+- Discovery offer 只携带 `protocol=infer-runtime.consumer-core` 与精确 opaque version
+  `20260813.1`；每个 Consumer 请求携带完整 Core identity，缺失或不一致 fail closed；
+- `/infer/v1/capabilities` 独立发布日期化 Capability Catalog。Core OpenAPI 只含共同控制面，
+  Responses、音频、视觉、RAW 等各有不可变 schema URL/SHA-256；新增 capability 或 additive
+  response 字段不升级 Core，也不改写既有能力摘要；
+- Job/Auth/Discovery/error envelope 的共同 breaking change才创建新的 Core 日期版本；
+- 官方 `infer-runtime-client` SDK 统一实现发现、协商、鉴权、错误与 typed data planes；Consumer
+  不再手写协议选择或保留固定端口产品 fallback；
+- metrics、provider probe 和 resource lifecycle/eviction 仍属于 operator surface，不进入 Core；
 - Provider SPI 在进程内初期不承诺第三方 ABI 稳定；
 - 数据库 migration 与 daemon 版本绑定并记录 schema version；
 - CLI 是 admin client，不直接读取或修改内部数据库。
@@ -1164,7 +1182,7 @@ infer-runtime/
 
 MVP **包含**：单机 `inferd`、无状态 provider execution 的 OpenAI Responses API 兼容文本协议、Ollama、本地 MLX 文件音频协议族、Intent/Model/Build/Deployment registry、流式文本、排队、三档优先级、policy 路由、受约束 fallback、基础 quota、取消、指标和 CLI 管理面。M4 在其上增加 runtime-managed、local-only 的 Responses background 生命周期，不把 durability 下推给 provider。
 
-冻结的 v0.1 stable Consumer contract **不包含**：远程 Node、GPU 级抢占、通用模型下载、自动 benchmark 路由、低延迟原生增量 ASR、Vision/Embedding 稳定数据面、ONNX stable contract、Agent、第三方动态插件 ABI、HA、多用户/组织权限。candidate.2 新增 PCM TTS server-stream，并把 commit-redecode ASR duplex 明确列为 experimental route；这不等于承诺原生实时转写。ONNX P0 与 Web Console 同样作为 experimental surface 独立演进，不回填或扩大 v0.1 stable 范围。
+冻结的 v0.1 stable Consumer contract **不包含**：远程 Node、GPU 级抢占、通用模型下载、自动 benchmark 路由、低延迟原生增量 ASR、Vision/Embedding 稳定数据面、ONNX stable contract、Agent、第三方动态插件 ABI、HA、多用户/组织权限。历史 candidate.2 首次引入的 PCM TTS server-stream 与 commit-redecode ASR duplex 现由独立音频 Capability 标记为 experimental；这不等于承诺原生实时转写。ONNX P0 与 Web Console 同样作为 experimental surface 独立演进，不回填或扩大 v0.1 stable 范围。
 
 ## 21. 决策状态
 

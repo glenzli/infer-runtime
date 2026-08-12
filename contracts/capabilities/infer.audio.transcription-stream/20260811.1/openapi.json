@@ -1,0 +1,57 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.audio.transcription-stream",
+    "version": "20260811.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.audio.transcription-stream@20260811.1",
+  "paths": {
+    "/v1/audio/transcriptions/stream": {
+      "get": {
+        "operationId": "openTranscriptionStream",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TranscriptionStreamCapability"
+          }
+        ],
+        "summary": "Open an experimental duplex PCM transcription session",
+        "description": "Upgrade to WebSocket. The first text frame is session.configure, binary frames carry pcm_s16le audio, and input_audio.commit/input_audio.finish produce revisable transcript events. The current MLX adapter discloses transcription_mode=commit_redecode rather than claiming native incremental ASR.",
+        "x-infer-stability": "experimental",
+        "x-infer-websocket": {
+          "clientMessages": [
+            "session.configure",
+            "binary pcm_s16le",
+            "input_audio.commit",
+            "input_audio.finish",
+            "session.cancel"
+          ],
+          "serverMessages": [
+            "session.created",
+            "transcript.partial",
+            "transcript.final",
+            "session.completed",
+            "error"
+          ]
+        },
+        "responses": {
+          "101": {
+            "description": "WebSocket protocol switch"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "TranscriptionStreamCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.audio.transcription-stream@20260811.1"
+        }
+      }
+    }
+  }
+}

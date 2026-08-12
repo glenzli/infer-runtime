@@ -1,0 +1,8 @@
+{
+  "id": "resp_example",
+  "object": "response",
+  "created_at": 1786212000,
+  "model": "text.summarize",
+  "status": "completed",
+  "output": []
+}

@@ -1,0 +1,56 @@
+{
+  "id": "resp_example",
+  "app_id": "sample-app",
+  "intent": "text.summarize",
+  "consumer_core_contract": "infer-runtime.consumer-core@20260813.1",
+  "capability_contract": "infer.responses@20260812.1",
+  "provider": "local-example",
+  "deployment": "example-small",
+  "model_profile": "example-text-small",
+  "model_build": "example-build-v1",
+  "physical_model": "example/model:small",
+  "placement": "local",
+  "capability_level": "foundational",
+  "evaluation_status": "provisional",
+  "resource_class": "light",
+  "state": "succeeded",
+  "policy": "local-first",
+  "priority": "normal",
+  "constraints": {
+    "policy": "local-first",
+    "priority": "normal",
+    "provider_access_class": "standard",
+    "placement": "local_only",
+    "prefer": "local",
+    "offline_required": true,
+    "capability_floor": "foundational",
+    "latency": "balanced",
+    "max_cost_usd": 0.0,
+    "fallback": "none",
+    "deadline_ms": null,
+    "named_route": null
+  },
+  "routing": {
+    "capability_floor": "foundational",
+    "named_route": null,
+    "candidates": [
+      {
+        "deployment": "example-small",
+        "provider": "local-example",
+        "status": "eligible",
+        "rank": 0,
+        "reason_codes": []
+      }
+    ]
+  },
+  "attempts": [
+    {
+      "number": 1,
+      "provider": "local-example",
+      "deployment": "example-small",
+      "outcome": "succeeded",
+      "trigger": "initial"
+    }
+  ],
+  "error": null
+}

@@ -1,0 +1,232 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.vision.text-embedding",
+    "version": "20260811.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.vision.text-embedding@20260811.1",
+  "paths": {
+    "/infer/v1/vision/text-embeddings": {
+      "post": {
+        "operationId": "createVisionTextEmbedding",
+        "x-infer-stability": "experimental",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/VisionTextEmbeddingCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VisionTextEmbeddingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Normalized text embedding in the paired image space",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TextEmbeddingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "VisionTextEmbeddingCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.vision.text-embedding@20260811.1"
+        }
+      }
+    },
+    "schemas": {
+      "Metadata": {
+        "type": "object",
+        "default": {},
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Application metadata plus documented infer.* routing constraints. Unknown reserved infer.* keys are rejected."
+      },
+      "SemanticEmbedding": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "values",
+          "dimensions",
+          "normalized",
+          "distance_metric",
+          "space"
+        ],
+        "properties": {
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "dimensions": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "normalized": {
+            "type": "boolean"
+          },
+          "distance_metric": {
+            "type": "string"
+          },
+          "space": {
+            "type": "string"
+          }
+        }
+      },
+      "TextEmbeddingResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "object",
+          "created_at",
+          "status",
+          "query_revision",
+          "embedding",
+          "provenance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "query_revision": {
+            "type": "string"
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "embedding": {
+            "$ref": "#/components/schemas/SemanticEmbedding"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/VisionProvenance"
+          }
+        }
+      },
+      "VisionProvenance": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "job_id",
+          "provider",
+          "deployment",
+          "model_build",
+          "artifact_sha256",
+          "preprocessing_identity",
+          "postprocessing_identity",
+          "runtime",
+          "requested_execution_provider",
+          "actual_execution_provider",
+          "precision"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "model_build": {
+            "type": "string"
+          },
+          "artifact_sha256": {
+            "type": "string"
+          },
+          "preprocessing_identity": {
+            "type": "string"
+          },
+          "postprocessing_identity": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "requested_execution_provider": {
+            "type": "string"
+          },
+          "actual_execution_provider": {
+            "type": "string"
+          },
+          "execution_provider_fallback_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "precision": {
+            "type": "string"
+          }
+        }
+      },
+      "VisionTextEmbeddingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model",
+          "text",
+          "query_revision"
+        ],
+        "properties": {
+          "model": {
+            "const": "vision.embed_text"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          },
+          "query_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 35
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/Metadata"
+          }
+        }
+      }
+    }
+  }
+}

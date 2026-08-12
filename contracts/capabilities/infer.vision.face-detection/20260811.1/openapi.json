@@ -1,0 +1,291 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.vision.face-detection",
+    "version": "20260811.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.vision.face-detection@20260811.1",
+  "paths": {
+    "/infer/v1/vision/face-detections": {
+      "post": {
+        "operationId": "createFaceDetection",
+        "x-infer-stability": "experimental",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FaceDetectionCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/FaceDetectionForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Face boxes and five-point landmarks in decoded input pixels",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaceDetectionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "FaceDetectionCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.vision.face-detection@20260811.1"
+        }
+      }
+    },
+    "schemas": {
+      "FaceDetectionForm": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/VisionImageFormBase"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "model": {
+                "const": "vision.detect_faces"
+              }
+            }
+          }
+        ]
+      },
+      "FaceDetectionResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "object",
+          "created_at",
+          "status",
+          "source_revision",
+          "image",
+          "detections",
+          "provenance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          },
+          "image": {
+            "$ref": "#/components/schemas/ImageGeometry"
+          },
+          "detections": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "bounding_box",
+                "landmarks",
+                "confidence"
+              ],
+              "properties": {
+                "bounding_box": {
+                  "type": "object"
+                },
+                "landmarks": {
+                  "$ref": "#/components/schemas/FivePointLandmarks"
+                },
+                "confidence": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/VisionProvenance"
+          }
+        }
+      },
+      "FivePointLandmarks": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "right_eye",
+          "left_eye",
+          "nose_tip",
+          "right_mouth_corner",
+          "left_mouth_corner"
+        ],
+        "properties": {
+          "right_eye": {
+            "$ref": "#/components/schemas/Point"
+          },
+          "left_eye": {
+            "$ref": "#/components/schemas/Point"
+          },
+          "nose_tip": {
+            "$ref": "#/components/schemas/Point"
+          },
+          "right_mouth_corner": {
+            "$ref": "#/components/schemas/Point"
+          },
+          "left_mouth_corner": {
+            "$ref": "#/components/schemas/Point"
+          }
+        }
+      },
+      "ImageGeometry": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "width",
+          "height",
+          "orientation"
+        ],
+        "properties": {
+          "width": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "orientation": {
+            "const": "display_pixels_orientation_normalized"
+          }
+        }
+      },
+      "Point": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "x",
+          "y"
+        ],
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        }
+      },
+      "VisionImageFormBase": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": {
+          "^infer\\.": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "image",
+          "source_revision"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "image": {
+            "type": "string",
+            "format": "binary",
+            "description": "JPEG/PNG, 1 byte through 20 MiB; decoded images are bounded to 40 megapixels"
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON object whose values are strings; Runtime forces local_only, offline_required=true, fallback=none"
+          }
+        }
+      },
+      "VisionProvenance": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "job_id",
+          "provider",
+          "deployment",
+          "model_build",
+          "artifact_sha256",
+          "preprocessing_identity",
+          "postprocessing_identity",
+          "runtime",
+          "requested_execution_provider",
+          "actual_execution_provider",
+          "precision"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "model_build": {
+            "type": "string"
+          },
+          "artifact_sha256": {
+            "type": "string"
+          },
+          "preprocessing_identity": {
+            "type": "string"
+          },
+          "postprocessing_identity": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "requested_execution_provider": {
+            "type": "string"
+          },
+          "actual_execution_provider": {
+            "type": "string"
+          },
+          "execution_provider_fallback_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "precision": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

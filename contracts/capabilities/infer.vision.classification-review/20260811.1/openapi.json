@@ -1,0 +1,252 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.vision.classification-review",
+    "version": "20260811.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.vision.classification-review@20260811.1",
+  "paths": {
+    "/infer/v1/vision/classification-reviews": {
+      "post": {
+        "operationId": "createClassificationReview",
+        "description": "Experimental synchronous local-only review against a Consumer-owned closed category set.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ClassificationReviewCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ClassificationReviewForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Assistant classification proposal; never user feedback",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClassificationReviewResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "ClassificationReviewCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.vision.classification-review@20260811.1"
+        }
+      }
+    },
+    "schemas": {
+      "ClassificationReviewForm": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": {
+          "^infer\\.": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "image",
+          "source_revision",
+          "image_orientation",
+          "taxonomy_revision",
+          "categories"
+        ],
+        "properties": {
+          "model": {
+            "const": "vision.classify_closed_set"
+          },
+          "image": {
+            "type": "string",
+            "format": "binary",
+            "description": "JPEG/PNG, at most 20 MiB and 40 megapixels decoded"
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "image_orientation": {
+            "const": "display_pixels_orientation_normalized"
+          },
+          "taxonomy_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "categories": {
+            "type": "string",
+            "maxLength": 65536,
+            "description": "JSON array of 1..64 ClassificationCategory objects"
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON object whose values are strings; placement/offline/fallback are forced local-only/true/none"
+          }
+        }
+      },
+      "ClassificationReviewResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "object",
+          "created_at",
+          "status",
+          "source_revision",
+          "taxonomy_revision",
+          "image",
+          "suggestion",
+          "provenance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "const": "vision.classification_review"
+          },
+          "created_at": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "const": "completed"
+          },
+          "source_revision": {
+            "type": "string"
+          },
+          "taxonomy_revision": {
+            "type": "string"
+          },
+          "image": {
+            "$ref": "#/components/schemas/ImageGeometry"
+          },
+          "suggestion": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "disposition"
+            ],
+            "properties": {
+              "disposition": {
+                "enum": [
+                  "matched",
+                  "none",
+                  "uncertain"
+                ]
+              },
+              "category_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            }
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/ImageUnderstandingProvenance"
+          }
+        }
+      },
+      "ImageGeometry": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "width",
+          "height",
+          "orientation"
+        ],
+        "properties": {
+          "width": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "orientation": {
+            "const": "display_pixels_orientation_normalized"
+          }
+        }
+      },
+      "ImageUnderstandingProvenance": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "job_id",
+          "provider",
+          "deployment",
+          "model_profile",
+          "model_build",
+          "physical_model",
+          "runtime",
+          "schema_revision",
+          "prompt_revision"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "model_profile": {
+            "type": "string"
+          },
+          "model_build": {
+            "type": "string"
+          },
+          "physical_model": {
+            "type": "string"
+          },
+          "runtime": {
+            "const": "ollama_native_chat"
+          },
+          "schema_revision": {
+            "type": "string"
+          },
+          "prompt_revision": {
+            "type": "string"
+          },
+          "total_duration_ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "load_duration_ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "prompt_eval_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "eval_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}

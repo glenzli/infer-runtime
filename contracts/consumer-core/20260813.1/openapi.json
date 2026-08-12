@@ -1,0 +1,975 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime Consumer Core",
+    "version": "20260813.1",
+    "description": "Immutable shared discovery, admission, Job, routing, cancellation, provenance, and error-envelope contract. Typed data planes are versioned by independent capability documents."
+  },
+  "x-infer-consumer-core-contract": "infer-runtime.consumer-core@20260813.1",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Runtime process is reachable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/infer/v1/contract": {
+      "get": {
+        "operationId": "getContractManifest",
+        "security": [
+          {
+            "consumerContract": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ConsumerContract"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Active external contract identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContractManifest"
+                }
+              }
+            }
+          },
+          "426": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/infer/v1/capabilities": {
+      "get": {
+        "operationId": "getCapabilityCatalog",
+        "security": [
+          {
+            "consumerContract": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ConsumerContract"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Additive typed capability catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityCatalog"
+                }
+              }
+            }
+          },
+          "426": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/infer/v1/openapi.json": {
+      "get": {
+        "operationId": "getOpenApi",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "This OpenAPI document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/infer/v1/capability-schemas/{capability_id}/{version}/openapi.json": {
+      "get": {
+        "operationId": "getCapabilitySchema",
+        "security": [],
+        "parameters": [
+          {
+            "name": "capability_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable capability-scoped OpenAPI document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/infer/v1/jobs": {
+      "get": {
+        "operationId": "listJobs",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque continuation cursor",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Priority"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/JobState"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Application-scoped job page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobListPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/infer/v1/jobs/{response_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ResponseId"
+        }
+      ],
+      "get": {
+        "operationId": "getJob",
+        "responses": {
+          "200": {
+            "description": "Full application-scoped job snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobSnapshot"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/infer/v1/jobs/{response_id}/cancel": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ResponseId"
+        }
+      ],
+      "post": {
+        "operationId": "cancelJob",
+        "responses": {
+          "200": {
+            "description": "Cancellation was accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/infer/v1/explain/{response_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ResponseId"
+        }
+      ],
+      "get": {
+        "operationId": "explainJob",
+        "responses": {
+          "200": {
+            "description": "Admission-time routing and attempt evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExplainResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "examples": {
+      "Error": {
+        "value": {
+          "error": {
+            "message": "request body does not match the documented schema",
+            "type": "invalid_request_error",
+            "code": "invalid_request_error"
+          }
+        }
+      }
+    },
+    "parameters": {
+      "ConsumerContract": {
+        "name": "Infer-Consumer-Contract",
+        "in": "header",
+        "required": true,
+        "description": "The only accepted dated Consumer Core identity.",
+        "schema": {
+          "const": "infer-runtime.consumer-core@20260813.1"
+        }
+      },
+      "ResponseId": {
+        "name": "response_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Stable error envelope; code is machine-actionable and message is diagnostic text",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            },
+            "examples": {
+              "invalidRequest": {
+                "$ref": "#/components/examples/Error"
+              }
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Attempt": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "number",
+          "provider",
+          "deployment",
+          "outcome",
+          "trigger"
+        ],
+        "properties": {
+          "number": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "provider": {
+            "type": "string"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "running",
+              "succeeded",
+              "failed",
+              "interrupted"
+            ]
+          },
+          "trigger": {
+            "enum": [
+              "initial",
+              "retry",
+              "fallback",
+              "recovery"
+            ]
+          },
+          "error_kind": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "CancelResult": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "cancelled"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "cancelled": {
+            "const": true
+          }
+        }
+      },
+      "CapabilityCatalog": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "schema",
+          "schema_version",
+          "core_contract",
+          "capabilities"
+        ],
+        "properties": {
+          "schema": {
+            "const": "infer-runtime.capability-catalog"
+          },
+          "schema_version": {
+            "const": "20260813.1"
+          },
+          "core_contract": {
+            "const": "infer-runtime.consumer-core@20260813.1"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "schema_version",
+                "stability",
+                "schema",
+                "routes"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "schema_version": {
+                  "type": "string",
+                  "pattern": "^[0-9]{8}\\.[1-9][0-9]*$",
+                  "description": "Exactly one immutable schema version per Catalog record. The same capability id may have several records during a migration window."
+                },
+                "stability": {
+                  "enum": [
+                    "stable",
+                    "experimental"
+                  ]
+                },
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "format",
+                    "url",
+                    "sha256"
+                  ],
+                  "properties": {
+                    "format": {
+                      "const": "openapi-3.1"
+                    },
+                    "url": {
+                      "type": "string",
+                      "pattern": "^/infer/v1/capability-schemas/[A-Za-z0-9._-]+/[0-9]{8}\\.[1-9][0-9]*/openapi\\.json$"
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    }
+                  }
+                },
+                "routes": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "required": [
+                      "method",
+                      "path"
+                    ],
+                    "properties": {
+                      "method": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "execution_modes": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ContractManifest": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "schema",
+          "schema_version",
+          "core_contract",
+          "supported_core_contracts",
+          "capability_catalog",
+          "openapi_url",
+          "openapi_sha256",
+          "error_codes",
+          "consumer_routes"
+        ],
+        "properties": {
+          "schema": {
+            "const": "infer-runtime.consumer-core"
+          },
+          "schema_version": {
+            "const": "20260813.1"
+          },
+          "core_contract": {
+            "const": "infer-runtime.consumer-core@20260813.1"
+          },
+          "supported_core_contracts": {
+            "type": "array",
+            "prefixItems": [
+              {
+                "const": "infer-runtime.consumer-core@20260813.1"
+              }
+            ],
+            "items": false,
+            "minItems": 1,
+            "maxItems": 1
+          },
+          "capability_catalog": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schema",
+              "schema_version",
+              "url"
+            ],
+            "properties": {
+              "schema": {
+                "const": "infer-runtime.capability-catalog"
+              },
+              "schema_version": {
+                "const": "20260813.1"
+              },
+              "url": {
+                "const": "/infer/v1/capabilities"
+              }
+            }
+          },
+          "openapi_url": {
+            "const": "/infer/v1/openapi.json"
+          },
+          "openapi_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "error_codes": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/components/schemas/PublicErrorCode"
+            }
+          },
+          "consumer_routes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true,
+              "required": [
+                "method",
+                "path"
+              ],
+              "properties": {
+                "method": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "message",
+              "type",
+              "code"
+            ],
+            "properties": {
+              "message": {
+                "type": "string",
+                "description": "Diagnostic text; not a stable machine discriminator"
+              },
+              "type": {
+                "const": "invalid_request_error"
+              },
+              "code": {
+                "$ref": "#/components/schemas/PublicErrorCode"
+              }
+            }
+          }
+        }
+      },
+      "ExplainResult": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "response_id",
+          "intent",
+          "consumer_core_contract",
+          "capability_contract",
+          "routing",
+          "attempts",
+          "state"
+        ],
+        "properties": {
+          "response_id": {
+            "type": "string"
+          },
+          "intent": {
+            "type": "string"
+          },
+          "consumer_core_contract": {
+            "type": "string"
+          },
+          "capability_contract": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routing": {
+            "$ref": "#/components/schemas/RoutingDecision"
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Attempt"
+            }
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          }
+        }
+      },
+      "Health": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "status",
+          "service"
+        ],
+        "properties": {
+          "status": {
+            "const": "ok"
+          },
+          "service": {
+            "const": "inferd"
+          }
+        }
+      },
+      "JobListItem": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "app_id",
+          "intent",
+          "provider",
+          "deployment",
+          "state",
+          "priority",
+          "created_at_ms",
+          "updated_at_ms"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "app_id": {
+            "type": "string"
+          },
+          "intent": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/Priority"
+          },
+          "created_at_ms": {
+            "type": "integer"
+          },
+          "updated_at_ms": {
+            "type": "integer"
+          }
+        }
+      },
+      "JobListPage": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "jobs"
+        ],
+        "properties": {
+          "jobs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/JobListItem"
+            }
+          },
+          "next_cursor": {
+            "type": "string",
+            "description": "Opaque continuation cursor"
+          }
+        }
+      },
+      "JobSnapshot": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "app_id",
+          "intent",
+          "consumer_core_contract",
+          "provider",
+          "deployment",
+          "model_profile",
+          "model_build",
+          "physical_model",
+          "placement",
+          "capability_level",
+          "evaluation_status",
+          "resource_class",
+          "state",
+          "policy",
+          "priority",
+          "constraints",
+          "routing",
+          "attempts",
+          "error"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "app_id": {
+            "type": "string"
+          },
+          "intent": {
+            "type": "string"
+          },
+          "consumer_core_contract": {
+            "type": "string",
+            "description": "Exact admitted Core identity; historical internally recovered Jobs may expose a legacy identity."
+          },
+          "capability_contract": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "model_profile": {
+            "type": "string"
+          },
+          "model_build": {
+            "type": "string"
+          },
+          "physical_model": {
+            "type": "string"
+          },
+          "placement": {
+            "enum": [
+              "local",
+              "trusted_node",
+              "cloud"
+            ]
+          },
+          "capability_level": {
+            "enum": [
+              "foundational",
+              "capable",
+              "advanced",
+              "expert",
+              "exceptional"
+            ]
+          },
+          "evaluation_status": {
+            "enum": [
+              "provisional",
+              "benchmarked"
+            ]
+          },
+          "resource_class": {
+            "enum": [
+              "light",
+              "standard",
+              "heavy",
+              "extreme"
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          },
+          "policy": {
+            "type": "string"
+          },
+          "priority": {
+            "$ref": "#/components/schemas/Priority"
+          },
+          "constraints": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "routing": {
+            "$ref": "#/components/schemas/RoutingDecision"
+          },
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Attempt"
+            }
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "JobState": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "running",
+          "succeeded",
+          "failed",
+          "cancelled",
+          "expired"
+        ]
+      },
+      "Priority": {
+        "type": "string",
+        "enum": [
+          "interactive",
+          "normal",
+          "background"
+        ]
+      },
+      "PublicErrorCode": {
+        "type": "string",
+        "description": "Stable machine-actionable error code. Additions are additive; renames or removals require a Core or Capability revision.",
+        "enum": [
+          "invalid_api_key",
+          "not_found",
+          "invalid_request_error",
+          "consumer_core_unsupported",
+          "capability_contract_unsupported",
+          "internal_error",
+          "observer_credential_restricted",
+          "observer_access_required",
+          "policy_violation",
+          "intent_forbidden",
+          "route_target_forbidden",
+          "resource_admin_required"
+        ]
+      },
+      "RoutingDecision": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "capability_floor",
+          "candidates"
+        ],
+        "properties": {
+          "capability_floor": {
+            "enum": [
+              "foundational",
+              "capable",
+              "advanced",
+              "expert",
+              "exceptional"
+            ]
+          },
+          "named_route": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "ordered_ids"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "deployment",
+                  "model_profile"
+                ]
+              },
+              "ordered_ids": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              }
+            }
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "deployment",
+                "provider",
+                "status"
+              ],
+              "properties": {
+                "deployment": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "eligible",
+                    "fallback_eligible",
+                    "rejected"
+                  ]
+                },
+                "rank": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "reason_codes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

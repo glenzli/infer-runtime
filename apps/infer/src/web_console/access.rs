@@ -153,7 +153,7 @@ pub(super) struct AppAccessInput {
     #[serde(default)]
     pub allowed_provider_access_classes: Option<BTreeSet<ProviderAccessClass>>,
     /// Independent cloud payload egress permission. Omission preserves the
-    /// existing value on update and creates a text-only Consumer.
+    /// existing value on update and creates a Consumer with no cloud egress.
     #[serde(default)]
     pub allowed_cloud_input_modalities: Option<BTreeSet<Modality>>,
     pub max_pending_jobs: usize,
@@ -249,7 +249,7 @@ impl AccessManager {
             input.allowed_builtin_tools = Some(BTreeSet::new());
         }
         if input.allowed_cloud_input_modalities.is_none() {
-            input.allowed_cloud_input_modalities = Some(BTreeSet::from([Modality::Text]));
+            input.allowed_cloud_input_modalities = Some(BTreeSet::new());
         }
         validate_console_input(&input)?;
         let source = self.config_file.read_source().await?;
@@ -263,7 +263,12 @@ impl AccessManager {
         }
         config.apps.insert(
             input.app_id.clone(),
-            app_config(&input, AppCredentialConfig::Managed, ObserverAccess::None),
+            app_config(
+                &input,
+                AppCredentialConfig::Managed,
+                ObserverAccess::None,
+                None,
+            ),
         );
         config.validate().map_err(anyhow::Error::from)?;
         insert_app(&mut document, &input)?;
@@ -315,7 +320,12 @@ impl AccessManager {
         }
         config.apps.insert(
             input.app_id.clone(),
-            app_config(&input, existing.credential, existing.observer_access),
+            app_config(
+                &input,
+                existing.credential,
+                existing.observer_access,
+                existing.routing,
+            ),
         );
         config.validate().map_err(anyhow::Error::from)?;
         update_app(&mut document, &input)?;
@@ -468,14 +478,20 @@ fn app_config(
     input: &AppAccessInput,
     credential: AppCredentialConfig,
     observer_access: ObserverAccess,
+    routing: Option<infer_core::AppRoutingConfig>,
 ) -> AppConfig {
     AppConfig {
         credential,
         observer_access,
         resource_admin: false,
+        allow_all_intents: false,
         allowed_intents: input.allowed_intents.clone(),
+        // This Console surface does not edit named routing; create denies it
+        // and update preserves the existing independently managed contract.
+        routing,
         allowed_builtin_tools: input.allowed_builtin_tools.clone().unwrap_or_default(),
         allowed_speech_voice_aliases: None,
+        allow_all_speech_voice_aliases: false,
         allowed_provider_access_classes: input
             .allowed_provider_access_classes
             .clone()
@@ -483,7 +499,7 @@ fn app_config(
         allowed_cloud_input_modalities: input
             .allowed_cloud_input_modalities
             .clone()
-            .unwrap_or_else(|| BTreeSet::from([Modality::Text])),
+            .unwrap_or_default(),
         max_pending_jobs: input.max_pending_jobs,
         default_policy: input.default_policy.clone(),
         allowed_policies: input.allowed_policies.clone(),

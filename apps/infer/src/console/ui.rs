@@ -106,7 +106,7 @@ fn render_overview(
         .split(columns[1]);
 
     let connected = state.snapshot.health.value.is_some();
-    let contract = string_at(&state.snapshot.contract, "/contract_version").unwrap_or("—");
+    let contract = string_at(&state.snapshot.contract, "/core_contract").unwrap_or("—");
     let daemon_uptime = supervisor
         .uptime_seconds()
         .map(format_duration)

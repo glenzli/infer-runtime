@@ -1,0 +1,344 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.responses",
+    "version": "20260812.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.responses@20260812.1",
+  "paths": {
+    "/v1/responses": {
+      "post": {
+        "operationId": "createResponse",
+        "description": "Submit the supported stateless subset of an OpenAI Responses request. The model field is an infer-runtime intent, not a physical deployment ID.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ResponsesCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponsesRequest"
+              },
+              "examples": {
+                "minimal": {
+                  "$ref": "#/components/examples/ResponsesRequest"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Completed response, or an SSE stream when stream=true",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseObject"
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "SSE event/data frames. Provider event types are forwarded after response identity normalization; runtime-generated failures use event: error."
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Durable local background job accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/responses/{response_id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ResponseId"
+        }
+      ],
+      "get": {
+        "operationId": "getResponse",
+        "description": "Get a durable background response owned by the authenticated application.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ResponsesCapability"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current or completed background response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/responses/{response_id}/cancel": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/ResponseId"
+        }
+      ],
+      "post": {
+        "operationId": "cancelResponse",
+        "description": "Request cancellation of a durable background response.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ResponsesCapability"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Background response after cancellation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackgroundResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "examples": {
+      "ResponsesRequest": {
+        "value": {
+          "model": "text.summarize",
+          "input": "Summarize this text.",
+          "metadata": {
+            "infer.placement": "local_only",
+            "infer.priority": "normal"
+          }
+        }
+      }
+    },
+    "parameters": {
+      "ResponseId": {
+        "name": "response_id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "ResponsesCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.responses@20260812.1"
+        }
+      }
+    },
+    "schemas": {
+      "BackgroundResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ResponseObject"
+          },
+          {
+            "type": "object",
+            "required": [
+              "background",
+              "status",
+              "output"
+            ],
+            "properties": {
+              "background": {
+                "const": true
+              },
+              "status": {
+                "enum": [
+                  "queued",
+                  "in_progress",
+                  "completed",
+                  "failed",
+                  "cancelled",
+                  "incomplete"
+                ]
+              },
+              "output": {
+                "type": "array"
+              },
+              "error": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "Metadata": {
+        "type": "object",
+        "default": {},
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Application metadata plus documented infer.* routing constraints. Unknown reserved infer.* keys are rejected."
+      },
+      "Reasoning": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "effort": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "none",
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max",
+              "ultra",
+              null
+            ]
+          }
+        }
+      },
+      "ResponseObject": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "object",
+          "created_at",
+          "model"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "const": "response"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "model": {
+            "type": "string",
+            "description": "Logical intent, not physical deployment"
+          },
+          "status": {
+            "type": "string"
+          },
+          "output": {
+            "type": "array"
+          },
+          "parallel_tool_calls": {
+            "type": "boolean"
+          },
+          "tool_choice": {},
+          "tools": {
+            "type": "array"
+          }
+        }
+      },
+      "ResponsesRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model",
+          "input"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Stable intent profile, never a physical deployment ID"
+          },
+          "input": {},
+          "instructions": {},
+          "stream": {
+            "type": "boolean",
+            "default": false
+          },
+          "background": {
+            "type": "boolean",
+            "default": false
+          },
+          "metadata": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Metadata"
+              }
+            ],
+            "description": "The named-routing capability accepts at most one of infer.deployment_ids or infer.model_profile_ids. Its value is an ordered comma-separated list of 1-16 Runtime-owned IDs. The App routing ACL must authorize every ID; the request is a hard narrowing and never expands the App security ceiling."
+          },
+          "tools": {
+            "type": "array",
+            "items": {}
+          },
+          "reasoning": {
+            "$ref": "#/components/schemas/Reasoning"
+          },
+          "temperature": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "top_p": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "max_output_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "truncation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "store": {
+            "enum": [
+              false,
+              null
+            ],
+            "description": "Only false or null is accepted"
+          },
+          "previous_response_id": {
+            "type": "null",
+            "description": "Stateful chaining is not supported"
+          },
+          "conversation": {
+            "type": "null",
+            "description": "Conversation state is not supported"
+          }
+        }
+      }
+    }
+  }
+}

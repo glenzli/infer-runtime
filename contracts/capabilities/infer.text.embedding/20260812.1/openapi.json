@@ -1,0 +1,290 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.text.embedding",
+    "version": "20260812.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.text.embedding@20260812.1",
+  "paths": {
+    "/infer/v1/text/query-embeddings": {
+      "post": {
+        "operationId": "createQueryEmbeddings",
+        "x-infer-stability": "experimental",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RetrievalEmbeddingCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrievalEmbeddingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Query embeddings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalEmbeddingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/infer/v1/text/document-embeddings": {
+      "post": {
+        "operationId": "createDocumentEmbeddings",
+        "x-infer-stability": "experimental",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/RetrievalEmbeddingCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetrievalEmbeddingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Document embeddings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetrievalEmbeddingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "RetrievalEmbeddingCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.text.embedding@20260812.1"
+        }
+      }
+    },
+    "schemas": {
+      "Metadata": {
+        "type": "object",
+        "default": {},
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Application metadata plus documented infer.* routing constraints. Unknown reserved infer.* keys are rejected."
+      },
+      "RetrievalEmbeddingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model",
+          "inputs"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "inputs": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 64,
+            "items": {
+              "$ref": "#/components/schemas/RetrievalTextInput"
+            }
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/Metadata"
+          }
+        }
+      },
+      "RetrievalEmbeddingResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "object",
+          "created_at",
+          "status",
+          "data",
+          "provenance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "source_revision",
+                "embedding"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "source_revision": {
+                  "type": "string"
+                },
+                "embedding": {
+                  "$ref": "#/components/schemas/SemanticEmbedding"
+                }
+              }
+            }
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/RetrievalProvenance"
+          }
+        }
+      },
+      "RetrievalProvenance": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "job_id",
+          "provider",
+          "deployment",
+          "model_build",
+          "model_revision",
+          "artifact_sha256",
+          "tokenizer_identity",
+          "runtime",
+          "precision"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "model_build": {
+            "type": "string"
+          },
+          "model_revision": {
+            "type": "string"
+          },
+          "artifact_sha256": {
+            "type": "string"
+          },
+          "tokenizer_identity": {
+            "type": "string"
+          },
+          "instruction_revision": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "precision": {
+            "type": "string"
+          },
+          "embedding_space": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "RetrievalTextInput": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "text",
+          "source_revision"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32768
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        }
+      },
+      "SemanticEmbedding": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "values",
+          "dimensions",
+          "normalized",
+          "distance_metric",
+          "space"
+        ],
+        "properties": {
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "dimensions": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "normalized": {
+            "type": "boolean"
+          },
+          "distance_metric": {
+            "type": "string"
+          },
+          "space": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

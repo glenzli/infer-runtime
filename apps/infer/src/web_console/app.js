@@ -335,7 +335,10 @@ function providerCard(provider, resource, deployments, totalDeployments, filters
     const lifecycle = lifecycleByDeployment.get(deployment.id);
     const modelIdentity = deployment.model || lifecycle?.model_id || "—";
     const coverage = deploymentCoverage(deployment, filters);
-    const details = [compactModelIdentity(modelIdentity), deployment.model_profile, coverage]
+    const supply = deployment.source_kind
+      ? `${deployment.source_kind} · license:${deployment.license_status || "unreviewed"}`
+      : "";
+    const details = [compactModelIdentity(modelIdentity), deployment.model_profile, supply, coverage]
       .filter(Boolean)
       .join(" · ");
     const state = lifecycle?.state || (provider.circuit_open || !provider.configured ? "unavailable" : "admitted");

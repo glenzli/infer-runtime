@@ -1,0 +1,12 @@
+{
+  "id": "resp_background_example",
+  "object": "response",
+  "created_at": 1786212000,
+  "status": "queued",
+  "background": true,
+  "model": "text.summarize",
+  "output": [],
+  "parallel_tool_calls": false,
+  "tool_choice": "auto",
+  "tools": []
+}

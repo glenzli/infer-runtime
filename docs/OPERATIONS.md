@@ -103,8 +103,8 @@ allowed_policies = ["balanced", "local-first"]
 
 daemon 启动环境负责提供 `SAMPLE_CONSUMER_INFER_TOKEN`；consumer 自己可把相同值放在其
 私有 secret store 中并通过 OpenAI SDK 的 `api_key` 使用，不要求采用 runtime 的变量名。
-`allowed_intents` 应按最小权限显式填写；省略只用于兼容旧配置并表示允许所有 Intent，显式
-空数组则保留身份但禁止推理。
+`allowed_intents` 应按最小权限显式填写；省略和显式空数组都保留身份但禁止推理。仅受保护的
+resource-admin operator 可显式设置 `allow_all_intents = true`，普通 Consumer 不能使用该 grant。
 Apps & Access 可以轮换 managed token 或撤销非 operator App；它不管理 environment secret，
 只可移除该 App 的 runtime 登记。创建、权限修改、轮换和撤销都不会热改运行中认证表，必须
 随后重启 daemon；页面会一直显示待应用状态。`local-operator` 是 protected identity，不能
@@ -272,6 +272,12 @@ allow_cpu_fallback = true
 
 下载先进入 `artifacts/staging`，不得直接放入可执行 blob 路径。固定来源 revision、license、
 SHA-256、size、opset、tensor 和 preprocessing manifest 后，用本机 operator CLI 发布：
+
+所有 Build 都应声明 `provenance.source_kind` 与 `license.status`。Provider cache 中的模型通常
+使用 `provider_managed`；operator 自行安装的 MLX/ONNX 制品使用 `user_managed`。许可未完成
+审核时写 `unreviewed`，不得猜测为开放许可。只有 Runtime 自己承担下载或捆绑责任时，才可
+使用 `runtime_downloadable` / `runtime_bundled`，且配置必须同时提供固定 upstream、revision、
+artifact SHA-256、verified license expression/URL/license-text SHA-256。
 
 ```bash
 infer import-onnx yunet_2026may_onnx --file '/verified/staging/yunet.onnx'

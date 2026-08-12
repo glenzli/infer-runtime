@@ -1,0 +1,157 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.audio.voice-clone",
+    "version": "20260811.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.audio.voice-clone@20260811.1",
+  "paths": {
+    "/v1/audio/voice-clones": {
+      "post": {
+        "operationId": "createVoiceClone",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/VoiceCloneCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceCloneForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generated audio. x-infer-job-id and x-infer-model identify the execution.",
+            "headers": {
+              "x-infer-job-id": {
+                "$ref": "#/components/headers/InferJobId"
+              },
+              "x-infer-model": {
+                "$ref": "#/components/headers/InferModel"
+              }
+            },
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/mpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/flac": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "audio/ogg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "headers": {
+      "InferJobId": {
+        "description": "Runtime job/response identity",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "InferModel": {
+        "description": "Logical intent requested by the caller",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "parameters": {
+      "VoiceCloneCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.audio.voice-clone@20260811.1"
+        }
+      }
+    },
+    "schemas": {
+      "SpeechFormat": {
+        "type": "string",
+        "enum": [
+          "wav",
+          "mp3",
+          "flac",
+          "opus",
+          "pcm"
+        ],
+        "default": "wav"
+      },
+      "VoiceCloneForm": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": {
+          "^infer\\.": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "input",
+          "reference_audio",
+          "reference_text"
+        ],
+        "properties": {
+          "model": {
+            "const": "speech.clone_voice"
+          },
+          "input": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reference_audio": {
+            "type": "string",
+            "format": "binary"
+          },
+          "reference_text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "language": {
+            "type": "string"
+          },
+          "response_format": {
+            "$ref": "#/components/schemas/SpeechFormat"
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON object whose values are strings"
+          }
+        }
+      }
+    }
+  }
+}

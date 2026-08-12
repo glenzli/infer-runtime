@@ -1,0 +1,141 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.audio.alignment",
+    "version": "20260811.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.audio.alignment@20260811.1",
+  "paths": {
+    "/v1/audio/alignments": {
+      "post": {
+        "operationId": "createAlignment",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AlignmentCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/AlignmentForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Forced-alignment result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlignmentResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "AlignmentCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.audio.alignment@20260811.1"
+        }
+      }
+    },
+    "schemas": {
+      "AlignmentForm": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": {
+          "^infer\\.": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "file",
+          "text"
+        ],
+        "properties": {
+          "model": {
+            "const": "audio.align"
+          },
+          "file": {
+            "type": "string",
+            "format": "binary"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "language": {
+            "type": "string"
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON object whose values are strings"
+          }
+        }
+      },
+      "AlignmentResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "model",
+          "text",
+          "language",
+          "items"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "model": {
+            "const": "audio.align"
+          },
+          "text": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "text",
+                "start",
+                "end"
+              ],
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "start": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "end": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

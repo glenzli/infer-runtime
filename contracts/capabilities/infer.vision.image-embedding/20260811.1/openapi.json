@@ -1,0 +1,265 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.vision.image-embedding",
+    "version": "20260811.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.vision.image-embedding@20260811.1",
+  "paths": {
+    "/infer/v1/vision/image-embeddings": {
+      "post": {
+        "operationId": "createImageEmbedding",
+        "x-infer-stability": "experimental",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ImageEmbeddingCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageEmbeddingForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Normalized image embedding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageEmbeddingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "ImageEmbeddingCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.vision.image-embedding@20260811.1"
+        }
+      }
+    },
+    "schemas": {
+      "ImageEmbeddingForm": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/VisionImageFormBase"
+          },
+          {
+            "type": "object",
+            "required": [
+              "image_orientation"
+            ],
+            "properties": {
+              "model": {
+                "const": "vision.embed_image"
+              },
+              "image_orientation": {
+                "const": "display_pixels_orientation_normalized"
+              }
+            }
+          }
+        ]
+      },
+      "ImageEmbeddingResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "object",
+          "created_at",
+          "status",
+          "source_revision",
+          "image",
+          "embedding",
+          "provenance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          },
+          "image": {
+            "$ref": "#/components/schemas/ImageGeometry"
+          },
+          "embedding": {
+            "$ref": "#/components/schemas/SemanticEmbedding"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/VisionProvenance"
+          }
+        }
+      },
+      "ImageGeometry": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "width",
+          "height",
+          "orientation"
+        ],
+        "properties": {
+          "width": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "orientation": {
+            "const": "display_pixels_orientation_normalized"
+          }
+        }
+      },
+      "SemanticEmbedding": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "values",
+          "dimensions",
+          "normalized",
+          "distance_metric",
+          "space"
+        ],
+        "properties": {
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "dimensions": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "normalized": {
+            "type": "boolean"
+          },
+          "distance_metric": {
+            "type": "string"
+          },
+          "space": {
+            "type": "string"
+          }
+        }
+      },
+      "VisionImageFormBase": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": {
+          "^infer\\.": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "image",
+          "source_revision"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "image": {
+            "type": "string",
+            "format": "binary",
+            "description": "JPEG/PNG, 1 byte through 20 MiB; decoded images are bounded to 40 megapixels"
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON object whose values are strings; Runtime forces local_only, offline_required=true, fallback=none"
+          }
+        }
+      },
+      "VisionProvenance": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "job_id",
+          "provider",
+          "deployment",
+          "model_build",
+          "artifact_sha256",
+          "preprocessing_identity",
+          "postprocessing_identity",
+          "runtime",
+          "requested_execution_provider",
+          "actual_execution_provider",
+          "precision"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "model_build": {
+            "type": "string"
+          },
+          "artifact_sha256": {
+            "type": "string"
+          },
+          "preprocessing_identity": {
+            "type": "string"
+          },
+          "postprocessing_identity": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "requested_execution_provider": {
+            "type": "string"
+          },
+          "actual_execution_provider": {
+            "type": "string"
+          },
+          "execution_provider_fallback_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "precision": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

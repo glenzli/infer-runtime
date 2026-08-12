@@ -13,7 +13,7 @@
 
 - **状态**：Accepted
 - **决定**：`inferd` 的文本数据面公开 `POST /v1/responses`，非流式响应与 SSE 流事件遵守 OpenAI Responses API 兼容合同。Job 查询、队列、预算、解释和管理功能使用独立的 `/infer/v1/*` 控制 API，避免污染 Responses wire schema。
-- **Intent 语义**：标准 `model` 字段填写稳定 Intent Profile，如 `text.summarize`、`language.respond`，而非应用别名或物理模型。Intent 定义任务、模态、features、默认能力下限和 policy；`language.respond` 不暗示 tool 或 Agent 执行。管理员调试接口才允许物理 deployment override。
+- **Intent 语义**：标准 `model` 字段填写稳定 Intent Profile，如 `text.summarize`、`text.edit`、`text.deduplicate`、`language.respond`，而非应用别名或物理模型。Intent 定义任务、模态、features、默认能力下限和 policy；`text.edit` 表示一份或多份 Consumer 已编译文本上下文上的有界指令式编辑，不暗示 tools/agent；`text.deduplicate` 仅做 Consumer 提供记录间的有界同一性匹配，不判断价值或相关性，Consumer 必须校验返回标识并在失败时放行；`language.respond` 不暗示 tool 或 Agent 执行。管理员调试接口才允许物理 deployment override。
 - **请求动态约束**：使用 Responses 的 `metadata` 中保留的 `infer.*` keys 表达 priority、placement、placement preference、provider access class 收窄、capability floor、latency、max cost、fallback、deadline 和可选 policy profile；标准 `reasoning.effort` 独立表达选中模型后的计算投入，tools 再由独立 capability/ACL 授权。
 - **MVP 子集**：无状态 `input`/`instructions`、streaming、function tools、基础生成参数与 usage。`previous_response_id`、`conversation` 和服务端 conversation state 不在 MVP；不支持的字段返回明确错误，不能静默忽略。
 - **合同制品**：首个外部反馈基线为 `0.1.0-candidate.1`，由 `contracts/v0.1/openapi.json`、fixtures 和 daemon 的 `/infer/v1/contract` 固定；operator resource/provider 管理路由不在该 consumer 承诺内。
@@ -99,7 +99,7 @@
 ### D-011：App 使用显式 Intent allowlist，所有数据面在统一 admission 前授权
 
 - **状态**：Accepted
-- **决定**：`AppConfig.allowed_intents` 是普通 Consumer 的稳定 workload ACL。非空清单精确授权，显式空清单禁止推理；字段省略仅为旧配置兼容并表示允许全部。Apps & Access 创建或编辑 Consumer 时写入显式清单。
+- **决定**：`AppConfig.allowed_intents` 是普通 Consumer 的稳定 workload ACL。非空清单精确授权，显式空清单或字段省略都禁止推理。只有 `resource_admin=true` 且显式 `allow_all_intents=true` 的 operator 身份可跟随完整 Intent registry；Apps & Access 创建或编辑 Consumer 时写入显式清单。
 - **执行点**：授权只在公共 Job preparation owner 中执行，并先于 Candidate Plan、App/provider admission、持久化和 provider 调用；Responses、音频、视觉与 durable background 不建立各自 ACL 分支。
 - **失败合同**：未知 Intent 仍是 `400 invalid_request_error`；存在但未授权的 Intent 是 `403 intent_forbidden`，不产生 Job、Attempt、reservation 或 provider side effect。配置中的未知或重复 allowlist 项 fail closed。
 - **边界**：Intent ACL、`resource_admin` 与 request override 上限正交。不引入 role/scope DSL，不允许应用直接授权 Deployment、ONNX tensor 或 provider 原生操作。
@@ -138,7 +138,7 @@
 - **稳定性**：文本 delta 是 append-only；transcript partial 是 revisioned replacement。当前
   MLX ASR 明确披露 `commit_redecode`，不冒充模型原生低延迟流。alignment/embedding 保持 unary。
 - **多模态云边界**：subscription/provider access 只授权经济与账号边界；App 还必须通过独立
-  `allowed_cloud_input_modalities` 才能外发图片。默认只有 text，拒绝记录
+  `allowed_cloud_input_modalities` 才能外发 payload。默认空集，text/image 均需显式授权，拒绝记录
   `cloud_input_modality_not_allowed`。
 - **Codex**：bridge 可翻译有界 text/image input 与 agentMessage delta，但继续封闭 thread、工具、
   Shell、MCP、workspace path、memory 和 agent loop。完成结果以权威 completed event 为准。
@@ -146,7 +146,7 @@
 
 ### D-014：Consumer API 通过 Infra Discovery 定位，鉴权仍由 App 身份承担
 
-- **状态**：Accepted
+- **状态**：Superseded by D-115；以下保留为历史决策
 - **决定**：`infer-runtime` 的同一 registration 除只读状态外，发布独立的
   `infer-runtime.consumer` offer；protocol version 精确等于当前 Consumer contract，candidate.2
   保持冻结，candidate.3 迁移后为 `0.1.0-candidate.3`。Infer 自有 `infer-runtime.http-loopback` binding 只接受 canonical numeric
@@ -254,12 +254,63 @@
 ### D-111：生成式 raster image edit 必须等待真实执行面
 
 - **状态**：Proposed / Blocked；当前没有可输出 raster 的已验证 Provider、Build 或 Deployment
-- **边界**：`image.edit` 是独立类型化数据平面，不进入只返回文本的 Responses/VLM 合同。只有真实执行面通过端到端验证后，才可 additive 发布 `0.1.0-candidate.4` 或更高 revision、`infer.image.edit@20260811.1` 与 `POST /v1/images/edits`；空路由、mock、文本输出或仅登记模型均不构成能力。
+- **边界**：`image.edit` 是独立类型化数据平面，不进入只返回文本的 Responses/VLM 合同。只有真实执行面通过端到端验证后，才可 additive 发布独立的 `infer.image.edit@<date-revision>` Capability Schema 与 `POST /v1/images/edits`；空路由、mock、文本输出或仅登记模型均不构成能力。新增该能力不升级 Consumer Core。
 - **拟定输入**：strict multipart；`model=image.edit`；必需 JPEG/PNG `source_image`（不超过 20 MiB/40 MP、orientation-normalized display pixels）与 `source_revision`；必需不超过 16 KiB UTF-8 `instruction`；可选同尺寸 PNG mask（白/1 可编辑、黑/0 保留）及 `mask_revision`；最多四个带 `role=style|identity` 和 revision 的图片引用。identity 授权事实由 Consumer 持有。
 - **拟定输出**：unary 单张 raw raster；`Content-Type`、Job id、输出 SHA-256、宽高、orientation、colorspace 通过稳定 header 返回，完整 Build/Attempt/placement/policy/fallback/cost provenance 由 Job snapshot 提供。
 - **隐私/所有权**：Runtime 不持久化 source、instruction、mask、references 或 output pixels，也不接管 Shape Scene、Candidate、Compare/Accept 或 immutable Revision。`apps.shape` 只有在真实能力就绪后才增加 Intent；local-first/local-only/offline/no-fallback/max-cost/provider class 边界保持不变，cloud image modality 必须另行授权。
 - **开放门槛**：真实 Provider/Build/Deployment、取消与迟到结果测试、digest/header 校验、ACL 正负面测试和真实 raster HTTP E2E 全部通过。门槛关闭前 Shape 保持 semantic proposal only。
 - **ADR**：[ADR-0011](adr/0011-heterogeneous-local-runtimes-and-typed-vision.md)
+
+### D-112：Consumer 具名申请使用分层 routing ACL
+
+- **状态**：Accepted；由 `infer.responses@20260812.1` 承载
+- **公共身份**：Responses `model` 继续是稳定 Intent。Consumer 只能用 `infer.deployment_ids` 或 `infer.model_profile_ids` 具名申请 Runtime-owned Deployment/Model Profile；Build、Provider 与 provider-native physical model 不进入该权限面。
+- **全局安全硬上限**：App 的 `allowed_intents`、provider access class、cloud input modality、policy/placement/cost 和 request override grants 永远不可被 routing 或单次请求扩大。
+- **替换语义**：`apps.<id>.routing` 的 deployment/profile grant 只是没有 Intent 专属 rule 时的 routing default，并非全部 Intent rule 的超集。`apps.<id>.routing.intents."<intent>"` 一旦存在就完整替换 routing default；空 rule 表示 deny all，目标 unavailable 时不得退回 routing default。
+- **逐层收窄**：effective Intent routing grant 必须位于 App 全局安全硬上限内；单次具名列表又必须完全位于 effective grant 内。未授权在 Job/Provider/quota admission 前 fail closed；已授权但不可用返回稳定 `no_candidate`。有序列表只表达已授权的首选与备用，实际 fallback 仍受 `infer.fallback` 约束。
+- **兼容性**：未配置 `routing` 的旧 App 继续 capability routing，但默认不能具名申请；operator/admin deployment override 不会因此成为 Consumer 权限。
+- **握手**：具名字段属于 `infer.responses@20260812.1`；每个请求同时携带日期化 Core 与 Responses capability identity。缺失或错误身份统一 426 fail closed。Job/Explain 固定持久化实际 Core/Capability identities。
+- **owner**：`infer-core::routing` 拥有 ACL/请求收窄语义，config owner 负责交叉校验，control/registry owner 负责 admission、Candidate reasons 与 provenance，API/OpenAPI owner 负责 Responses capability wire 和错误码。
+- **历史迁移**：[candidate.4 migration](MIGRATION-0.1.0-candidate.4.md)
+
+### D-113：首个具名 Consumer 使用通用 `text.edit` Intent
+
+- **状态**：Accepted for tracked example；live Shape activation remains deferred
+- **合同**：`text.edit` 是 input/output 均为 text 的通用 Runtime Intent，覆盖 rewrite、expand、polish、shorten、summarize 等 Consumer 编译后的结构化编辑指令；首版不包含 tools、Agent 或多模态输入，默认 capability floor 为 `foundational`。
+- **执行面**：`qwen3_5_4b` 对该 Intent 以 `foundational/provisional` 评级，受管 Deployment 为 `ollama_qwen3_5_4b`。example Consumer 的 Intent rule 只授权该 Deployment，并维持 local-first、local-only、offline、zero-cost、fallback none。
+- **边界**：`text.edit` 不是 Shape 应用别名，也不复用开放式 `language.respond`。35B、subscription 或 cloud rating 必须有真实评估后另行登记；它们不进入首个 grant。ignored live `apps.shape`、credential 和 daemon 不在本决定中修改。
+
+### D-114：Build 供应链统一，Provider 保持受信任内置装配
+
+- **状态**：Accepted
+- **Build 来源**：所有 Model Build 使用统一 provenance/license 事实，区分 `unknown`、`user_managed`、`provider_managed`、`organization_managed`、`runtime_downloadable` 与 `runtime_bundled`。旧配置缺失来源时保持 `unknown`；`unreviewed`/`unknown` 是诚实状态，不从模型名或缓存推断许可。
+- **分发门槛**：Runtime 承担下载或捆绑时必须固定 upstream、revision、artifact digest 与 verified license receipt；证据不全配置 fail closed。用户/Provider 管理的权重不因此进入仓库、发行包或隐式下载流程。
+- **装配边界**：内置 Provider family 继续由 infer-runtime 维护和测试，但实例、Build 与 Deployment 仍是配置数据。composition owner 只创建 typed executors、native lifecycle controller 与 scheduler，Router 不包含 Provider 构造分支。
+- **明确延期**：本阶段不建立第三方动态库、外部 Provider package 或通用进程插件协议。只有两个以上独立真实 Provider 证明共同需求后才复审；不得为了扩展性提前建设万能 JSON/tensor SPI。
+
+### D-115：Consumer 协议收敛为日期化 Core + 独立 Capability Catalog
+
+- **状态**：Accepted；等待全部登记 Consumer 完成 hard migration 后启用新 daemon
+- **Core 身份**：Discovery 发布 `infer-runtime.consumer-core@20260813.1`，HTTP 请求携带完整
+  `Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1`。Runtime 不再发布或接受
+  candidate.2/3/4，也不接受缺失 header、裸日期或版本范围。
+- **Core 边界**：只冻结 Discovery 选择、Bearer App 身份、ACL/admission、公共错误、Job/Attempt/
+  routing/cancel/provenance 和 bootstrap。文本、音频、视觉、RAW、OCR 等数据平面使用各自日期化
+  Capability Schema；新增或升级单项 capability 不再升级 Core。
+- **Catalog**：`GET /infer/v1/capabilities` 返回
+  `infer-runtime.capability-catalog@20260813.1`，声明 endpoint 实现的 capability schema、稳定性和
+  route。Core OpenAPI 只含共同骨架，每个能力引用独立不可变 URL/SHA-256；新增能力不得改写既有
+  Core 或能力摘要。Catalog 不表示某个 Deployment 当前可用，也不绕过 App ACL 或 Candidate Plan。
+- **能力握手**：每个 typed data-plane request 额外携带唯一的
+  `Infer-Capability-Contract: <capability-id>@<schema-version>`。缺失、重复或不匹配在鉴权和
+  payload 解析前返回 `426 capability_contract_unsupported`；Job 持久化 exact capability identity。
+- **SDK**：官方 Rust 包 `infer-runtime-client` 统一拥有 Infra Discovery、generation 重发现、
+  canonical loopback、proxy/redirect 禁用、owner-only managed token、Core header、error envelope 与
+  typed capability clients。租户不得继续复制这些基础实现，也不保留固定 8787 产品 fallback。
+- **切换纪律**：新 Runtime 在临时端口/临时 Discovery root 完成合同与 SDK E2E；各租户先完成 SDK
+  迁移，再做一次 Console-owned 单实例切换。旧 Job 数据只保留内部读取兼容，不构成旧 wire 支持。
+- **规范**：[Core Contract](CORE-CONTRACT-20260813.1.md) 与
+  [Capability Catalog](CAPABILITY-CATALOG-20260813.1.md)
 
 ## 已关闭的阶段决策
 

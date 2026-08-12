@@ -1,0 +1,218 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.document.ocr",
+    "version": "20260812.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.document.ocr@20260812.1",
+  "paths": {
+    "/infer/v1/documents/ocr": {
+      "post": {
+        "operationId": "createDocumentOcr",
+        "x-infer-stability": "experimental",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DocumentOcrCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentOcrForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bounded text lines with polygons",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentOcrResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "DocumentOcrCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.document.ocr@20260812.1"
+        }
+      }
+    },
+    "schemas": {
+      "DocumentOcrForm": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/VisionImageFormBase"
+          },
+          {
+            "type": "object",
+            "required": [
+              "image_orientation"
+            ],
+            "properties": {
+              "model": {
+                "const": "document.ocr"
+              },
+              "image_orientation": {
+                "const": "display_pixels_orientation_normalized"
+              }
+            }
+          }
+        ]
+      },
+      "DocumentOcrResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "object",
+          "created_at",
+          "status",
+          "source_revision",
+          "image",
+          "lines",
+          "provenance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          },
+          "image": {
+            "$ref": "#/components/schemas/ImageGeometry"
+          },
+          "lines": {
+            "type": "array",
+            "maxItems": 4096,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "polygon",
+                "text",
+                "confidence"
+              ],
+              "properties": {
+                "polygon": {
+                  "type": "array",
+                  "minItems": 4,
+                  "maxItems": 4,
+                  "items": {
+                    "$ref": "#/components/schemas/Point"
+                  }
+                },
+                "text": {
+                  "type": "string"
+                },
+                "confidence": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "provenance": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "ImageGeometry": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "width",
+          "height",
+          "orientation"
+        ],
+        "properties": {
+          "width": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "orientation": {
+            "const": "display_pixels_orientation_normalized"
+          }
+        }
+      },
+      "Point": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "x",
+          "y"
+        ],
+        "properties": {
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        }
+      },
+      "VisionImageFormBase": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": {
+          "^infer\\.": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "image",
+          "source_revision"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "image": {
+            "type": "string",
+            "format": "binary",
+            "description": "JPEG/PNG, 1 byte through 20 MiB; decoded images are bounded to 40 megapixels"
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON object whose values are strings; Runtime forces local_only, offline_required=true, fallback=none"
+          }
+        }
+      }
+    }
+  }
+}

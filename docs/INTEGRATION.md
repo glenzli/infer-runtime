@@ -3,25 +3,34 @@
 本文面向调用 `infer-runtime` 的应用开发者。它说明如何登记一个 App、取得调用凭证、发送
 第一条文本或音频请求，以及在反馈测试中保留哪些诊断信息。
 
-当前外部合同版本为 `0.1.0-candidate.3`。从 candidate.2 升级的 Consumer 必须先完成
-[candidate.3 migration](MIGRATION-0.1.0-candidate.3.md)，再阅读
-[consumer contract](../contracts/v0.1/README.md)；机器可读字段、枚举和响应以
-[OpenAPI](../contracts/v0.1/openapi.json) 为准。本文是 onboarding，不替代版本化合同。
+当前外部骨架合同为
+[`infer-runtime.consumer-core@20260813.1`](CORE-CONTRACT-20260813.1.md)，能力集合由
+[`infer-runtime.capability-catalog@20260813.1`](CAPABILITY-CATALOG-20260813.1.md) 独立声明。
+机器可读字段、枚举和响应以
+[Core OpenAPI](../contracts/consumer-core/20260813.1/openapi.json) 与 Catalog 引用的
+[能力专属 schemas](../contracts/capabilities/) 为准。旧 candidate 文档只用于历史
+审计；新 Consumer 不实现 candidate 分支。
 
 ## 1. 先分清两个地址和两类密钥
 
 | 用途 | 默认地址 | 面向对象 |
 | --- | --- | --- |
-| inference API | Infra Discovery；兼容默认 `http://127.0.0.1:8787` | 外部应用与 `infer` CLI |
+| inference API | Infra Discovery；显式 endpoint 仅用于开发诊断 | 外部应用与 `infer` CLI |
 | Web Console | `http://127.0.0.1:8790` | 本机 operator 的管理界面 |
 
-外部应用只连接 `8787`，不调用 Web Console 的内部接口。请求中的 bearer token 用来让
+外部应用只连接 Discovery 选中的 inference endpoint，不调用 Web Console 的内部接口。请求中的 bearer token 用来让
 `infer-runtime` 识别调用 App；它不是 DeepSeek、OpenAI 或其他 provider 的 API key。
 Provider key 只由 daemon 在服务端读取，不得交给 consumer。
 
 正式本机接入应按 [Consumer Discovery](CONSUMER_DISCOVERY.md) 选择
-`infer-runtime.consumer@0.1.0-candidate.3` offer。显式 endpoint 配置可覆盖 Discovery，供开发与
-诊断使用；固定端口只是现有 Consumer 的迁移 fallback，不应继续成为新接入的硬编码依赖。
+`infer-runtime.consumer-core@20260813.1` offer。显式 endpoint 配置可覆盖 Discovery，供开发与
+诊断使用；产品接入不保留固定端口 fallback。
+选择后，`GET /infer/v1/contract` 与所有受保护 Consumer 数据/控制请求都必须恰好发送一个
+`Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1`。Runtime 固定返回的
+`core_contract` 与单元素 `supported_core_contracts` 必须与 Discovery offer 交叉一致。缺少、重复、
+裸日期或旧 candidate 会返回 426，`error.code=consumer_core_unsupported`。
+类型化业务请求还必须发送 Catalog 中的精确 `Infer-Capability-Contract`；SDK 会自动完成这两层
+握手。缺少或错误能力身份返回 `426 capability_contract_unsupported`。
 
 ## 2. 为 consumer 登记独立 App
 
@@ -58,9 +67,10 @@ consumer 自己的 secret store。面板创建的 managed token 则保存在 own
 file 中，不需要 daemon 环境变量。两种模式都不要把真实值写进 TOML、源码、日志或反馈报告。配置中的
 `allowed_intents` 是 App 能提交的稳定 workload 清单；未知项会使配置校验失败，已知但未授权
 的 Intent 会在创建 Job、占用 admission slot 或调用 provider 前以 `403 intent_forbidden`
-拒绝。为兼容旧配置，完全省略该字段表示允许全部已配置 Intent；显式空数组表示禁止该 App
-提交任何推理任务。受保护的 `local-operator` 是例外：它作为本机管理员有意跟随完整 Intent
-registry，不能把它的 token 交给产品 Consumer。`request_overrides` 是该 App 可申请的约束上限；没有获准的 `infer.*` 值会
+拒绝。完全省略该字段与显式空数组相同，均禁止该 App 提交推理。受保护的 `local-operator`
+只有在 `resource_admin=true` 且显式 `allow_all_intents=true` 时才跟随完整 Intent registry；不能把
+它的 token 交给产品 Consumer。云端 text/image payload 也都必须经
+`allowed_cloud_input_modalities` 显式授权。`request_overrides` 是该 App 可申请的约束上限；没有获准的 `infer.*` 值会
 被拒绝，而不是静默降级。
 
 凭证和配置在 daemon 启动时读取。修改后先在 Web Console 的配置页校验，再显式重启
@@ -78,15 +88,17 @@ SAMPLE_CONSUMER_INFER_TOKEN='<从 secret store 注入>' \
 
 ## 3. 确认合同与服务身份
 
-下面三个只读入口不需要凭证：
+下面四个只读入口不需要凭证。`INFER_BASE_URL` 必须来自 SDK/Discovery 或显式开发 override：
 
 ```bash
-curl http://127.0.0.1:8787/health
-curl http://127.0.0.1:8787/infer/v1/contract
-curl http://127.0.0.1:8787/infer/v1/openapi.json
+curl "$INFER_BASE_URL/health"
+curl -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' "$INFER_BASE_URL/infer/v1/contract"
+curl -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' "$INFER_BASE_URL/infer/v1/capabilities"
+curl "$INFER_BASE_URL/infer/v1/openapi.json"
 ```
 
-Consumer 应在诊断信息中记录 `/infer/v1/contract` 返回的 `contract_version`；operator 还应
+Consumer 应在诊断信息中记录 `/infer/v1/contract` 返回的 `core_contract` 与 Job 的
+`capability_contract`；operator 还应
 另行提供部署所用的 daemon Git commit。不要只根据产品版本猜测 wire contract。
 
 ## 4. 发出第一条文本请求
@@ -95,8 +107,10 @@ Consumer 应在诊断信息中记录 `/infer/v1/contract` 返回的 `contract_ve
 或云端物理模型名：
 
 ```bash
-curl http://127.0.0.1:8787/v1/responses \
+curl "$INFER_BASE_URL/v1/responses" \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  -H 'Infer-Capability-Contract: infer.responses@20260812.1' \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "text.summarize",
@@ -108,17 +122,23 @@ curl http://127.0.0.1:8787/v1/responses \
   }'
 ```
 
-常用 Intent 包括 `text.summarize`、`text.proofread`、`language.respond` 和
-`reasoning.solve`。可用的 Intent 及默认路由以运行配置和合同为准。`infer.placement`、
-`infer.capability_floor`、`infer.fallback` 等是约束，不是物理 deployment 选择器。
+常用 Intent 包括 `text.summarize`、`text.proofread`、`text.edit`、`text.deduplicate`、
+`language.respond` 和 `reasoning.solve`。`text.deduplicate` 只适合 Consumer 提供的有界记录
+同一性匹配；Consumer 必须验证返回标识，并在调用失败或输出不合法时 fail open。它不能替代
+价值、兴趣、事实或偏好判断。可用的 Intent 及默认路由以运行配置和合同为准。`infer.placement`、
+`infer.capability_floor`、`infer.fallback` 等是约束。Core 提供经 App routing ACL 授权的
+`infer.deployment_ids` 或 `infer.model_profile_ids` 作为可选具名硬收窄；两者互斥，值为最多 16 个
+有序、唯一的 Runtime ID。`model` 仍然只能是 Intent，不能传 provider-native physical model。
 
-普通 HTTP client 的接入形状如下：
+普通 HTTP client 必须显式处理两层合同；产品代码优先使用官方 SDK：
 
 ```javascript
-const response = await fetch("http://127.0.0.1:8787/v1/responses", {
+const response = await fetch(`${inferBaseUrl}/v1/responses`, {
   method: "POST",
   headers: {
     Authorization: `Bearer ${inferToken}`,
+    "Infer-Consumer-Contract": "infer-runtime.consumer-core@20260813.1",
+    "Infer-Capability-Contract": "infer.responses@20260812.1",
     "Content-Type": "application/json",
   },
   body: JSON.stringify({
@@ -142,14 +162,16 @@ if (!response.ok) {
 设置 `"stream": true` 后响应为 `text/event-stream`：
 
 ```bash
-curl -N http://127.0.0.1:8787/v1/responses \
+curl -N "$INFER_BASE_URL/v1/responses" \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  -H 'Infer-Capability-Contract: infer.responses@20260812.1' \
   -H 'Content-Type: application/json' \
   -d '{"model":"language.respond","input":"你好","stream":true}'
 ```
 
 客户端取消 HTTP/SSE 连接后仍应按正常取消路径处理。不要假设所有 provider 都产生完全相同
-的扩展事件；只依赖 candidate 合同明确保证的事件与字段。
+的扩展事件；只依赖所选 capability schema 明确保证的事件与字段。
 
 ### Local background
 
@@ -180,8 +202,10 @@ POST /v1/responses/{response_id}/cancel
 转写示例：
 
 ```bash
-curl http://127.0.0.1:8787/v1/audio/transcriptions \
+curl "$INFER_BASE_URL/v1/audio/transcriptions" \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  -H 'Infer-Capability-Contract: infer.audio.transcription@20260811.1' \
   -F model=audio.transcribe \
   -F file=@sample.wav \
   -F language=Chinese \
@@ -191,8 +215,10 @@ curl http://127.0.0.1:8787/v1/audio/transcriptions \
 TTS 示例：
 
 ```bash
-curl http://127.0.0.1:8787/v1/audio/speech \
+curl "$INFER_BASE_URL/v1/audio/speech" \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  -H 'Infer-Capability-Contract: infer.audio.speech@20260811.1' \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "speech.synthesize",
@@ -218,14 +244,16 @@ alias 不会被静默重定义。获得该 Intent 不会同时获得 VoiceDesign
 原生 speaker 字符串都会在创建 Job 前被拒绝。省略 allowlist 只用于兼容尚未迁移到 Runtime 逻辑别名的
 调用方。
 
-### TTS server stream（candidate.2 引入，candidate.3 保留）
+### TTS server stream（experimental）
 
 同一 speech endpoint 使用显式执行模式，不另造模型专属接口。首个 streaming codec 固定为
 `pcm_s16le`，所以必须同时使用 `response_format=pcm`：
 
 ```bash
-curl --no-buffer http://127.0.0.1:8787/v1/audio/speech \
+curl --no-buffer "$INFER_BASE_URL/v1/audio/speech" \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  -H 'Infer-Capability-Contract: infer.audio.speech@20260811.1' \
   -H 'Content-Type: application/json' \
   -d '{
     "model":"speech.synthesize",
@@ -276,12 +304,12 @@ partial，只有 final 可按终态保存。
 
 ## 6. 试用实验性本地人脸检测与 SFace 向量
 
-ONNX P0 提供一个刻意收窄的实验路由。它不属于 `0.1.0-candidate.3` stable Consumer routes，外部接入时
+ONNX P0 提供刻意收窄、独立版本化的 experimental capability；外部接入时
 必须单独固定 daemon commit，并接受在 stable promotion 前可能调整 schema：
 
 | 项目 | 当前 wire contract |
 | --- | --- |
-| Base URL | `http://127.0.0.1:8787` |
+| Base URL | SDK / Infra Discovery 选择的 endpoint |
 | 检测 | `POST /infer/v1/vision/face-detections` |
 | 单脸向量 | `POST /infer/v1/vision/face-embeddings` |
 | Error discriminator | HTTP status + JSON `error.code`；不要解析 `error.message` |
@@ -293,8 +321,10 @@ ONNX P0 提供一个刻意收窄的实验路由。它不属于 `0.1.0-candidate.
 256 bytes 内。Runtime 只绑定并回显该值，stale-result 判断仍由 Consumer 负责。
 
 ```bash
-curl http://127.0.0.1:8787/infer/v1/vision/face-detections \
+curl "$INFER_BASE_URL/infer/v1/vision/face-detections" \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  -H 'Infer-Capability-Contract: infer.vision.face-detection@20260811.1' \
   -F model=vision.detect_faces \
   -F source_revision='catalog-item-42/revision-7' \
   -F image=@sample.jpg\;type=image/jpeg
@@ -322,8 +352,10 @@ Consumer 应拒绝持久化坐标，而不是猜测变换。
 所解码出的 raster；首版按人脸逐次调用，不提供 batch endpoint：
 
 ```bash
-curl http://127.0.0.1:8787/infer/v1/vision/face-embeddings \
+curl "$INFER_BASE_URL/infer/v1/vision/face-embeddings" \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  -H 'Infer-Capability-Contract: infer.vision.face-embedding@20260811.1' \
   -F model=vision.embed_face \
   -F source_revision='catalog-item-42/revision-7' \
   -F 'landmarks={"right_eye":{"x":120.1,"y":92.4},"left_eye":{"x":164.8,"y":91.9},"nose_tip":{"x":143.0,"y":116.2},"right_mouth_corner":{"x":126.7,"y":139.5},"left_mouth_corner":{"x":160.2,"y":139.1}}' \
@@ -358,8 +390,10 @@ SigLIP 2 纵向切片把图像和文本编码为同一个语义空间，供 Cons
 256 个 UTF-8 bytes，必须稳定标识这份确切像素制品：
 
 ```bash
-curl http://127.0.0.1:8787/infer/v1/vision/image-embeddings \
+curl "$INFER_BASE_URL/infer/v1/vision/image-embeddings" \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  -H 'Infer-Capability-Contract: infer.vision.image-embedding@20260811.1' \
   -F model=semantic.embed_image \
   -F source_revision='shadow:photo-42/recipe:7/artifact:abc123' \
   -F image_orientation=display_pixels_orientation_normalized \
@@ -371,8 +405,10 @@ curl http://127.0.0.1:8787/infer/v1/vision/image-embeddings \
 先 lower-case，再用固定 tokenizer 截断/填充为 64 tokens：
 
 ```bash
-curl http://127.0.0.1:8787/infer/v1/vision/text-embeddings \
+curl "$INFER_BASE_URL/infer/v1/vision/text-embeddings" \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  -H 'Infer-Capability-Contract: infer.vision.text-embedding@20260811.1' \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "semantic.embed_text",
@@ -423,8 +459,10 @@ normalization 的像素。`source_revision` 最多 256 UTF-8 bytes，必须稳�
 描述还要求最长 35 ASCII bytes 的 BCP-47-shaped `language`：
 
 ```bash
-curl http://127.0.0.1:8787/infer/v1/vision/image-descriptions \
+curl "$INFER_BASE_URL/infer/v1/vision/image-descriptions" \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  -H 'Infer-Capability-Contract: infer.vision.image-description@20260811.1' \
   -F model=vision.describe_image \
   -F source_revision='shadow:photo-42/recipe:7/artifact:abc123' \
   -F image_orientation=display_pixels_orientation_normalized \
@@ -445,8 +483,10 @@ curl http://127.0.0.1:8787/infer/v1/vision/image-descriptions \
 最多 64 KiB；每项只允许 `id`、`name` 和可选 `description`，未知字段会拒绝：
 
 ```bash
-curl http://127.0.0.1:8787/infer/v1/vision/classification-reviews \
+curl "$INFER_BASE_URL/infer/v1/vision/classification-reviews" \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  -H 'Infer-Capability-Contract: infer.vision.classification-review@20260811.1' \
   -F model=vision.classify_closed_set \
   -F source_revision='shadow:photo-42/recipe:7/artifact:abc123' \
   -F image_orientation=display_pixels_orientation_normalized \
@@ -514,8 +554,10 @@ bridge 支持非流式或 SSE 文本输出、字符串 `instructions` 和 `reaso
 passthrough、conversation 或 durable background：
 
 ```bash
-curl http://127.0.0.1:8787/v1/responses \
+curl "$INFER_BASE_URL/v1/responses" \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  -H 'Infer-Capability-Contract: infer.responses@20260812.1' \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "reasoning.solve",
@@ -561,8 +603,10 @@ Responses parts；只接受 HTTPS image URL 或有界 JPEG/PNG data URL，本地
 `{"type":"image_generation"}` tool；输入只允许文本，输出恰好一张 Base64 PNG：
 
 ```bash
-curl http://127.0.0.1:8787/v1/responses \
+curl "$INFER_BASE_URL/v1/responses" \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
+  -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
+  -H 'Infer-Capability-Contract: infer.responses@20260812.1' \
   -H 'Content-Type: application/json' \
   -d '{
     "model": "image.generate",
@@ -623,7 +667,7 @@ Codex Web Search 使用标准 Responses request 形状，不增加 `web.research
 
 这个 Codex experimental extension 沿用标准 Responses 形状，当前接受
 `tool_choice = auto|required|none`，以及单个 `web_search` tool 的 `external_web_access` 布尔值。
-它是 candidate.3 Responses 合同中的有界 hosted-tool 子集；获得 Intent 或 subscription access
+它是 `infer.responses@20260812.1` 中的有界 hosted-tool 子集；获得 Intent 或 subscription access
 并不自动授权 Web Search，App 仍必须显式取得 `allowed_builtin_tools=web_search`。domain filter、
 位置、图片结果和 object-form tool choice 留到独立合同版本。`false` 映射
 Codex cached search，缺省/`true` 映射 live search；`required` 会在返回前验证至少出现一个
@@ -665,10 +709,10 @@ GET  /infer/v1/explain/{response_id}
 Provider probe、资源 load/unload、eviction、maintenance lease、budget 和进程 metrics 属于
 operator experimental surface，不是普通 consumer 合同。
 
-## 11. RawNIND foundation（candidate.3 experimental）
+## 11. RawNIND foundation（experimental）
 
 `raw.materialize_foundation` 是本机、typed、无路径的大制品纵切，不是通用 tensor 或文件市场。
-Consumer 仍通过 Infra Discovery 精确选择 `infer-runtime.consumer@0.1.0-candidate.3` 与
+Consumer 通过官方 SDK / Infra Discovery 精确选择 `infer-runtime.consumer-core@20260813.1` 与
 `infer-runtime.http-loopback`；短期 UDS endpoint 只在 bearer 鉴权成功的 lease grant 中返回，
 不新增 Discovery offer。
 
@@ -717,6 +761,7 @@ graph SHA-256、ORT version、actual EP、precision、implementation revision �
 12. Qwen 视觉 Consumer 必须验证闭集 id 不外逸、foundational/capable 路由、取消与 source revision
     仲裁；proposal 只有在应用自己的用户接受链路后才能成为业务事实。
 
-Golden request/response/error 示例位于 [contracts/v0.1/fixtures](../contracts/v0.1/fixtures)。
-接入方若使用代码生成器，应直接输入运行中 daemon 返回的 OpenAPI，并固定所使用的
-candidate revision。
+Golden request/response/error 示例位于
+[contracts/consumer-core/20260813.1/fixtures](../contracts/consumer-core/20260813.1/fixtures)。
+Rust Consumer 应使用官方 `infer-runtime-client`；其他语言 SDK 应从运行中 daemon 返回的 OpenAPI
+生成 typed layer，并复用相同 Core conformance fixtures。

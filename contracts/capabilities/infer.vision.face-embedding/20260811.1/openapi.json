@@ -1,0 +1,249 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.vision.face-embedding",
+    "version": "20260811.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.vision.face-embedding@20260811.1",
+  "paths": {
+    "/infer/v1/vision/face-embeddings": {
+      "post": {
+        "operationId": "createFaceEmbedding",
+        "x-infer-stability": "experimental",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FaceEmbeddingCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/FaceEmbeddingForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sensitive biometric face embedding",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaceEmbeddingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "FaceEmbeddingCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.vision.face-embedding@20260811.1"
+        }
+      }
+    },
+    "schemas": {
+      "FaceEmbeddingForm": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/VisionImageFormBase"
+          },
+          {
+            "type": "object",
+            "required": [
+              "landmarks"
+            ],
+            "properties": {
+              "model": {
+                "const": "vision.embed_face"
+              },
+              "landmarks": {
+                "type": "string",
+                "description": "JSON FivePointLandmarks in decoded, unrotated input pixel coordinates"
+              }
+            }
+          }
+        ]
+      },
+      "FaceEmbeddingResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "object",
+          "created_at",
+          "status",
+          "source_revision",
+          "data_classification",
+          "embedding",
+          "eligibility",
+          "provenance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          },
+          "data_classification": {
+            "const": "sensitive_biometric"
+          },
+          "embedding": {
+            "$ref": "#/components/schemas/SemanticEmbedding"
+          },
+          "eligibility": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/VisionProvenance"
+          }
+        }
+      },
+      "SemanticEmbedding": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "values",
+          "dimensions",
+          "normalized",
+          "distance_metric",
+          "space"
+        ],
+        "properties": {
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            }
+          },
+          "dimensions": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "normalized": {
+            "type": "boolean"
+          },
+          "distance_metric": {
+            "type": "string"
+          },
+          "space": {
+            "type": "string"
+          }
+        }
+      },
+      "VisionImageFormBase": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": {
+          "^infer\\.": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "image",
+          "source_revision"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "image": {
+            "type": "string",
+            "format": "binary",
+            "description": "JPEG/PNG, 1 byte through 20 MiB; decoded images are bounded to 40 megapixels"
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON object whose values are strings; Runtime forces local_only, offline_required=true, fallback=none"
+          }
+        }
+      },
+      "VisionProvenance": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "job_id",
+          "provider",
+          "deployment",
+          "model_build",
+          "artifact_sha256",
+          "preprocessing_identity",
+          "postprocessing_identity",
+          "runtime",
+          "requested_execution_provider",
+          "actual_execution_provider",
+          "precision"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "model_build": {
+            "type": "string"
+          },
+          "artifact_sha256": {
+            "type": "string"
+          },
+          "preprocessing_identity": {
+            "type": "string"
+          },
+          "postprocessing_identity": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "requested_execution_provider": {
+            "type": "string"
+          },
+          "actual_execution_provider": {
+            "type": "string"
+          },
+          "execution_provider_fallback_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "precision": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

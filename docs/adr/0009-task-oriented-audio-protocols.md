@@ -33,8 +33,8 @@
 可以追加别名，但既有 alias 只会通过显式合同退役流程移除。VoiceDesign、VoiceClone 和任意录音引用
 仍是独立 Intent，不会因获得 `speech.synthesize` 权限而开放。
 
-App 可通过 `allowed_speech_voice_aliases` 收窄到一组 Runtime alias。省略该字段保留 candidate.2
-既有 speaker 字符串兼容；Shape 首个 Audio Operator 明确只允许
+App 必须通过 `allowed_speech_voice_aliases` 显式授权一组 Runtime alias；省略该字段 deny-all。
+只有 resource-admin operator 可显式设置 `allow_all_speech_voice_aliases=true`。Shape 首个 Audio Operator 明确只允许
 `speech.voice.zh.bright_female.v1`，所以原生 speaker 字符串会在创建 Job 前以 policy violation
 拒绝。
 

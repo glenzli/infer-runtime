@@ -1,0 +1,16 @@
+{
+  "jobs": [
+    {
+      "id": "resp_example",
+      "app_id": "sample-app",
+      "intent": "text.summarize",
+      "provider": "local-ollama",
+      "deployment": "qwen-small",
+      "state": "succeeded",
+      "priority": "normal",
+      "created_at_ms": 1786212000000,
+      "updated_at_ms": 1786212000100
+    }
+  ],
+  "next_cursor": "1786212000000:resp_example"
+}

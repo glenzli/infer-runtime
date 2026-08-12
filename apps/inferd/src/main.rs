@@ -94,9 +94,12 @@ async fn main() -> anyhow::Result<()> {
         }
         None
     };
-    let (observer_socket, registration) = if observer_config.enabled {
-        let discovery_runtime = DiscoveryRuntime::from_environment()?;
-        let identity = runtime.observer_identity();
+    // Consumer discovery is part of the data-plane lifecycle, not the optional
+    // observer lifecycle. Disabling Sentinel/status observation must never make
+    // an otherwise healthy Consumer API undiscoverable.
+    let discovery_runtime = DiscoveryRuntime::from_environment()?;
+    let identity = runtime.observer_identity();
+    let (observer_endpoint, observer_socket) = if observer_config.enabled {
         let socket_runtime = Arc::clone(&runtime);
         let snapshot_provider: SnapshotProvider = Arc::new(move || {
             let runtime = Arc::clone(&socket_runtime);
@@ -109,20 +112,17 @@ async fn main() -> anyhow::Result<()> {
         )
         .await
         .context("start infer-runtime.status Unix socket")?;
-        let registration = RegistrationPublication::publish(RegistrationSpec {
-            runtime: discovery_runtime,
-            service: DiscoveryService::from(&identity.service),
-            offers: vec![
-                DiscoveryOffer::infer_status_unix(socket_endpoint),
-                consumer_http_offer(consumer_address, infer_api::contract::CONTRACT_VERSION)
-                    .context("build Infer Runtime Consumer discovery offer")?,
-            ],
-        })
-        .context("publish Infra Discovery registration")?;
-        (Some(observer_socket), Some(registration))
+        (Some(socket_endpoint), Some(observer_socket))
     } else {
         (None, None)
     };
+    let offers = discovery_offers(consumer_address, observer_endpoint)?;
+    let registration = RegistrationPublication::publish(RegistrationSpec {
+        runtime: discovery_runtime,
+        service: DiscoveryService::from(&identity.service),
+        offers,
+    })
+    .context("publish Infra Discovery registration")?;
     info!(address = %bind, "inferd started");
     let api = raw_control.map_or_else(
         || infer_api::router(Arc::clone(&runtime)),
@@ -131,9 +131,7 @@ async fn main() -> anyhow::Result<()> {
     let serve_result = axum::serve(listener, api)
         .with_graceful_shutdown(shutdown_signal())
         .await;
-    if let Some(registration) = registration {
-        registration.shutdown();
-    }
+    registration.shutdown();
     if let Some(observer_socket) = observer_socket {
         observer_socket
             .shutdown()
@@ -146,6 +144,24 @@ async fn main() -> anyhow::Result<()> {
     }
     serve_result?;
     Ok(())
+}
+
+fn discovery_offers(
+    consumer_address: std::net::SocketAddr,
+    observer_endpoint: Option<String>,
+) -> anyhow::Result<Vec<DiscoveryOffer>> {
+    let consumer_offer =
+        consumer_http_offer(consumer_address, &[infer_api::contract::CORE_VERSION])
+            .context("build Infer Runtime Consumer discovery offer")?;
+    if !infer_api::contract::published_versions_match_contract(&consumer_offer.protocol_versions) {
+        anyhow::bail!("Consumer Discovery offer diverges from the HTTP contract set");
+    }
+    let mut offers = Vec::with_capacity(1 + usize::from(observer_endpoint.is_some()));
+    if let Some(endpoint) = observer_endpoint {
+        offers.push(DiscoveryOffer::infer_status_unix(endpoint));
+    }
+    offers.push(consumer_offer);
+    Ok(offers)
 }
 
 fn required_path(value: Option<&str>, field: &str) -> anyhow::Result<PathBuf> {
@@ -204,5 +220,33 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn consumer_discovery_does_not_depend_on_observer() {
+        let offers = discovery_offers("127.0.0.1:8787".parse().unwrap(), None).unwrap();
+        assert_eq!(offers.len(), 1);
+        assert_eq!(offers[0].protocol, infer_observer::CONSUMER_PROTOCOL);
+        assert_eq!(
+            offers[0].protocol_versions,
+            vec![infer_api::contract::CORE_VERSION.to_owned()]
+        );
+    }
+
+    #[test]
+    fn observer_adds_status_offer_without_replacing_consumer_discovery() {
+        let offers = discovery_offers(
+            "127.0.0.1:8787".parse().unwrap(),
+            Some("sockets/infer-runtime--local.sock".into()),
+        )
+        .unwrap();
+        assert_eq!(offers.len(), 2);
+        assert_eq!(offers[0].protocol, "infer-runtime.status");
+        assert_eq!(offers[1].protocol, infer_observer::CONSUMER_PROTOCOL);
     }
 }

@@ -317,7 +317,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let api_key = resolve_api_key(&args)?;
-    let client = reqwest::Client::new();
+    let client = consumer_http_client_builder().build()?;
     let base = args.server.trim_end_matches('/');
     match args.command {
         Command::ImportOnnx { .. } | Command::ImportOnnxAuxiliary { .. } => {
@@ -367,6 +367,10 @@ async fn main() -> anyhow::Result<()> {
         } => {
             let response = client
                 .post(format!("{base}/v1/responses"))
+                .header(
+                    infer_core::CAPABILITY_CONTRACT_HEADER,
+                    "infer.responses@20260812.1",
+                )
                 .bearer_auth(&api_key)
                 .json(&json!({
                     "model":route,
@@ -399,6 +403,10 @@ async fn main() -> anyhow::Result<()> {
                 "{}",
                 client
                     .post(format!("{base}/v1/audio/transcriptions"))
+                    .header(
+                        infer_core::CAPABILITY_CONTRACT_HEADER,
+                        "infer.audio.transcription@20260811.1",
+                    )
                     .bearer_auth(&api_key)
                     .multipart(form)
                     .send()
@@ -418,6 +426,10 @@ async fn main() -> anyhow::Result<()> {
                 "{}",
                 client
                     .post(format!("{base}/infer/v1/vision/face-detections"))
+                    .header(
+                        infer_core::CAPABILITY_CONTRACT_HEADER,
+                        "infer.vision.face-detection@20260811.1",
+                    )
                     .bearer_auth(&api_key)
                     .multipart(form)
                     .send()
@@ -442,6 +454,10 @@ async fn main() -> anyhow::Result<()> {
                 "{}",
                 client
                     .post(format!("{base}/infer/v1/vision/face-embeddings"))
+                    .header(
+                        infer_core::CAPABILITY_CONTRACT_HEADER,
+                        "infer.vision.face-embedding@20260811.1",
+                    )
                     .bearer_auth(&api_key)
                     .multipart(form)
                     .send()
@@ -465,6 +481,10 @@ async fn main() -> anyhow::Result<()> {
                 "{}",
                 client
                     .post(format!("{base}/v1/audio/alignments"))
+                    .header(
+                        infer_core::CAPABILITY_CONTRACT_HEADER,
+                        "infer.audio.alignment@20260811.1",
+                    )
                     .bearer_auth(&api_key)
                     .multipart(form)
                     .send()
@@ -485,6 +505,10 @@ async fn main() -> anyhow::Result<()> {
         } => {
             let response = client
                 .post(format!("{base}/v1/audio/speech"))
+                .header(
+                    infer_core::CAPABILITY_CONTRACT_HEADER,
+                    "infer.audio.speech@20260811.1",
+                )
                 .bearer_auth(&api_key)
                 .json(&json!({
                     "model": route,
@@ -518,6 +542,10 @@ async fn main() -> anyhow::Result<()> {
             }
             let response = client
                 .post(format!("{base}/v1/audio/voice-clones"))
+                .header(
+                    infer_core::CAPABILITY_CONTRACT_HEADER,
+                    "infer.audio.voice-clone@20260811.1",
+                )
                 .bearer_auth(&api_key)
                 .multipart(form)
                 .send()
@@ -577,10 +605,13 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Response { response_id } => println!(
             "{}",
-            authed(
+            capability_request(
+                authed(
                 &client,
                 &api_key,
                 format!("{base}/v1/responses/{response_id}")
+                ),
+                "infer.responses@20260812.1",
             )
             .send()
             .await?
@@ -592,6 +623,10 @@ async fn main() -> anyhow::Result<()> {
             "{}",
             client
                 .post(format!("{base}/v1/responses/{response_id}/cancel"))
+                .header(
+                    infer_core::CAPABILITY_CONTRACT_HEADER,
+                    "infer.responses@20260812.1",
+                )
                 .bearer_auth(&api_key)
                 .send()
                 .await?
@@ -822,8 +857,25 @@ fn resolve_api_key(args: &Args) -> anyhow::Result<String> {
     Ok(credentials.token_for(&args.app_id)?.to_owned())
 }
 
+pub(crate) fn consumer_http_client_builder() -> reqwest::ClientBuilder {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::HeaderName::from_bytes(infer_core::CONSUMER_CORE_HEADER.as_bytes())
+            .expect("frozen Consumer contract header name is valid"),
+        reqwest::header::HeaderValue::from_static(infer_core::CONSUMER_CORE_CONTRACT),
+    );
+    reqwest::Client::builder().default_headers(headers)
+}
+
 fn authed(client: &reqwest::Client, api_key: &str, url: String) -> reqwest::RequestBuilder {
     client.get(url).bearer_auth(api_key)
+}
+
+fn capability_request(
+    request: reqwest::RequestBuilder,
+    capability: &'static str,
+) -> reqwest::RequestBuilder {
+    request.header(infer_core::CAPABILITY_CONTRACT_HEADER, capability)
 }
 
 async fn audio_form(route: String, path: &PathBuf, field: &'static str) -> anyhow::Result<Form> {
