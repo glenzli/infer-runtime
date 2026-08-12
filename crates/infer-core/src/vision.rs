@@ -292,9 +292,10 @@ pub struct FaceEmbeddingEligibility {
 pub struct ImageGeometry {
     pub width: u32,
     pub height: u32,
-    /// Pixel-space contract for all returned coordinates. The current value
-    /// means width/height and coordinates refer to the decoded raster exactly
-    /// as submitted; EXIF orientation metadata was not applied.
+    /// Pixel-space contract for all returned coordinates. Typed routes freeze
+    /// this to their submitted artifact semantics: face detection uses the
+    /// decoded raster without EXIF transforms, while normalized-display routes
+    /// use the Consumer-provided orientation-normalized display raster.
     pub orientation: String,
 }
 

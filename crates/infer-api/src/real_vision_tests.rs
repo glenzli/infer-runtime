@@ -29,6 +29,14 @@ async fn face_detection_traverses_auth_http_job_attempt_and_cpu_provider() {
         .clone()
         .oneshot(
             Request::post("/infer/v1/vision/face-detections")
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .header(
+                    crate::contract::CAPABILITY_CONTRACT_HEADER,
+                    "infer.vision.face-detection@20260811.1",
+                )
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .header(
                     header::CONTENT_TYPE,
@@ -64,6 +72,14 @@ async fn face_embedding_traverses_auth_acl_job_attempt_and_cpu_provider() {
         .clone()
         .oneshot(
             Request::post("/infer/v1/vision/face-embeddings")
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .header(
+                    crate::contract::CAPABILITY_CONTRACT_HEADER,
+                    "infer.vision.face-embedding@20260811.1",
+                )
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .header(
                     header::CONTENT_TYPE,
@@ -96,6 +112,10 @@ async fn face_embedding_traverses_auth_acl_job_attempt_and_cpu_provider() {
         .clone()
         .oneshot(
             Request::get(format!("/infer/v1/jobs/{job_id}"))
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -111,6 +131,14 @@ async fn face_embedding_traverses_auth_acl_job_attempt_and_cpu_provider() {
     let denied = service
         .oneshot(
             Request::post("/infer/v1/vision/face-detections")
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .header(
+                    crate::contract::CAPABILITY_CONTRACT_HEADER,
+                    "infer.vision.face-detection@20260811.1",
+                )
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .header(
                     header::CONTENT_TYPE,
@@ -141,6 +169,14 @@ async fn siglip_image_and_text_share_one_normalized_space_through_http() {
         .clone()
         .oneshot(
             Request::post("/infer/v1/vision/image-embeddings")
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .header(
+                    crate::contract::CAPABILITY_CONTRACT_HEADER,
+                    "infer.vision.image-embedding@20260811.1",
+                )
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .header(
                     header::CONTENT_TYPE,
@@ -181,6 +217,14 @@ async fn siglip_image_and_text_share_one_normalized_space_through_http() {
         .clone()
         .oneshot(
             Request::post("/infer/v1/vision/text-embeddings")
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .header(
+                    crate::contract::CAPABILITY_CONTRACT_HEADER,
+                    "infer.vision.text-embedding@20260811.1",
+                )
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
@@ -227,6 +271,10 @@ async fn siglip_image_and_text_share_one_normalized_space_through_http() {
             .clone()
             .oneshot(
                 Request::get(format!("/infer/v1/jobs/{}", job_id.unwrap()))
+                    .header(
+                        crate::contract::CONSUMER_CORE_HEADER,
+                        crate::contract::CORE_CONTRACT,
+                    )
                     .header(header::AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -256,6 +304,14 @@ async fn siglip_coreml_route_is_used_or_discloses_cpu_fallback() {
     let response = service
         .oneshot(
             Request::post("/infer/v1/vision/image-embeddings")
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .header(
+                    crate::contract::CAPABILITY_CONTRACT_HEADER,
+                    "infer.vision.image-embedding@20260811.1",
+                )
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .header(
                     header::CONTENT_TYPE,
@@ -325,11 +381,9 @@ async fn real_service_with_execution_providers(
             .allowed_execution_providers =
             vec![OnnxExecutionProvider::Coreml, OnnxExecutionProvider::Cpu];
     }
-    config
-        .apps
-        .get_mut("local-operator")
-        .unwrap()
-        .allowed_intents = Some(
+    let operator = config.apps.get_mut("local-operator").unwrap();
+    operator.allow_all_intents = false;
+    operator.allowed_intents = Some(
         allowed_intents
             .iter()
             .map(|intent| (*intent).into())

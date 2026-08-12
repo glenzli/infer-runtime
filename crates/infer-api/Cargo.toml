@@ -17,17 +17,19 @@ infer-resource = { path = "../infer-resource" }
 infer-raw-foundation = { path = "../infer-raw-foundation" }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+async-trait.workspace = true
 http-body-util.workspace = true
 image.workspace = true
 infer-auth = { path = "../infer-auth" }
 infer-artifact-lease = { path = "../infer-artifact-lease" }
 infer-raw-foundation = { path = "../infer-raw-foundation" }
 libc.workspace = true
-sha2.workspace = true
 tempfile.workspace = true
+tokio-util.workspace = true
 toml.workspace = true
 tower.workspace = true

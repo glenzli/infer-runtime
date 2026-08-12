@@ -176,6 +176,9 @@ impl RawFoundationControl {
                     estimated_tokens: 0,
                     id_prefix: "raw",
                     expected_data_plane: "raw.foundation",
+                    capability_contract: crate::current_admitted_capability_contract(
+                        "infer.raw-foundation@20260811.1",
+                    ),
                     durable_payload: None,
                 },
             )

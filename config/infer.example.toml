@@ -148,6 +148,36 @@ priority_aging_ms = 10000
 version = 1
 protocol = "audio_worker"
 
+# Optional isolated MLX retrieval worker. Production installs should point to
+# an owner-only pinned Python runtime; this example path is intentionally
+# portable and does not imply that the models are installed.
+[providers.qwen3-retrieval-local]
+kind = "retrieval_worker"
+command = ".infer-runtime/runtimes/retrieval-ocr/bin/python"
+args = ["workers/text_retrieval_worker.py"]
+placement = "local"
+max_concurrency = 1
+max_queue = 32
+priority_aging_ms = 10000
+
+[providers.qwen3-retrieval-local.capability_profile]
+version = 1
+protocol = "retrieval_worker"
+
+# Exact text OCR is separate from generative QwenVL understanding.
+[providers.pp-ocr-local]
+kind = "ocr_worker"
+command = ".infer-runtime/runtimes/retrieval-ocr/bin/python"
+args = ["workers/ocr_worker.py"]
+placement = "local"
+max_concurrency = 1
+max_queue = 16
+priority_aging_ms = 10000
+
+[providers.pp-ocr-local.capability_profile]
+version = 1
+protocol = "ocr_worker"
+
 [providers.onnx-local]
 kind = "onnx"
 placement = "local"
@@ -261,11 +291,33 @@ default_policy = "cost-first"
 default_max_output_tokens = 512
 default_reasoning_effort = "none"
 
+# Bounded instruction-guided editing of one or more Consumer-compiled text
+# contexts. Actions such as rewrite, expand, polish, shorten and summarize are
+# expressed in the text request; this Intent does not imply tools or agents.
+[intents."text.edit"]
+input_modalities = ["text"]
+output_modalities = ["text"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+default_reasoning_effort = "none"
+
 [intents."language.respond"]
 input_modalities = ["text"]
 output_modalities = ["text"]
 default_capability_floor = "capable"
 default_policy = "balanced"
+
+# Bounded pairwise identity matching for Consumer-owned records. The
+# Consumer supplies the candidate set, validates returned identifiers, and
+# must fail open when the response is unavailable or malformed. This Intent
+# does not assess value, relevance, truth, preference, or presentation.
+[intents."text.deduplicate"]
+input_modalities = ["text"]
+output_modalities = ["text"]
+default_capability_floor = "foundational"
+default_policy = "cost-first"
+default_max_output_tokens = 512
+default_reasoning_effort = "none"
 
 # Stateless image+text reasoning. Cloud image egress also requires the App's
 # independent allowed_cloud_input_modalities entitlement.
@@ -340,6 +392,38 @@ required_features = ["siglip2_embedding_768d", "multilingual_text", "cross_modal
 default_capability_floor = "foundational"
 default_policy = "local-first"
 
+[intents."semantic.embed_query"]
+data_plane = "text.embedding"
+input_modalities = ["text"]
+output_modalities = ["json"]
+required_features = ["qwen3_embedding_1024d", "retrieval_query_instruction"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[intents."semantic.embed_documents"]
+data_plane = "text.embedding"
+input_modalities = ["text"]
+output_modalities = ["json"]
+required_features = ["qwen3_embedding_1024d"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[intents."semantic.rerank"]
+data_plane = "text.rerank"
+input_modalities = ["text"]
+output_modalities = ["json"]
+required_features = ["qwen3_rerank_score"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[intents."document.ocr"]
+data_plane = "document.ocr"
+input_modalities = ["image"]
+output_modalities = ["text", "json"]
+required_features = ["ocr_line_polygons", "orientation_normalized_display_pixels"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
 [intents."audio.transcribe"]
 data_plane = "audio.transcription"
 input_modalities = ["audio"]
@@ -402,7 +486,15 @@ status = "provisional"
 level = "foundational"
 status = "provisional"
 
+[model_profiles.qwen3_5_4b.ratings."text.edit"]
+level = "foundational"
+status = "provisional"
+
 [model_profiles.qwen3_5_4b.ratings."language.respond"]
+level = "foundational"
+status = "provisional"
+
+[model_profiles.qwen3_5_4b.ratings."text.deduplicate"]
 level = "foundational"
 status = "provisional"
 
@@ -436,24 +528,25 @@ status = "provisional"
 level = "capable"
 status = "provisional"
 
-[model_profiles.qwen3_6_35b]
-family = "qwen3.6"
+# Example registration for a QAT Q4_0 artifact behind a Runtime-owned 8K
+# Ollama alias. Keep vision, tools, and thinking out of the Build until those
+# independent execution contracts have been validated.
+[model_profiles.gemma4_26b_a4b]
+family = "gemma4"
 
-[model_profiles.qwen3_6_35b.ratings."language.respond"]
+[model_profiles.gemma4_26b_a4b.ratings."text.summarize"]
+level = "advanced"
+status = "provisional"
+
+[model_profiles.gemma4_26b_a4b.ratings."text.proofread"]
+level = "advanced"
+status = "provisional"
+
+[model_profiles.gemma4_26b_a4b.ratings."language.respond"]
 level = "capable"
 status = "provisional"
 
-[model_profiles.qwen3_6_35b.ratings."text.summarize"]
-level = "advanced"
-status = "provisional"
-
-[model_profiles.qwen3_6_35b.ratings."text.proofread"]
-level = "advanced"
-status = "provisional"
-
-# The local 35B is a competent solver, but remains below reasoning.solve's
-# advanced default and therefore is not routed there by default.
-[model_profiles.qwen3_6_35b.ratings."reasoning.solve"]
+[model_profiles.gemma4_26b_a4b.ratings."reasoning.solve"]
 level = "capable"
 status = "provisional"
 
@@ -620,12 +713,143 @@ status = "provisional"
 level = "foundational"
 status = "provisional"
 
+[model_profiles.qwen3_embedding_0_6b]
+family = "qwen3-embedding"
+
+[model_profiles.qwen3_embedding_0_6b.ratings."semantic.embed_query"]
+level = "foundational"
+status = "benchmarked"
+eval_profile = "local_retrieval_smoke_20260812_v1"
+
+[model_profiles.qwen3_embedding_0_6b.ratings."semantic.embed_documents"]
+level = "foundational"
+status = "benchmarked"
+eval_profile = "local_retrieval_smoke_20260812_v1"
+
+[model_profiles.qwen3_reranker_0_6b]
+family = "qwen3-reranker"
+
+[model_profiles.qwen3_reranker_0_6b.ratings."semantic.rerank"]
+level = "foundational"
+status = "benchmarked"
+eval_profile = "local_retrieval_smoke_20260812_v1"
+
+[model_profiles.pp_ocrv6_medium]
+family = "pp-ocrv6"
+
+[model_profiles.pp_ocrv6_medium.ratings."document.ocr"]
+level = "foundational"
+status = "benchmarked"
+eval_profile = "local_ocr_smoke_20260812_v1"
+
+# These portable Build entries demonstrate exact supply-chain identity only.
+# Their immutable files live in the configured artifact store, never in Git.
+[model_builds.qwen3_embedding_0_6b_mlx]
+profile = "qwen3_embedding_0_6b"
+model_id = "qwen3_embedding_0_6b_mlx"
+variant = "mlx-fp16"
+input_modalities = ["text"]
+output_modalities = ["json"]
+features = ["qwen3_embedding_1024d", "retrieval_query_instruction"]
+
+[model_builds.qwen3_embedding_0_6b_mlx.provenance]
+source_kind = "user_managed"
+upstream = "Qwen/Qwen3-Embedding-0.6B"
+source_revision = "97b0c614be4d77ee51c0cef4e5f07c00f9eb65b3"
+artifact_sha256 = "7f275077031effd8fedc8abcab9a5ee34867546efe34bc20df9fdb0a46465adb"
+
+[model_builds.qwen3_embedding_0_6b_mlx.license]
+status = "declared"
+expression = "Apache-2.0"
+license_url = "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B"
+reviewed_at = "2026-08-12"
+
+[model_builds.qwen3_embedding_0_6b_mlx.local_worker]
+artifact_set_sha256 = "7f275077031effd8fedc8abcab9a5ee34867546efe34bc20df9fdb0a46465adb"
+adapter = "qwen3_embedding"
+runtime = "python3.11;mlx-embeddings-0.1.0"
+precision = "fp16_weights_fp32_output"
+postprocessing_identity = "last_token_pool_then_l2_fp32_v1"
+tokenizer_identity = "qwen3_embedding_tokenizer@def76fb086971"
+instruction_revision = "qwen3-retrieval-query-v1"
+embedding_space = { identity = "qwen3_embedding_0_6b@97b0c614:query-doc:l2_1024_fp32:v1", dimensions = 1024, normalized = true, distance_metric = "cosine" }
+
+
+[model_builds.qwen3_reranker_0_6b_mlx]
+profile = "qwen3_reranker_0_6b"
+model_id = "qwen3_reranker_0_6b_mlx"
+variant = "mlx-fp16"
+input_modalities = ["text"]
+output_modalities = ["json"]
+features = ["qwen3_rerank_score"]
+
+[model_builds.qwen3_reranker_0_6b_mlx.provenance]
+source_kind = "user_managed"
+upstream = "Qwen/Qwen3-Reranker-0.6B"
+source_revision = "e61197ed45024b0ed8a2d74b80b4d909f1255473"
+artifact_sha256 = "849b858699acf4f0d8cb5d4faa7a359fe74d965679b9908097d60a7fa7670759"
+
+[model_builds.qwen3_reranker_0_6b_mlx.license]
+status = "declared"
+expression = "Apache-2.0"
+license_url = "https://huggingface.co/Qwen/Qwen3-Reranker-0.6B"
+reviewed_at = "2026-08-12"
+
+[model_builds.qwen3_reranker_0_6b_mlx.local_worker]
+artifact_set_sha256 = "849b858699acf4f0d8cb5d4faa7a359fe74d965679b9908097d60a7fa7670759"
+adapter = "qwen3_reranker"
+runtime = "python3.11;mlx-embeddings-0.1.0"
+precision = "fp16_weights_fp32_score"
+postprocessing_identity = "yes_no_softmax_then_descending_rank_v1"
+tokenizer_identity = "qwen3_reranker_tokenizer@aeb13307a71a"
+instruction_revision = "qwen3-retrieval-rerank-v1"
+
+
+[model_builds.pp_ocrv6_medium_onnx_cpu]
+profile = "pp_ocrv6_medium"
+model_id = "pp_ocrv6_medium_onnx_cpu"
+variant = "onnxruntime-1.28.0-cpu-fp32"
+input_modalities = ["image"]
+output_modalities = ["text", "json"]
+features = ["ocr_line_polygons", "orientation_normalized_display_pixels"]
+
+[model_builds.pp_ocrv6_medium_onnx_cpu.provenance]
+source_kind = "runtime_downloadable"
+upstream = "PaddlePaddle/PP-OCRv6-medium-onnx"
+source_revision = "det@61323801669c338b7891481ec7bac61ce31b576a;rec@50c7eacafc52fa7bcf4194e8cd08e46f8558504b"
+artifact_sha256 = "c713f5b0733b8c166d9b3c5220d4c05248b51a4dbd3b78333cb6a5c5611e8548"
+
+[model_builds.pp_ocrv6_medium_onnx_cpu.license]
+status = "verified"
+expression = "Apache-2.0"
+license_url = "https://github.com/PaddlePaddle/PaddleOCR/blob/main/LICENSE"
+license_text_sha256 = "3840c5c0c61c294264d2dd77b8777be6ddd90121ef4e0e64abcd22edea581d6e"
+reviewed_at = "2026-08-12"
+
+[model_builds.pp_ocrv6_medium_onnx_cpu.local_worker]
+artifact_set_sha256 = "c713f5b0733b8c166d9b3c5220d4c05248b51a4dbd3b78333cb6a5c5611e8548"
+adapter = "pp_ocrv6"
+runtime = "python3.11;paddleocr-3.7.0;onnxruntime-1.28.0"
+precision = "fp32"
+postprocessing_identity = "paddleocr_rec_polys_text_scores_v1"
+preprocessing_identity = "display_pixels_orientation_normalized_ppocrv6_v1"
+requested_execution_provider = "cpu"
+actual_execution_provider = "cpu"
+
+
 [model_builds.qwen3_5_2b_mlx]
 profile = "qwen3_5_2b"
 model_id = "qwen3.5:2b-mlx"
 variant = "mlx"
 input_modalities = ["text"]
 output_modalities = ["text"]
+
+[model_builds.qwen3_5_2b_mlx.provenance]
+source_kind = "provider_managed"
+upstream = "ollama:qwen3.5:2b-mlx"
+
+[model_builds.qwen3_5_2b_mlx.license]
+status = "unreviewed"
 
 [model_builds.qwen3_5_4b_mlx]
 profile = "qwen3_5_4b"
@@ -634,12 +858,26 @@ variant = "mlx"
 input_modalities = ["text"]
 output_modalities = ["text"]
 
+[model_builds.qwen3_5_4b_mlx.provenance]
+source_kind = "provider_managed"
+upstream = "ollama:qwen3.5:4b-mlx"
+
+[model_builds.qwen3_5_4b_mlx.license]
+status = "unreviewed"
+
 [model_builds.qwen3_vl_4b]
 profile = "qwen3_vl_4b"
 model_id = "qwen3-vl:4b"
 input_modalities = ["text", "image"]
 output_modalities = ["text", "json"]
 features = ["structured_vision_output"]
+
+[model_builds.qwen3_vl_4b.provenance]
+source_kind = "provider_managed"
+upstream = "ollama:qwen3-vl:4b"
+
+[model_builds.qwen3_vl_4b.license]
+status = "unreviewed"
 
 [model_builds.qwen3_vl_8b]
 profile = "qwen3_vl_8b"
@@ -648,12 +886,26 @@ input_modalities = ["text", "image"]
 output_modalities = ["text", "json"]
 features = ["structured_vision_output"]
 
-[model_builds.qwen3_6_35b_mlx]
-profile = "qwen3_6_35b"
-model_id = "qwen3.6:35b-mlx"
-variant = "mlx"
+[model_builds.qwen3_vl_8b.provenance]
+source_kind = "provider_managed"
+upstream = "ollama:qwen3-vl:8b"
+
+[model_builds.qwen3_vl_8b.license]
+status = "unreviewed"
+
+[model_builds.gemma4_26b_a4b_qat_q4_0_8k]
+profile = "gemma4_26b_a4b"
+model_id = "infer-gemma4:26b-a4b-it-qat-8k"
+variant = "qat-q4_0-gguf-8k"
 input_modalities = ["text"]
 output_modalities = ["text"]
+
+[model_builds.gemma4_26b_a4b_qat_q4_0_8k.provenance]
+source_kind = "provider_managed"
+upstream = "ollama:infer-gemma4:26b-a4b-it-qat-8k"
+
+[model_builds.gemma4_26b_a4b_qat_q4_0_8k.license]
+status = "unreviewed"
 
 [model_builds.deepseek_v4_flash]
 profile = "deepseek_v4_flash"
@@ -663,6 +915,13 @@ input_modalities = ["text"]
 output_modalities = ["text"]
 features = ["function_tools", "reasoning"]
 
+[model_builds.deepseek_v4_flash.provenance]
+source_kind = "provider_managed"
+upstream = "deepseek:deepseek-v4-flash"
+
+[model_builds.deepseek_v4_flash.license]
+status = "unreviewed"
+
 [model_builds.deepseek_v4_pro]
 profile = "deepseek_v4_pro"
 model_id = "deepseek-v4-pro"
@@ -670,6 +929,13 @@ variant = "cloud"
 input_modalities = ["text"]
 output_modalities = ["text"]
 features = ["function_tools", "reasoning"]
+
+[model_builds.deepseek_v4_pro.provenance]
+source_kind = "provider_managed"
+upstream = "deepseek:deepseek-v4-pro"
+
+[model_builds.deepseek_v4_pro.license]
+status = "unreviewed"
 
 [model_builds.codex_gpt_5_6_luna_subscription]
 profile = "codex_gpt_5_6_luna"
@@ -679,6 +945,13 @@ input_modalities = ["text", "image"]
 output_modalities = ["text", "image"]
 features = ["reasoning", "web_search", "image_generation"]
 
+[model_builds.codex_gpt_5_6_luna_subscription.provenance]
+source_kind = "provider_managed"
+upstream = "codex-subscription:gpt-5.6-luna"
+
+[model_builds.codex_gpt_5_6_luna_subscription.license]
+status = "unreviewed"
+
 [model_builds.codex_gpt_5_6_terra_subscription]
 profile = "codex_gpt_5_6_terra"
 model_id = "gpt-5.6-terra"
@@ -686,6 +959,13 @@ variant = "codex-subscription"
 input_modalities = ["text", "image"]
 output_modalities = ["text"]
 features = ["reasoning", "web_search"]
+
+[model_builds.codex_gpt_5_6_terra_subscription.provenance]
+source_kind = "provider_managed"
+upstream = "codex-subscription:gpt-5.6-terra"
+
+[model_builds.codex_gpt_5_6_terra_subscription.license]
+status = "unreviewed"
 
 [model_builds.codex_gpt_5_6_sol_subscription]
 profile = "codex_gpt_5_6_sol"
@@ -695,6 +975,13 @@ input_modalities = ["text", "image"]
 output_modalities = ["text"]
 features = ["reasoning", "web_search"]
 
+[model_builds.codex_gpt_5_6_sol_subscription.provenance]
+source_kind = "provider_managed"
+upstream = "codex-subscription:gpt-5.6-sol"
+
+[model_builds.codex_gpt_5_6_sol_subscription.license]
+status = "unreviewed"
+
 [model_builds.qwen3_asr_1_7b_8bit]
 profile = "qwen3_asr_1_7b"
 model_id = "models/qwen3-asr-1.7b-8bit"
@@ -702,6 +989,13 @@ variant = "mlx-8bit"
 input_modalities = ["audio"]
 output_modalities = ["text", "json"]
 features = ["language_detection"]
+
+[model_builds.qwen3_asr_1_7b_8bit.provenance]
+source_kind = "user_managed"
+upstream = "local-mlx-audio:qwen3-asr-1.7b-8bit"
+
+[model_builds.qwen3_asr_1_7b_8bit.license]
+status = "unreviewed"
 
 [model_builds.qwen3_forced_aligner_0_6b_8bit]
 profile = "qwen3_forced_aligner_0_6b"
@@ -711,6 +1005,13 @@ input_modalities = ["audio", "text"]
 output_modalities = ["json"]
 features = ["word_timestamps"]
 
+[model_builds.qwen3_forced_aligner_0_6b_8bit.provenance]
+source_kind = "user_managed"
+upstream = "local-mlx-audio:qwen3-forced-aligner-0.6b-8bit"
+
+[model_builds.qwen3_forced_aligner_0_6b_8bit.license]
+status = "unreviewed"
+
 [model_builds.qwen3_tts_custom_voice_1_7b_8bit]
 profile = "qwen3_tts_custom_voice_1_7b"
 model_id = "models/qwen3-tts-1.7b-custom-voice-8bit"
@@ -718,6 +1019,13 @@ variant = "mlx-8bit"
 input_modalities = ["text"]
 output_modalities = ["audio"]
 features = ["built_in_voices"]
+
+[model_builds.qwen3_tts_custom_voice_1_7b_8bit.provenance]
+source_kind = "user_managed"
+upstream = "local-mlx-audio:qwen3-tts-1.7b-custom-voice-8bit"
+
+[model_builds.qwen3_tts_custom_voice_1_7b_8bit.license]
+status = "unreviewed"
 
 [model_builds.qwen3_tts_voice_design_1_7b_8bit]
 profile = "qwen3_tts_voice_design_1_7b"
@@ -727,6 +1035,13 @@ input_modalities = ["text"]
 output_modalities = ["audio"]
 features = ["voice_design"]
 
+[model_builds.qwen3_tts_voice_design_1_7b_8bit.provenance]
+source_kind = "user_managed"
+upstream = "local-mlx-audio:qwen3-tts-1.7b-voice-design-8bit"
+
+[model_builds.qwen3_tts_voice_design_1_7b_8bit.license]
+status = "unreviewed"
+
 [model_builds.qwen3_tts_base_1_7b_8bit]
 profile = "qwen3_tts_base_1_7b"
 model_id = "models/qwen3-tts-1.7b-base-8bit"
@@ -734,6 +1049,13 @@ variant = "mlx-8bit"
 input_modalities = ["text", "audio"]
 output_modalities = ["audio"]
 features = ["voice_clone"]
+
+[model_builds.qwen3_tts_base_1_7b_8bit.provenance]
+source_kind = "user_managed"
+upstream = "local-mlx-audio:qwen3-tts-1.7b-base-8bit"
+
+[model_builds.qwen3_tts_base_1_7b_8bit.license]
+status = "unreviewed"
 
 [model_builds.sensevoice_small_pytorch]
 profile = "sensevoice_small"
@@ -743,6 +1065,13 @@ input_modalities = ["audio"]
 output_modalities = ["text", "json"]
 features = ["language_detection", "emotion_detection", "audio_event_detection", "requires_funasr"]
 
+[model_builds.sensevoice_small_pytorch.provenance]
+source_kind = "user_managed"
+upstream = "local:sensevoice-small"
+
+[model_builds.sensevoice_small_pytorch.license]
+status = "unreviewed"
+
 [model_builds.yunet_2026may_onnx]
 profile = "yunet_2026may"
 model_id = "sha256:ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0"
@@ -750,6 +1079,17 @@ variant = "onnx-opset11-fp32"
 input_modalities = ["image"]
 output_modalities = ["json"]
 features = ["five_point_landmarks"]
+
+[model_builds.yunet_2026may_onnx.provenance]
+source_kind = "user_managed"
+upstream = "opencv/opencv_zoo"
+source_revision = "opencv-zoo@47534e27c9851bb1128ccc0102f1145e27f23f98"
+artifact_sha256 = "ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0"
+
+[model_builds.yunet_2026may_onnx.license]
+status = "declared"
+expression = "MIT"
+license_url = "https://github.com/opencv/opencv_zoo/blob/47534e27c9851bb1128ccc0102f1145e27f23f98/LICENSE"
 
 [model_builds.yunet_2026may_onnx.onnx]
 adapter = "yunet_face_detection"
@@ -800,6 +1140,17 @@ input_modalities = ["image"]
 output_modalities = ["json"]
 features = ["face_embedding_128d", "sensitive_biometric"]
 
+[model_builds.sface_2021dec_onnx.provenance]
+source_kind = "user_managed"
+upstream = "opencv/opencv_zoo"
+source_revision = "opencv-zoo@47534e27c9851bb1128ccc0102f1145e27f23f98"
+artifact_sha256 = "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+
+[model_builds.sface_2021dec_onnx.license]
+status = "declared"
+expression = "Apache-2.0"
+license_url = "https://github.com/opencv/opencv_zoo/blob/47534e27c9851bb1128ccc0102f1145e27f23f98/LICENSE"
+
 [model_builds.sface_2021dec_onnx.onnx]
 adapter = "sface_embedding"
 opset = 11
@@ -834,6 +1185,17 @@ variant = "fixres224-image-onnx-opset17-fp32"
 input_modalities = ["image"]
 output_modalities = ["json"]
 features = ["siglip2_embedding_768d", "cross_modal_retrieval"]
+
+[model_builds.siglip2_base_patch16_224_image_onnx_cpu_v1.provenance]
+source_kind = "user_managed"
+upstream = "google/siglip2-base-patch16-224"
+source_revision = "75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2;infer-export-v1"
+artifact_sha256 = "37a4dd33a92af42f9d6ca301fa9ed71ebc28c6fd6036dbb03475c6f703ab69c6"
+
+[model_builds.siglip2_base_patch16_224_image_onnx_cpu_v1.license]
+status = "declared"
+expression = "Apache-2.0"
+license_url = "https://huggingface.co/google/siglip2-base-patch16-224/blob/75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2/LICENSE"
 
 [model_builds.siglip2_base_patch16_224_image_onnx_cpu_v1.onnx]
 adapter = "siglip_image_embedding"
@@ -875,6 +1237,17 @@ variant = "fixres224-text-onnx-opset17-fp32"
 input_modalities = ["text"]
 output_modalities = ["json"]
 features = ["siglip2_embedding_768d", "multilingual_text", "cross_modal_retrieval"]
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cpu_v1.provenance]
+source_kind = "user_managed"
+upstream = "google/siglip2-base-patch16-224"
+source_revision = "75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2;infer-export-v1"
+artifact_sha256 = "59a483f782025c5724628100e4dd7b49e96fa47b8b49d963b99932d4ab83199c"
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cpu_v1.license]
+status = "declared"
+expression = "Apache-2.0"
+license_url = "https://huggingface.co/google/siglip2-base-patch16-224/blob/75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2/LICENSE"
 
 [model_builds.siglip2_base_patch16_224_text_onnx_cpu_v1.onnx]
 adapter = "siglip_text_embedding"
@@ -945,9 +1318,9 @@ resource_class = "heavy"
 estimated_cost_usd = 0.0
 supported_execution_modes = ["unary", "server_stream"]
 
-[deployments.ollama_qwen3_6_35b]
+[deployments.ollama_gemma4_26b_a4b_qat]
 provider = "ollama-local"
-build = "qwen3_6_35b_mlx"
+build = "gemma4_26b_a4b_qat_q4_0_8k"
 resource_class = "heavy"
 supported_efforts = ["none"]
 estimated_cost_usd = 0.0
@@ -1049,14 +1422,33 @@ build = "siglip2_base_patch16_224_text_onnx_cpu_v1"
 resource_class = "heavy"
 estimated_cost_usd = 0.0
 
-# Protected local administrator identity. `allowed_intents` is intentionally
-# omitted here: unlike an ordinary legacy Consumer, local-operator must follow
-# the complete configured Intent registry so newly added operator diagnostics
-# do not require a second permission-list update. Never share this credential
+[deployments.local_qwen3_embedding_0_6b]
+provider = "qwen3-retrieval-local"
+build = "qwen3_embedding_0_6b_mlx"
+resource_class = "standard"
+estimated_cost_usd = 0.0
+
+[deployments.local_qwen3_reranker_0_6b]
+provider = "qwen3-retrieval-local"
+build = "qwen3_reranker_0_6b_mlx"
+resource_class = "standard"
+estimated_cost_usd = 0.0
+
+[deployments.local_pp_ocrv6_medium]
+provider = "pp-ocr-local"
+build = "pp_ocrv6_medium_onnx_cpu"
+resource_class = "standard"
+estimated_cost_usd = 0.0
+
+# Protected local administrator identity. The two explicit `allow_all_*`
+# grants are valid only together with `resource_admin = true`; ordinary Apps
+# fail closed when their allowlists are omitted. Never share this credential
 # with a product Consumer.
 [apps.local-operator]
 credential = { source = "managed" }
 resource_admin = true
+allow_all_intents = true
+allow_all_speech_voice_aliases = true
 allowed_builtin_tools = ["web_search"]
 allowed_provider_access_classes = ["standard", "subscription"]
 allowed_cloud_input_modalities = ["text", "image"]
@@ -1103,3 +1495,57 @@ capability_floor = ["foundational", "capable"]
 latency = ["interactive", "balanced", "throughput"]
 fallback = ["none"]
 max_cost_usd = { min = 0.0, max = 0.0 }
+
+# Optional candidate.4 named-routing grants. This is a routing default only;
+# it does not expand the App-wide Intent/provider/cloud/policy/cost ceiling.
+# Consumers without this table keep ordinary capability routing and cannot
+# submit named requests.
+# [apps.example-local-consumer.routing]
+# deployment_ids = ["ollama_qwen3_5_2b"]
+# model_profile_ids = []
+#
+# An Intent-specific rule replaces the routing default completely. Empty lists
+# deliberately mean deny all for that Intent; there is no fallback to the
+# routing default merely because an authorized target is unavailable.
+# [apps.example-local-consumer.routing.intents."text.summarize"]
+# deployment_ids = ["ollama_qwen3_5_2b"]
+# model_profile_ids = []
+
+# Tracked review fixture for Shape's least-privilege candidate.4 contract. It
+# does not activate or replace the ignored live `apps.shape` entry. The global
+# ceiling permits only text editing and the existing TTS slice; the empty
+# routing default denies every other named route, while each Intent rule grants
+# exactly one Runtime Deployment.
+[apps.example-shape-consumer]
+credential = { source = "managed" }
+resource_admin = false
+allowed_intents = ["text.edit", "speech.synthesize"]
+allowed_builtin_tools = []
+allowed_speech_voice_aliases = ["speech.voice.zh.bright_female.v1"]
+allowed_provider_access_classes = ["standard"]
+allowed_cloud_input_modalities = []
+max_pending_jobs = 8
+default_policy = "local-first"
+allowed_policies = ["local-first"]
+
+[apps.example-shape-consumer.request_overrides]
+priority = ["interactive", "normal"]
+placement = ["local_only"]
+prefer = ["local"]
+offline_required = true
+capability_floor = ["foundational", "capable"]
+latency = ["interactive", "balanced"]
+fallback = ["none"]
+max_cost_usd = { min = 0.0, max = 0.0 }
+
+[apps.example-shape-consumer.routing]
+deployment_ids = []
+model_profile_ids = []
+
+[apps.example-shape-consumer.routing.intents."text.edit"]
+deployment_ids = ["ollama_qwen3_5_4b"]
+model_profile_ids = []
+
+[apps.example-shape-consumer.routing.intents."speech.synthesize"]
+deployment_ids = ["mlx_qwen3_tts_custom_voice_1_7b"]
+model_profile_ids = []

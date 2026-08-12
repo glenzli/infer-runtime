@@ -1,0 +1,26 @@
+[package]
+name = "infer-runtime-client"
+version = "1.0.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Official Rust client for the dated Infer Runtime Consumer Core contract"
+readme = "README.md"
+keywords = ["inference", "local-first", "ai", "client"]
+categories = ["api-bindings"]
+
+[dependencies]
+bytes.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+zeroize.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

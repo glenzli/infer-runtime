@@ -181,8 +181,6 @@ mod tests {
     use tempfile::TempDir;
     use tower::ServiceExt;
 
-    use super::router as raw_router;
-
     #[tokio::test]
     #[ignore = "requires pinned RawNIND graph and ORT 1.27"]
     async fn authenticated_http_uds_job_and_real_model_e2e() {
@@ -220,8 +218,7 @@ mod tests {
             &library,
         )
         .unwrap();
-        let app =
-            crate::router(Arc::clone(&runtime)).merge(raw_router(Arc::clone(&runtime), control));
+        let app = crate::router_with_raw(Arc::clone(&runtime), control);
         let lease_body = json!({
             "model":"raw.materialize_foundation", "priority":"background", "source_revision":"synthetic-phase0-v1",
             "source":{"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":1,"pixel_contract_sha256":"e1998069001c14d01251cc3d6e2bc2aa66b807f3f17d246e7ee7270528302f7f"},
@@ -233,6 +230,14 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/infer/v1/raw/foundations/leases")
+                    .header(
+                        crate::contract::CONSUMER_CORE_HEADER,
+                        crate::contract::CORE_CONTRACT,
+                    )
+                    .header(
+                        crate::contract::CAPABILITY_CONTRACT_HEADER,
+                        "infer.raw-foundation@20260811.1",
+                    )
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(lease_body.to_string()))
                     .unwrap(),
@@ -315,6 +320,14 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/infer/v1/raw/foundations")
+                    .header(
+                        crate::contract::CONSUMER_CORE_HEADER,
+                        crate::contract::CORE_CONTRACT,
+                    )
+                    .header(
+                        crate::contract::CAPABILITY_CONTRACT_HEADER,
+                        "infer.raw-foundation@20260811.1",
+                    )
                     .header(header::AUTHORIZATION, "Bearer other-test-token")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
@@ -591,7 +604,16 @@ estimated_cost_usd = 0.0
     }
 
     fn auth(builder: axum::http::request::Builder) -> axum::http::request::Builder {
-        builder.header(header::AUTHORIZATION, "Bearer raw-test-token")
+        builder
+            .header(
+                crate::contract::CONSUMER_CORE_HEADER,
+                crate::contract::CORE_CONTRACT,
+            )
+            .header(
+                crate::contract::CAPABILITY_CONTRACT_HEADER,
+                "infer.raw-foundation@20260811.1",
+            )
+            .header(header::AUTHORIZATION, "Bearer raw-test-token")
     }
     async fn json_body(response: axum::response::Response) -> Value {
         serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()

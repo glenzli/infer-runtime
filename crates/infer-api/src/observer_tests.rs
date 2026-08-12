@@ -15,6 +15,7 @@ use crate::router;
 
 const OBSERVER_TOKEN: &str = "observer-test-token";
 const OPERATOR_TOKEN: &str = "operator-test-token";
+const CONSUMER_TOKEN: &str = "consumer-test-token";
 
 fn observer_router() -> axum::Router {
     let config: RuntimeConfig = toml::from_str(include_str!("../../../config/infer.example.toml"))
@@ -22,6 +23,7 @@ fn observer_router() -> axum::Router {
     let credentials = AppCredentials::from_pairs([
         ("infra-sentinel", OBSERVER_TOKEN),
         ("local-operator", OPERATOR_TOKEN),
+        ("example-local-consumer", CONSUMER_TOKEN),
     ])
     .unwrap();
     router(Runtime::with_providers_and_credentials(
@@ -29,6 +31,32 @@ fn observer_router() -> axum::Router {
         BTreeMap::new(),
         credentials,
     ))
+}
+
+#[tokio::test]
+async fn ordinary_consumer_cannot_read_or_mutate_operator_resources() {
+    for (method, path) in [
+        ("GET", "/infer/v1/metrics"),
+        ("GET", "/infer/v1/providers"),
+        ("GET", "/infer/v1/resources"),
+        ("GET", "/infer/v1/budget"),
+        ("POST", "/infer/v1/resources"),
+    ] {
+        let response = observer_router()
+            .oneshot(
+                authenticated(Request::builder().method(method).uri(path), CONSUMER_TOKEN)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{method} {path}");
+        assert_eq!(
+            body_json(response).await["error"]["code"],
+            "resource_admin_required",
+            "{method} {path}"
+        );
+    }
 }
 
 fn authenticated(
@@ -144,6 +172,18 @@ async fn observer_credential_is_rejected_from_every_existing_surface_class() {
                     Request::builder()
                         .method(method)
                         .uri(path)
+                        .header(
+                            crate::contract::CONSUMER_CORE_HEADER,
+                            crate::contract::CORE_CONTRACT,
+                        )
+                        .header(
+                            crate::contract::CAPABILITY_CONTRACT_HEADER,
+                            if path == "/v1/responses" {
+                                "infer.responses@20260812.1"
+                            } else {
+                                "infer.responses@unused"
+                            },
+                        )
                         .header(header::CONTENT_TYPE, "application/json"),
                     OBSERVER_TOKEN,
                 )
@@ -182,12 +222,30 @@ async fn operator_credential_cannot_reuse_the_observer_endpoint() {
 }
 
 #[tokio::test]
-async fn health_and_contract_remain_public_bootstrap_routes() {
-    for path in ["/health", "/infer/v1/contract"] {
-        let response = observer_router()
-            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::OK, "{path}");
-    }
+async fn health_is_public_but_contract_requires_the_current_consumer_header() {
+    let health = observer_router()
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(health.status(), StatusCode::OK);
+
+    let contract = observer_router()
+        .oneshot(
+            Request::builder()
+                .uri("/infer/v1/contract")
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(contract.status(), StatusCode::OK);
 }

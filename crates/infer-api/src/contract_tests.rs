@@ -27,7 +27,15 @@ fn contract_router() -> Router {
 }
 
 fn authenticated(request: request::Builder) -> request::Builder {
-    request.header(header::AUTHORIZATION, "Bearer contract-test-token")
+    contracted(request).header(header::AUTHORIZATION, "Bearer contract-test-token")
+}
+
+fn capability(request: request::Builder, capability: &'static str) -> request::Builder {
+    request.header(contract::CAPABILITY_CONTRACT_HEADER, capability)
+}
+
+fn contracted(request: request::Builder) -> request::Builder {
+    request.header(contract::CONSUMER_CORE_HEADER, contract::CORE_CONTRACT)
 }
 
 async fn body_json(response: axum::response::Response) -> Value {
@@ -41,10 +49,10 @@ async fn body_json(response: axum::response::Response) -> Value {
 }
 
 #[tokio::test]
-async fn contract_identity_and_openapi_are_available_without_authentication() {
+async fn core_and_capability_catalog_are_public_bootstrap_with_exact_identity() {
     let manifest = contract_router()
         .oneshot(
-            Request::builder()
+            contracted(Request::builder())
                 .uri("/infer/v1/contract")
                 .body(Body::empty())
                 .unwrap(),
@@ -53,15 +61,68 @@ async fn contract_identity_and_openapi_are_available_without_authentication() {
         .unwrap();
     assert_eq!(manifest.status(), StatusCode::OK);
     let manifest = body_json(manifest).await;
-    assert_eq!(manifest["contract_version"], contract::CONTRACT_VERSION);
-    assert_eq!(manifest["operator_routes"]["stability"], "experimental");
+    assert_eq!(manifest["schema"], "infer-runtime.consumer-core");
+    assert_eq!(manifest["schema_version"], contract::CORE_VERSION);
+    assert_eq!(manifest["core_contract"], contract::CORE_CONTRACT);
+    assert_eq!(manifest["openapi_sha256"], contract::OPENAPI_SHA256);
+    assert_eq!(
+        manifest["error_codes"],
+        serde_json::json!(contract::CORE_ERROR_CODES)
+    );
+    assert_eq!(
+        manifest["supported_core_contracts"],
+        serde_json::json!(contract::SUPPORTED_CORE_CONTRACTS)
+    );
+    assert_eq!(
+        manifest["capability_catalog"]["url"],
+        "/infer/v1/capabilities"
+    );
+
+    let catalog = contract_router()
+        .oneshot(
+            contracted(Request::builder())
+                .uri("/infer/v1/capabilities")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(catalog.status(), StatusCode::OK);
+    let catalog = body_json(catalog).await;
+    assert_eq!(catalog["schema"], contract::CAPABILITY_CATALOG_SCHEMA);
+    assert_eq!(
+        catalog["schema_version"],
+        contract::CAPABILITY_CATALOG_VERSION
+    );
+    assert_eq!(catalog["core_contract"], contract::CORE_CONTRACT);
     assert!(
-        manifest["experimental_routes"]
+        catalog["capabilities"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|route| route["path"] == "/v1/audio/transcriptions/stream")
+            .any(|capability| capability["id"] == "infer.audio.transcription-stream")
     );
+    for capability in catalog["capabilities"].as_array().unwrap() {
+        assert_eq!(capability["schema"]["format"], "openapi-3.1");
+        let url = capability["schema"]["url"].as_str().unwrap();
+        assert!(url.starts_with("/infer/v1/capability-schemas/"));
+        assert_eq!(capability["schema"]["sha256"].as_str().unwrap().len(), 64);
+
+        let schema = contract_router()
+            .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(schema.status(), StatusCode::OK);
+        let schema = body_json(schema).await;
+        assert_eq!(
+            schema["x-infer-capability-contract"],
+            format!(
+                "{}@{}",
+                capability["id"].as_str().unwrap(),
+                capability["schema_version"].as_str().unwrap()
+            )
+        );
+    }
 
     let openapi = contract_router()
         .oneshot(
@@ -76,23 +137,136 @@ async fn contract_identity_and_openapi_are_available_without_authentication() {
     assert_eq!(openapi.headers()[header::CONTENT_TYPE], "application/json");
     assert_eq!(
         body_json(openapi).await["info"]["version"],
-        contract::CONTRACT_VERSION
+        contract::CORE_VERSION
     );
+}
+
+#[test]
+fn catalog_routes_have_one_exact_runtime_capability_identity() {
+    let mut routes = std::collections::BTreeSet::new();
+    let mut identities = std::collections::BTreeSet::new();
+    for capability in contract::CAPABILITIES {
+        let version = capability.schema_version;
+        let identity = format!("{}@{}", capability.id, capability.schema_version);
+        assert!(identities.insert(identity.clone()));
+        for route in capability.routes {
+            assert!(routes.insert((route.method, route.path, version)));
+            let concrete = route
+                .path
+                .replace("{response_id}", "resp_example")
+                .replace("{job_id}", "raw_example");
+            assert_eq!(
+                contract::required_capability_id(&concrete),
+                Some(capability.id),
+                "{} {}",
+                route.method,
+                route.path
+            );
+        }
+    }
+    for route in contract::CONSUMER_ROUTES {
+        let concrete = route.path.replace("{response_id}", "resp_example");
+        assert_eq!(contract::required_capability_id(&concrete), None);
+    }
+}
+
+#[tokio::test]
+async fn explicit_contract_handshake_is_exact_and_fail_closed() {
+    for requested in ["20260812.1", "0.1.0-candidate.4", "0.1.0-candidate.3"] {
+        let response = contract_router()
+            .oneshot(
+                Request::builder()
+                    .uri("/infer/v1/contract")
+                    .header(contract::CONSUMER_CORE_HEADER, requested)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED);
+        let body = body_json(response).await;
+        assert_eq!(body["error"]["type"], "invalid_request_error");
+        assert_eq!(body["error"]["code"], "consumer_core_unsupported");
+    }
+
+    let missing = contract_router()
+        .oneshot(
+            Request::builder()
+                .uri("/infer/v1/contract")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::UPGRADE_REQUIRED);
+    assert_eq!(
+        body_json(missing).await["error"]["code"],
+        "consumer_core_unsupported"
+    );
+
+    let duplicate = contract_router()
+        .oneshot(
+            Request::builder()
+                .uri("/infer/v1/contract")
+                .header(contract::CONSUMER_CORE_HEADER, contract::CORE_CONTRACT)
+                .header(contract::CONSUMER_CORE_HEADER, contract::CORE_CONTRACT)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), StatusCode::UPGRADE_REQUIRED);
+    assert_eq!(
+        body_json(duplicate).await["error"]["code"],
+        "consumer_core_unsupported"
+    );
+}
+
+#[tokio::test]
+async fn missing_or_old_contract_is_rejected_before_every_consumer_surface_class() {
+    for (method, path) in [
+        ("POST", "/v1/responses"),
+        ("GET", "/v1/responses/resp_example"),
+        ("POST", "/v1/audio/speech"),
+        ("GET", "/infer/v1/jobs"),
+        ("GET", "/infer/v1/explain/resp_example"),
+        ("POST", "/infer/v1/vision/text-embeddings"),
+        ("POST", "/infer/v1/raw/foundations/leases"),
+    ] {
+        for requested in [None, Some("0.1.0-candidate.4")] {
+            let mut request = Request::builder().method(method).uri(path);
+            if let Some(requested) = requested {
+                request = request.header(contract::CONSUMER_CORE_HEADER, requested);
+            }
+            let response = contract_router()
+                .oneshot(request.body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED, "{path}");
+            assert_eq!(
+                body_json(response).await["error"]["code"],
+                "consumer_core_unsupported"
+            );
+        }
+    }
 }
 
 #[tokio::test]
 async fn duplex_audio_rejects_a_request_without_a_server_upgrade_context() {
     let response = contract_router()
         .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/v1/audio/transcriptions/stream")
-                .header(header::CONNECTION, "upgrade")
-                .header(header::UPGRADE, "websocket")
-                .header("sec-websocket-version", "13")
-                .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
-                .body(Body::empty())
-                .unwrap(),
+            capability(
+                contracted(Request::builder()),
+                "infer.audio.transcription-stream@20260811.1",
+            )
+            .method("GET")
+            .uri("/v1/audio/transcriptions/stream")
+            .header(header::CONNECTION, "upgrade")
+            .header(header::UPGRADE, "websocket")
+            .header("sec-websocket-version", "13")
+            .header("sec-websocket-key", "dGhlIHNhbXBsZSBub25jZQ==")
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -100,17 +274,42 @@ async fn duplex_audio_rejects_a_request_without_a_server_upgrade_context() {
 }
 
 #[tokio::test]
+async fn capability_handshake_is_exact_before_auth_or_payload_parsing() {
+    for requested in [None, Some("infer.responses@20260811.1")] {
+        let mut request = contracted(Request::builder())
+            .method("POST")
+            .uri("/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(requested) = requested {
+            request = request.header(contract::CAPABILITY_CONTRACT_HEADER, requested);
+        }
+        let response = contract_router()
+            .oneshot(request.body(Body::from("{}")).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED);
+        assert_eq!(
+            body_json(response).await["error"]["code"],
+            "capability_contract_unsupported"
+        );
+    }
+}
+
+#[tokio::test]
 async fn unknown_response_json_fields_use_the_stable_error_envelope() {
     let response = contract_router()
         .oneshot(
-            authenticated(Request::builder())
-                .method("POST")
-                .uri("/v1/responses")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    r#"{"model":"text.summarize","input":"text","modle":"typo"}"#,
-                ))
-                .unwrap(),
+            capability(
+                authenticated(Request::builder()),
+                "infer.responses@20260812.1",
+            )
+            .method("POST")
+            .uri("/v1/responses")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"text.summarize","input":"text","modle":"typo"}"#,
+            ))
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -130,14 +329,17 @@ async fn unknown_response_json_fields_use_the_stable_error_envelope() {
 async fn unknown_speech_json_fields_use_the_stable_error_envelope() {
     let response = contract_router()
         .oneshot(
-            authenticated(Request::builder())
-                .method("POST")
-                .uri("/v1/audio/speech")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    r#"{"model":"speech.synthesize","input":"hi","voice":"default","formt":"wav"}"#,
-                ))
-                .unwrap(),
+            capability(
+                authenticated(Request::builder()),
+                "infer.audio.speech@20260811.1",
+            )
+            .method("POST")
+            .uri("/v1/audio/speech")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"speech.synthesize","input":"hi","voice":"default","formt":"wav"}"#,
+            ))
+            .unwrap(),
         )
         .await
         .unwrap();
@@ -162,12 +364,15 @@ async fn audio_multipart_rejects_unknown_and_wrong_file_fields() {
     ] {
         let response = contract_router()
             .oneshot(
-                authenticated(Request::builder())
-                    .method("POST")
-                    .uri("/v1/audio/transcriptions")
-                    .header(header::CONTENT_TYPE, "multipart/form-data; boundary=x")
-                    .body(Body::from(body))
-                    .unwrap(),
+                capability(
+                    authenticated(Request::builder()),
+                    "infer.audio.transcription@20260811.1",
+                )
+                .method("POST")
+                .uri("/v1/audio/transcriptions")
+                .header(header::CONTENT_TYPE, "multipart/form-data; boundary=x")
+                .body(Body::from(body))
+                .unwrap(),
             )
             .await
             .unwrap();
@@ -186,7 +391,7 @@ async fn audio_multipart_rejects_unknown_and_wrong_file_fields() {
 async fn authentication_failures_use_the_same_error_envelope() {
     let response = contract_router()
         .oneshot(
-            Request::builder()
+            capability(contracted(Request::builder()), "infer.responses@20260812.1")
                 .method("POST")
                 .uri("/v1/responses")
                 .header(header::CONTENT_TYPE, "application/json")

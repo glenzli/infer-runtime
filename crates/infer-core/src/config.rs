@@ -473,7 +473,7 @@ pub struct DefaultsConfig {
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
-    pub kind: String,
+    pub kind: ProviderKind,
     /// Economic/access boundary for this Provider instance. Subscription
     /// bridges are denied to Apps unless they opt in explicitly.
     #[serde(default)]
@@ -500,6 +500,30 @@ pub struct ProviderConfig {
     /// and lifecycle management have a different protocol and failure policy.
     #[serde(default)]
     pub local_inventory: Option<LocalInventoryConfig>,
+}
+
+string_enum!(ProviderKind {
+    Responses => "responses",
+    CodexAppServer => "codex_app_server",
+    AudioWorker => "audio_worker",
+    RetrievalWorker => "retrieval_worker",
+    OcrWorker => "ocr_worker",
+    Onnx => "onnx",
+    RawFoundation => "raw_foundation"
+});
+
+impl std::fmt::Display for ProviderKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Responses => "responses",
+            Self::CodexAppServer => "codex_app_server",
+            Self::AudioWorker => "audio_worker",
+            Self::RetrievalWorker => "retrieval_worker",
+            Self::OcrWorker => "ocr_worker",
+            Self::Onnx => "onnx",
+            Self::RawFoundation => "raw_foundation",
+        })
+    }
 }
 
 string_enum!(ProviderAccessClass {
@@ -625,10 +649,78 @@ pub struct ModelBuildConfig {
     pub output_modalities: Vec<Modality>,
     #[serde(default)]
     pub features: Vec<String>,
+    /// Supply-chain ownership and provenance for this exact Build. This is a
+    /// deployment fact, not a legal opinion inferred by the runtime.
+    #[serde(default)]
+    pub provenance: ModelBuildProvenanceConfig,
+    /// Evidence recorded by the operator who admitted the Build. Unknown or
+    /// unreviewed facts remain explicit instead of being guessed from a model
+    /// name or provider cache.
+    #[serde(default)]
+    pub license: ModelBuildLicenseConfig,
     /// Present only for ONNX builds. This is execution identity, not a public
     /// tensor API: typed adapters remain the sole consumer-facing boundary.
     #[serde(default)]
     pub onnx: Option<OnnxModelBuildConfig>,
+    /// Present only for trusted, typed local worker Builds. The immutable file
+    /// set is content-addressed; Consumers never see artifact paths or worker
+    /// protocol details.
+    #[serde(default)]
+    pub local_worker: Option<LocalWorkerModelBuildConfig>,
+}
+
+string_enum!(ModelSourceKind {
+    Unknown => "unknown",
+    UserManaged => "user_managed",
+    ProviderManaged => "provider_managed",
+    OrganizationManaged => "organization_managed",
+    RuntimeDownloadable => "runtime_downloadable",
+    RuntimeBundled => "runtime_bundled"
+});
+
+// `string_enum!` cannot attach `#[default]` to one generated variant.
+#[allow(clippy::derivable_impls)]
+impl Default for ModelSourceKind {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ModelBuildProvenanceConfig {
+    #[serde(default)]
+    pub source_kind: ModelSourceKind,
+    pub upstream: Option<String>,
+    pub source_revision: Option<String>,
+    pub artifact_sha256: Option<String>,
+}
+
+string_enum!(ModelLicenseStatus {
+    Unreviewed => "unreviewed",
+    Declared => "declared",
+    Verified => "verified",
+    Restricted => "restricted",
+    Unknown => "unknown"
+});
+
+// `string_enum!` cannot attach `#[default]` to one generated variant.
+#[allow(clippy::derivable_impls)]
+impl Default for ModelLicenseStatus {
+    fn default() -> Self {
+        Self::Unreviewed
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ModelBuildLicenseConfig {
+    #[serde(default)]
+    pub status: ModelLicenseStatus,
+    pub expression: Option<String>,
+    pub license_url: Option<String>,
+    pub license_text_sha256: Option<String>,
+    pub reviewed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize, PartialEq)]
@@ -674,6 +766,45 @@ pub struct ArtifactIdentityConfig {
     pub source_url: String,
     pub source_revision: String,
     pub license_spdx: String,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LocalWorkerModelBuildConfig {
+    pub adapter: LocalWorkerAdapterKind,
+    /// SHA-256 over sorted `relative-name NUL file-sha256 LF` records.
+    pub artifact_set_sha256: String,
+    pub runtime: String,
+    pub precision: String,
+    pub postprocessing_identity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokenizer_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instruction_revision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_space: Option<EmbeddingSpaceConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preprocessing_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requested_execution_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actual_execution_provider: Option<String>,
+}
+
+string_enum!(LocalWorkerAdapterKind {
+    Qwen3Embedding => "qwen3_embedding",
+    Qwen3Reranker => "qwen3_reranker",
+    PpOcrv6 => "pp_ocrv6"
+});
+
+impl std::fmt::Display for LocalWorkerAdapterKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Qwen3Embedding => "qwen3_embedding",
+            Self::Qwen3Reranker => "qwen3_reranker",
+            Self::PpOcrv6 => "pp_ocrv6",
+        })
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize, PartialEq)]
@@ -785,20 +916,32 @@ pub struct AppConfig {
     /// Ordinary inference Apps remain unprivileged by default.
     #[serde(default)]
     pub resource_admin: bool,
-    /// Stable Intent ids this App may submit. Omitting the field preserves the
-    /// pre-ACL behavior and permits every configured Intent; an explicit empty
-    /// list denies all inference while retaining non-inference capabilities.
+    /// Explicit operator-only grant for every configured Intent. This is
+    /// separate from `allowed_intents` so omission never widens an ordinary
+    /// Consumer's authority.
+    #[serde(default)]
+    pub allow_all_intents: bool,
+    /// Stable Intent ids this App may submit. Omission and an explicit empty
+    /// list both deny inference unless the operator-only all-Intent grant is
+    /// present.
     #[serde(default)]
     pub allowed_intents: Option<Vec<String>>,
+    /// Optional named-routing execution boundary. Absence preserves legacy
+    /// capability routing while denying Consumer-supplied named targets.
+    #[serde(default)]
+    pub routing: Option<crate::AppRoutingConfig>,
     /// Hosted Responses tools are an independent data/side-effect boundary.
     /// A Provider capability and Intent grant never imply this App authority.
     #[serde(default)]
     pub allowed_builtin_tools: BTreeSet<BuiltinTool>,
     /// Optional allowlist for the public `voice` values accepted by
-    /// `speech.synthesize`. Omitting it preserves pre-alias compatibility;
-    /// an explicit list lets a Consumer depend only on Runtime-owned aliases.
+    /// `speech.synthesize`. Omitting it denies speech aliases; an explicit
+    /// list lets a Consumer depend only on Runtime-owned aliases.
     #[serde(default)]
     pub allowed_speech_voice_aliases: Option<Vec<String>>,
+    /// Explicit operator-only grant for every Runtime-owned speech alias.
+    #[serde(default)]
+    pub allow_all_speech_voice_aliases: bool,
     /// Provider economic/access classes this App may consume. The default is
     /// deliberately standard-only so adding a subscription bridge never
     /// widens an existing Consumer's authority.
@@ -806,9 +949,9 @@ pub struct AppConfig {
     pub allowed_provider_access_classes: BTreeSet<ProviderAccessClass>,
     /// Modalities this App may send to cloud-placed providers. This is an
     /// egress boundary, separate from provider economics/access entitlement.
-    /// Text-only preserves existing Consumers when multimodal cloud routes are
-    /// introduced later.
-    #[serde(default = "default_cloud_input_modalities")]
+    /// Omission denies cloud payload egress; every allowed modality must be an
+    /// explicit App grant.
+    #[serde(default)]
     pub allowed_cloud_input_modalities: BTreeSet<Modality>,
     #[serde(default = "default_app_max_pending_jobs")]
     pub max_pending_jobs: usize,
@@ -821,15 +964,19 @@ pub struct AppConfig {
 
 impl AppConfig {
     pub fn allows_intent(&self, intent: &str) -> bool {
-        self.allowed_intents
-            .as_ref()
-            .is_none_or(|allowed| allowed.iter().any(|candidate| candidate == intent))
+        self.allow_all_intents
+            || self
+                .allowed_intents
+                .as_ref()
+                .is_some_and(|allowed| allowed.iter().any(|candidate| candidate == intent))
     }
 
     pub fn allows_speech_voice(&self, voice: &str) -> bool {
-        self.allowed_speech_voice_aliases
-            .as_ref()
-            .is_none_or(|allowed| allowed.iter().any(|candidate| candidate == voice))
+        self.allow_all_speech_voice_aliases
+            || self
+                .allowed_speech_voice_aliases
+                .as_ref()
+                .is_some_and(|allowed| allowed.iter().any(|candidate| candidate == voice))
     }
 
     pub fn allows_builtin_tool(&self, tool: BuiltinTool) -> bool {
@@ -847,10 +994,6 @@ impl AppConfig {
 
 fn default_provider_access_classes() -> BTreeSet<ProviderAccessClass> {
     BTreeSet::from([ProviderAccessClass::Standard])
-}
-
-fn default_cloud_input_modalities() -> BTreeSet<Modality> {
-    BTreeSet::from([Modality::Text])
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
@@ -1132,38 +1275,41 @@ impl RuntimeConfig {
 
     fn validate_providers(&self) -> Result<(), ContractError> {
         for (id, provider) in &self.providers {
-            match provider.kind.as_str() {
-                "responses" if provider.base_url.as_deref().is_none_or(str::is_empty) => {
+            match provider.kind {
+                ProviderKind::Responses
+                    if provider.base_url.as_deref().is_none_or(str::is_empty) =>
+                {
                     return Err(configuration(format!("provider {id} needs base_url")));
                 }
-                "audio_worker" if provider.command.as_deref().is_none_or(str::is_empty) => {
+                ProviderKind::AudioWorker
+                | ProviderKind::RetrievalWorker
+                | ProviderKind::OcrWorker
+                    if provider.command.as_deref().is_none_or(str::is_empty) =>
+                {
                     return Err(configuration(format!(
-                        "audio worker provider {id} needs command"
+                        "local worker provider {id} needs command"
                     )));
                 }
-                "codex_app_server" if provider.command.as_deref().is_none_or(str::is_empty) => {
+                ProviderKind::CodexAppServer
+                    if provider.command.as_deref().is_none_or(str::is_empty) =>
+                {
                     return Err(configuration(format!(
                         "Codex App Server provider {id} needs command"
                     )));
                 }
-                "responses" | "codex_app_server" | "audio_worker" | "onnx" | "raw_foundation" => {}
-                _ => {
-                    return Err(configuration(format!(
-                        "provider {id} has unsupported kind {}",
-                        provider.kind
-                    )));
-                }
+                _ => {}
             }
-            let expected_protocol = match provider.kind.as_str() {
-                "responses" => ProviderProtocol::Responses,
-                "codex_app_server" => ProviderProtocol::CodexAppServer,
-                "audio_worker" => ProviderProtocol::AudioWorker,
-                "onnx" => ProviderProtocol::Onnx,
+            let expected_protocol = match provider.kind {
+                ProviderKind::Responses => ProviderProtocol::Responses,
+                ProviderKind::CodexAppServer => ProviderProtocol::CodexAppServer,
+                ProviderKind::AudioWorker => ProviderProtocol::AudioWorker,
+                ProviderKind::RetrievalWorker => ProviderProtocol::RetrievalWorker,
+                ProviderKind::OcrWorker => ProviderProtocol::OcrWorker,
+                ProviderKind::Onnx => ProviderProtocol::Onnx,
                 // The specialized RawFoundationControl owns graph execution;
                 // this provider contributes only scheduling/admission and
                 // uses the same verified native runtime protocol family.
-                "raw_foundation" => ProviderProtocol::Onnx,
-                _ => unreachable!("provider kind was validated above"),
+                ProviderKind::RawFoundation => ProviderProtocol::Onnx,
             };
             if provider.capability_profile.version != 1
                 || provider.capability_profile.protocol != expected_protocol
@@ -1185,7 +1331,10 @@ impl RuntimeConfig {
             }
             if matches!(
                 expected_protocol,
-                ProviderProtocol::AudioWorker | ProviderProtocol::Onnx
+                ProviderProtocol::AudioWorker
+                    | ProviderProtocol::RetrievalWorker
+                    | ProviderProtocol::OcrWorker
+                    | ProviderProtocol::Onnx
             ) && !provider.capability_profile.capabilities.is_empty()
             {
                 return Err(configuration(format!(
@@ -1214,7 +1363,7 @@ impl RuntimeConfig {
             {
                 return Err(configuration(format!("provider {id} requires api_key_env")));
             }
-            if provider.kind == "codex_app_server" {
+            if provider.kind == ProviderKind::CodexAppServer {
                 if provider.placement != Placement::Cloud {
                     return Err(configuration(format!(
                         "Codex App Server provider {id} must use cloud placement because its transport is local but inference leaves the machine"
@@ -1239,7 +1388,7 @@ impl RuntimeConfig {
                 }
                 match inventory.kind {
                     LocalInventoryKind::OllamaTags => {
-                        if provider.kind != "responses"
+                        if provider.kind != ProviderKind::Responses
                             || inventory
                                 .endpoint
                                 .as_deref()
@@ -1251,7 +1400,7 @@ impl RuntimeConfig {
                         }
                     }
                     LocalInventoryKind::OnnxSessions => {
-                        if provider.kind != "onnx" || inventory.endpoint.is_some() {
+                        if provider.kind != ProviderKind::Onnx || inventory.endpoint.is_some() {
                             return Err(configuration(format!(
                                 "provider {id} onnx_sessions inventory needs an ONNX provider and no endpoint"
                             )));
@@ -1259,7 +1408,7 @@ impl RuntimeConfig {
                     }
                 }
             }
-            if provider.kind == "onnx"
+            if provider.kind == ProviderKind::Onnx
                 && provider
                     .local_inventory
                     .as_ref()
@@ -1273,7 +1422,7 @@ impl RuntimeConfig {
         let has_onnx = self
             .providers
             .values()
-            .any(|provider| provider.kind == "onnx");
+            .any(|provider| provider.kind == ProviderKind::Onnx);
         if has_onnx {
             let runtime = &self.runtimes.onnx;
             if runtime
@@ -1319,6 +1468,9 @@ impl RuntimeConfig {
                         | "vision.text_embedding"
                         | "vision.image_description"
                         | "vision.classification_review"
+                        | "text.embedding"
+                        | "text.rerank"
+                        | "document.ocr"
                         | "raw.foundation"
                 )
                 || intent.input_modalities.is_empty()
@@ -1386,6 +1538,7 @@ impl RuntimeConfig {
             if build.model_id.trim().is_empty() {
                 return Err(configuration(format!("model build {id} needs model_id")));
             }
+            validate_build_supply_chain(id, build)?;
             if let Some(onnx) = &build.onnx {
                 if onnx.opset == 0
                     || onnx.artifact.size_bytes == 0
@@ -1543,17 +1696,49 @@ impl RuntimeConfig {
                     )));
                 }
             }
-            if provider.kind == "onnx" && build.onnx.is_none() {
+            if provider.kind == ProviderKind::Onnx && build.onnx.is_none() {
                 return Err(configuration(format!(
                     "ONNX deployment {id} requires model_builds.{}.onnx",
                     deployment.build
                 )));
             }
-            if provider.kind != "onnx" && build.onnx.is_some() {
+            if provider.kind != ProviderKind::Onnx && build.onnx.is_some() {
                 return Err(configuration(format!(
                     "ONNX model build {} must be deployed by an ONNX provider",
                     deployment.build
                 )));
+            }
+            let worker_provider = matches!(
+                provider.kind,
+                ProviderKind::RetrievalWorker | ProviderKind::OcrWorker
+            );
+            if worker_provider && build.local_worker.is_none() {
+                return Err(configuration(format!(
+                    "local worker deployment {id} requires model_builds.{}.local_worker",
+                    deployment.build
+                )));
+            }
+            if !worker_provider && build.local_worker.is_some() {
+                return Err(configuration(format!(
+                    "local worker model build {} must be deployed by a typed local worker provider",
+                    deployment.build
+                )));
+            }
+            if let Some(worker) = &build.local_worker {
+                let adapter_matches = matches!(
+                    (provider.kind, worker.adapter),
+                    (
+                        ProviderKind::RetrievalWorker,
+                        LocalWorkerAdapterKind::Qwen3Embedding
+                            | LocalWorkerAdapterKind::Qwen3Reranker
+                    ) | (ProviderKind::OcrWorker, LocalWorkerAdapterKind::PpOcrv6)
+                );
+                if !adapter_matches {
+                    return Err(configuration(format!(
+                        "local worker model build {} adapter is incompatible with provider {id}",
+                        deployment.build
+                    )));
+                }
             }
             if !deployment.estimated_cost_usd.is_finite() || deployment.estimated_cost_usd < 0.0 {
                 return Err(configuration(format!(
@@ -1590,6 +1775,8 @@ impl RuntimeConfig {
             }
             if app.observer_access == ObserverAccess::Summary
                 && (app.resource_admin
+                    || app.allow_all_intents
+                    || app.allow_all_speech_voice_aliases
                     || !app.allowed_builtin_tools.is_empty()
                     || app
                         .allowed_intents
@@ -1598,6 +1785,31 @@ impl RuntimeConfig {
             {
                 return Err(configuration(format!(
                     "observer App {id} must set resource_admin = false, allowed_intents = [], and allowed_builtin_tools = []"
+                )));
+            }
+            if app.allow_all_intents && !app.resource_admin {
+                return Err(configuration(format!(
+                    "app {id} allow_all_intents requires resource_admin = true"
+                )));
+            }
+            if app.resource_admin && !app.allow_all_intents && app.allowed_intents.is_none() {
+                return Err(configuration(format!(
+                    "resource-admin app {id} must explicitly set allow_all_intents or allowed_intents"
+                )));
+            }
+            if app.allow_all_intents && app.allowed_intents.is_some() {
+                return Err(configuration(format!(
+                    "app {id} must choose allow_all_intents or allowed_intents, not both"
+                )));
+            }
+            if app.allow_all_speech_voice_aliases && !app.resource_admin {
+                return Err(configuration(format!(
+                    "app {id} allow_all_speech_voice_aliases requires resource_admin = true"
+                )));
+            }
+            if app.allow_all_speech_voice_aliases && app.allowed_speech_voice_aliases.is_some() {
+                return Err(configuration(format!(
+                    "app {id} must choose allow_all_speech_voice_aliases or allowed_speech_voice_aliases, not both"
                 )));
             }
             if let Some(profile) = &app.default_policy {
@@ -1618,6 +1830,18 @@ impl RuntimeConfig {
                         return Err(configuration(format!(
                             "app {id} allowed_intents contains duplicate intent {intent}"
                         )));
+                    }
+                }
+            }
+            if let Some(routing) = &app.routing {
+                routing.validate(id, self)?;
+                if let Some(allowed_intents) = &app.allowed_intents {
+                    for intent in routing.intents.keys() {
+                        if !allowed_intents.contains(intent) {
+                            return Err(configuration(format!(
+                                "app {id} routing rule for {intent} exceeds allowed_intents"
+                            )));
+                        }
                     }
                 }
             }
@@ -1814,8 +2038,8 @@ impl ProviderConfig {
 }
 
 fn provider_serves_data_plane(provider: &ProviderConfig, data_plane: &str) -> bool {
-    match provider.kind.as_str() {
-        "responses" => {
+    match provider.kind {
+        ProviderKind::Responses => {
             data_plane == "responses"
                 || (matches!(
                     data_plane,
@@ -1825,14 +2049,154 @@ fn provider_serves_data_plane(provider: &ProviderConfig, data_plane: &str) -> bo
                     .as_ref()
                     .is_some_and(|inventory| inventory.kind == LocalInventoryKind::OllamaTags))
         }
-        "codex_app_server" => data_plane == "responses",
-        "audio_worker" => data_plane.starts_with("audio."),
-        "onnx" => data_plane.starts_with("vision."),
+        ProviderKind::CodexAppServer => data_plane == "responses",
+        ProviderKind::AudioWorker => data_plane.starts_with("audio."),
+        ProviderKind::RetrievalWorker => matches!(data_plane, "text.embedding" | "text.rerank"),
+        ProviderKind::OcrWorker => data_plane == "document.ocr",
+        ProviderKind::Onnx => data_plane.starts_with("vision."),
         // Raw foundation execution is a typed ONNX graph contract with a
         // dedicated controller and API, not a generic tensor surface.
-        "raw_foundation" => data_plane == "raw.foundation",
-        _ => false,
+        ProviderKind::RawFoundation => data_plane == "raw.foundation",
     }
+}
+
+fn validate_build_supply_chain(id: &str, build: &ModelBuildConfig) -> Result<(), ContractError> {
+    let provenance = &build.provenance;
+    for (field, value) in [
+        ("provenance.upstream", provenance.upstream.as_deref()),
+        (
+            "provenance.source_revision",
+            provenance.source_revision.as_deref(),
+        ),
+        ("license.expression", build.license.expression.as_deref()),
+        ("license.license_url", build.license.license_url.as_deref()),
+        ("license.reviewed_at", build.license.reviewed_at.as_deref()),
+    ] {
+        if value.is_some_and(|value| value.trim().is_empty()) {
+            return Err(configuration(format!(
+                "model build {id} has an empty {field}"
+            )));
+        }
+    }
+    for (field, digest) in [
+        (
+            "provenance.artifact_sha256",
+            provenance.artifact_sha256.as_deref(),
+        ),
+        (
+            "license.license_text_sha256",
+            build.license.license_text_sha256.as_deref(),
+        ),
+    ] {
+        if digest.is_some_and(|digest| {
+            digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        }) {
+            return Err(configuration(format!(
+                "model build {id} has an invalid {field}"
+            )));
+        }
+    }
+    if let Some(worker) = &build.local_worker {
+        if worker.runtime.trim().is_empty()
+            || worker.precision.trim().is_empty()
+            || worker.postprocessing_identity.trim().is_empty()
+            || worker.artifact_set_sha256.len() != 64
+            || !worker
+                .artifact_set_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err(configuration(format!(
+                "local worker model build {id} needs artifacts and complete execution identity"
+            )));
+        }
+        match worker.adapter {
+            LocalWorkerAdapterKind::Qwen3Embedding => {
+                if worker.embedding_space.is_none()
+                    || worker
+                        .tokenizer_identity
+                        .as_deref()
+                        .is_none_or(str::is_empty)
+                    || worker
+                        .instruction_revision
+                        .as_deref()
+                        .is_none_or(str::is_empty)
+                {
+                    return Err(configuration(format!(
+                        "Qwen3 embedding build {id} needs tokenizer, instruction and embedding-space identity"
+                    )));
+                }
+            }
+            LocalWorkerAdapterKind::Qwen3Reranker => {
+                if worker
+                    .tokenizer_identity
+                    .as_deref()
+                    .is_none_or(str::is_empty)
+                    || worker
+                        .instruction_revision
+                        .as_deref()
+                        .is_none_or(str::is_empty)
+                {
+                    return Err(configuration(format!(
+                        "Qwen3 reranker build {id} needs tokenizer and instruction identity"
+                    )));
+                }
+            }
+            LocalWorkerAdapterKind::PpOcrv6 => {
+                if worker
+                    .preprocessing_identity
+                    .as_deref()
+                    .is_none_or(str::is_empty)
+                    || worker
+                        .requested_execution_provider
+                        .as_deref()
+                        .is_none_or(str::is_empty)
+                    || worker
+                        .actual_execution_provider
+                        .as_deref()
+                        .is_none_or(str::is_empty)
+                {
+                    return Err(configuration(format!(
+                        "PP-OCRv6 build {id} needs preprocessing and execution-provider identity"
+                    )));
+                }
+            }
+        }
+    }
+    if matches!(
+        build.license.status,
+        ModelLicenseStatus::Declared
+            | ModelLicenseStatus::Verified
+            | ModelLicenseStatus::Restricted
+    ) && build
+        .license
+        .expression
+        .as_deref()
+        .is_none_or(str::is_empty)
+    {
+        return Err(configuration(format!(
+            "model build {id} with a reviewed license status needs license.expression"
+        )));
+    }
+    if matches!(
+        provenance.source_kind,
+        ModelSourceKind::RuntimeDownloadable | ModelSourceKind::RuntimeBundled
+    ) && (provenance.upstream.as_deref().is_none_or(str::is_empty)
+        || provenance
+            .source_revision
+            .as_deref()
+            .is_none_or(str::is_empty)
+        || provenance.artifact_sha256.is_none()
+        || build.license.status != ModelLicenseStatus::Verified
+        || build.license.expression.is_none()
+        || build.license.license_url.is_none()
+        || build.license.license_text_sha256.is_none())
+    {
+        return Err(configuration(format!(
+            "runtime-managed model build {id} needs immutable provenance and a verified license receipt"
+        )));
+    }
+    Ok(())
 }
 
 fn configuration(message: impl Into<String>) -> ContractError {
@@ -1868,11 +2232,12 @@ fn validate_quota_limit(name: &str, limit: &QuotaLimitConfig) -> Result<(), Cont
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
     use std::path::PathBuf;
 
     use super::{
-        BuiltinTool, ObserverAccess, ProviderCapability, ProviderProtocol, QuotaLimitConfig,
-        RuntimeConfig, provider_serves_data_plane,
+        BuiltinTool, ModelLicenseStatus, ModelSourceKind, ObserverAccess, ProviderCapability,
+        ProviderProtocol, QuotaLimitConfig, RuntimeConfig, provider_serves_data_plane,
     };
 
     #[test]
@@ -1880,6 +2245,62 @@ mod tests {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
         RuntimeConfig::load(path).expect("example registry must remain valid");
+    }
+
+    #[test]
+    fn example_builds_expose_supply_chain_ownership_without_guessing_licenses() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let config = RuntimeConfig::load(path).unwrap();
+        assert!(config.model_builds.values().all(|build| {
+            build.provenance.upstream.is_some()
+                && matches!(
+                    build.provenance.source_kind,
+                    ModelSourceKind::UserManaged
+                        | ModelSourceKind::ProviderManaged
+                        | ModelSourceKind::RuntimeDownloadable
+                        | ModelSourceKind::RuntimeBundled
+                )
+        }));
+        assert!(config.model_builds.values().all(|build| {
+            !matches!(
+                build.provenance.source_kind,
+                ModelSourceKind::RuntimeDownloadable | ModelSourceKind::RuntimeBundled
+            ) || (build.provenance.source_revision.is_some()
+                && build.provenance.artifact_sha256.is_some()
+                && build.license.status == ModelLicenseStatus::Verified
+                && build.license.license_text_sha256.is_some())
+        }));
+        assert_eq!(
+            config.model_builds["qwen3_5_2b_mlx"].license.status,
+            ModelLicenseStatus::Unreviewed
+        );
+        assert_eq!(
+            config.model_builds["yunet_2026may_onnx"]
+                .provenance
+                .artifact_sha256
+                .as_deref(),
+            Some("ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0")
+        );
+    }
+
+    #[test]
+    fn runtime_managed_builds_require_immutable_verified_license_receipts() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let mut config = RuntimeConfig::load(path).unwrap();
+        let build = config.model_builds.get_mut("qwen3_5_2b_mlx").unwrap();
+        build.provenance.source_kind = ModelSourceKind::RuntimeDownloadable;
+        assert!(config.validate().is_err());
+
+        let build = config.model_builds.get_mut("qwen3_5_2b_mlx").unwrap();
+        build.provenance.source_revision = Some("immutable-revision".into());
+        build.provenance.artifact_sha256 = Some("a".repeat(64));
+        build.license.status = ModelLicenseStatus::Verified;
+        build.license.expression = Some("Apache-2.0".into());
+        build.license.license_url = Some("https://example.invalid/license".into());
+        build.license.license_text_sha256 = Some("b".repeat(64));
+        config.validate().unwrap();
     }
 
     #[test]
@@ -1963,13 +2384,18 @@ mod tests {
     }
 
     #[test]
-    fn app_intent_acl_is_optional_but_references_known_unique_intents() {
+    fn app_intent_acl_omission_denies_and_operator_all_is_explicit() {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
         let mut config = RuntimeConfig::load(path).unwrap();
         let app = config.apps.get_mut("example-local-consumer").unwrap();
         app.allowed_intents = None;
-        assert!(app.allows_intent("reasoning.solve"));
+        assert!(!app.allows_intent("reasoning.solve"));
+
+        app.allow_all_intents = true;
+        assert!(config.validate().is_err());
+        let app = config.apps.get_mut("example-local-consumer").unwrap();
+        app.allow_all_intents = false;
 
         app.allowed_intents = Some(vec!["text.summarize".into()]);
         assert!(app.allows_intent("text.summarize"));
@@ -1992,6 +2418,159 @@ mod tests {
     }
 
     #[test]
+    fn resource_admin_cannot_have_an_ambiguous_intent_grant() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let mut config = RuntimeConfig::load(path).unwrap();
+        let operator = config.apps.get_mut("local-operator").unwrap();
+        operator.allow_all_intents = false;
+        assert!(config.validate().is_err());
+        config
+            .apps
+            .get_mut("local-operator")
+            .unwrap()
+            .allowed_intents = Some(Vec::new());
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn app_routing_defaults_and_intent_rules_cross_validate_registry_identity() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let mut config = RuntimeConfig::load(path).unwrap();
+        let app = config.apps.get_mut("example-local-consumer").unwrap();
+        app.routing = Some(crate::AppRoutingConfig {
+            deployment_ids: BTreeSet::from(["ollama_qwen3_5_2b".into()]),
+            model_profile_ids: BTreeSet::new(),
+            intents: BTreeMap::from([
+                (
+                    "text.summarize".into(),
+                    crate::RoutingGrantConfig {
+                        deployment_ids: BTreeSet::from(["ollama_qwen3_5_4b".into()]),
+                        model_profile_ids: BTreeSet::new(),
+                    },
+                ),
+                ("audio.align".into(), crate::RoutingGrantConfig::default()),
+            ]),
+        });
+        config.validate().unwrap();
+        let routing = config.apps["example-local-consumer"]
+            .routing
+            .as_ref()
+            .unwrap();
+        assert!(
+            routing
+                .grant_for("text.proofread")
+                .deployment_ids
+                .contains("ollama_qwen3_5_2b")
+        );
+        assert!(
+            routing
+                .grant_for("text.summarize")
+                .deployment_ids
+                .contains("ollama_qwen3_5_4b")
+        );
+        assert!(routing.grant_for("audio.align").deployment_ids.is_empty());
+
+        config
+            .apps
+            .get_mut("example-local-consumer")
+            .unwrap()
+            .routing
+            .as_mut()
+            .unwrap()
+            .deployment_ids
+            .insert("missing".into());
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn tracked_shape_fixture_freezes_the_minimum_text_edit_and_tts_grants() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let config = RuntimeConfig::load(path).unwrap();
+        let intent = &config.intents["text.edit"];
+        assert_eq!(intent.input_modalities, vec![crate::Modality::Text]);
+        assert_eq!(intent.output_modalities, vec![crate::Modality::Text]);
+        assert_eq!(
+            config.model_profiles["qwen3_5_4b"].ratings["text.edit"].level,
+            crate::CapabilityLevel::Foundational
+        );
+        assert_eq!(
+            config.model_profiles["qwen3_5_4b"].ratings["text.edit"].status,
+            crate::EvaluationStatus::Provisional
+        );
+
+        let app = &config.apps["example-shape-consumer"];
+        assert_eq!(
+            app.allowed_intents.as_deref(),
+            Some(&["text.edit".into(), "speech.synthesize".into()][..])
+        );
+        assert_eq!(
+            app.allowed_provider_access_classes,
+            BTreeSet::from([crate::ProviderAccessClass::Standard])
+        );
+        assert!(app.allowed_cloud_input_modalities.is_empty());
+        assert!(app.allowed_builtin_tools.is_empty());
+        assert_eq!(
+            app.request_overrides.capability_floor,
+            vec![
+                crate::CapabilityLevel::Foundational,
+                crate::CapabilityLevel::Capable
+            ]
+        );
+        assert_eq!(app.request_overrides.fallback, vec![crate::Fallback::None]);
+        assert_eq!(
+            app.routing.as_ref().unwrap().global_grant(),
+            crate::RoutingGrantConfig::default()
+        );
+
+        let edit = app.routing.as_ref().unwrap().grant_for("text.edit");
+        assert_eq!(
+            edit.deployment_ids,
+            BTreeSet::from(["ollama_qwen3_5_4b".into()])
+        );
+        assert!(edit.model_profile_ids.is_empty());
+        let speech = app.routing.as_ref().unwrap().grant_for("speech.synthesize");
+        assert_eq!(
+            speech.deployment_ids,
+            BTreeSet::from(["mlx_qwen3_tts_custom_voice_1_7b".into()])
+        );
+        assert!(speech.model_profile_ids.is_empty());
+    }
+
+    #[test]
+    fn routing_config_rejects_unknown_nested_fields() {
+        let source = include_str!("../../../config/infer.example.toml");
+        let invalid = source.replacen(
+            "[apps.example-shape-consumer.routing]\n",
+            "[apps.example-shape-consumer.routing]\nphysical_models = [\"forbidden\"]\n",
+            1,
+        );
+        assert!(toml::from_str::<RuntimeConfig>(&invalid).is_err());
+    }
+
+    #[test]
+    fn intent_routing_rule_cannot_exceed_the_app_intent_ceiling() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let mut config = RuntimeConfig::load(path).unwrap();
+        config
+            .apps
+            .get_mut("example-shape-consumer")
+            .unwrap()
+            .routing
+            .as_mut()
+            .unwrap()
+            .intents
+            .insert(
+                "text.summarize".into(),
+                crate::RoutingGrantConfig::default(),
+            );
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
     fn app_builtin_tool_acl_is_explicit_and_defaults_to_deny() {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
@@ -2004,13 +2583,13 @@ mod tests {
     }
 
     #[test]
-    fn app_speech_voice_allowlist_is_optional_and_alias_only() {
+    fn app_speech_voice_allowlist_omission_denies_and_aliases_are_explicit() {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
         let mut config = RuntimeConfig::load(path).unwrap();
         let app = config.apps.get_mut("example-local-consumer").unwrap();
         app.allowed_speech_voice_aliases = None;
-        assert!(app.allows_speech_voice("legacy-provider-speaker"));
+        assert!(!app.allows_speech_voice("legacy-provider-speaker"));
 
         app.allowed_speech_voice_aliases =
             Some(vec![crate::audio::SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1.into()]);

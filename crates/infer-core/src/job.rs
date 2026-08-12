@@ -13,6 +13,18 @@ pub struct JobSnapshot {
     pub id: String,
     pub app_id: String,
     pub intent: String,
+    /// Exact Consumer Core identity admitted for the submission. This is
+    /// payload-free admission provenance and survives durable recovery.
+    #[serde(
+        rename = "consumer_core_contract",
+        alias = "consumer_contract_version",
+        default = "unknown_legacy_consumer_contract"
+    )]
+    pub consumer_core_contract: String,
+    /// Exact capability schema identity admitted for this Job. Core-owned
+    /// control operations have no capability contract and omit the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capability_contract: Option<String>,
     pub provider: String,
     pub deployment: String,
     pub model_profile: String,
@@ -32,6 +44,10 @@ pub struct JobSnapshot {
     #[serde(default)]
     pub attempts: Vec<AttemptSnapshot>,
     pub error: Option<String>,
+}
+
+fn unknown_legacy_consumer_contract() -> String {
+    "legacy-unknown".into()
 }
 
 /// Lightweight, payload-free projection used by bounded Job collection
@@ -121,7 +137,15 @@ string_enum!(AttemptTrigger {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RoutingDecision {
     pub capability_floor: CapabilityLevel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub named_route: Option<NamedRouteDecision>,
     pub candidates: Vec<CandidateDecision>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct NamedRouteDecision {
+    pub kind: String,
+    pub ordered_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -158,7 +182,10 @@ string_enum!(CandidateReasonCode {
     OfflineRequired => "offline_required",
     CapabilityBelowFloor => "capability_below_floor",
     ReasoningEffortUnsupported => "reasoning_effort_unsupported",
-    CostLimitExceeded => "cost_limit_exceeded"
+    CostLimitExceeded => "cost_limit_exceeded",
+    RoutingGrantExcluded => "routing_grant_excluded",
+    NamedRouteMismatch => "named_route_mismatch",
+    NamedRouteFallbackDisabled => "named_route_fallback_disabled"
 });
 
 string_enum!(JobState {
@@ -172,7 +199,9 @@ string_enum!(JobState {
 
 #[cfg(test)]
 mod tests {
-    use super::JobPageCursor;
+    use serde_json::json;
+
+    use super::{JobPageCursor, JobSnapshot};
 
     #[test]
     fn job_page_cursor_round_trips_without_hiding_its_sort_key() {
@@ -182,5 +211,41 @@ mod tests {
         assert_eq!(cursor.to_string(), "1234:resp_one");
         assert!("-1:resp_one".parse::<JobPageCursor>().is_err());
         assert!("1234:".parse::<JobPageCursor>().is_err());
+    }
+
+    #[test]
+    fn current_job_wire_reads_legacy_snapshots_without_relabeling_them() {
+        let legacy = json!({
+            "id":"resp_legacy", "app_id":"legacy", "intent":"text.summarize",
+            "provider":"p", "deployment":"d", "model_profile":"m", "model_build":"b",
+            "physical_model":"physical", "placement":"local", "capability_level":"foundational",
+            "evaluation_status":"provisional", "resource_class":"light", "state":"succeeded",
+            "policy":"local-first", "priority":"normal",
+            "constraints":{},
+            "routing":{"capability_floor":"foundational","candidates":[]},
+            "attempts":[], "error":null
+        });
+        let snapshot: JobSnapshot = serde_json::from_value(legacy).unwrap();
+        assert_eq!(snapshot.consumer_core_contract, "legacy-unknown");
+        assert_eq!(snapshot.capability_contract, None);
+    }
+
+    #[test]
+    fn legacy_alias_is_read_but_current_wire_only_writes_core_identity() {
+        let legacy = json!({
+            "id":"resp_legacy", "app_id":"legacy", "intent":"text.summarize",
+            "consumer_contract_version":"0.1.0-candidate.4",
+            "provider":"p", "deployment":"d", "model_profile":"m", "model_build":"b",
+            "physical_model":"physical", "placement":"local", "capability_level":"foundational",
+            "evaluation_status":"provisional", "resource_class":"light", "state":"succeeded",
+            "policy":"local-first", "priority":"normal", "constraints":{},
+            "routing":{"capability_floor":"foundational","candidates":[]},
+            "attempts":[], "error":null
+        });
+        let snapshot: JobSnapshot = serde_json::from_value(legacy).unwrap();
+        assert_eq!(snapshot.consumer_core_contract, "0.1.0-candidate.4");
+        let current = serde_json::to_value(snapshot).unwrap();
+        assert_eq!(current["consumer_core_contract"], "0.1.0-candidate.4");
+        assert!(current.get("consumer_contract_version").is_none());
     }
 }

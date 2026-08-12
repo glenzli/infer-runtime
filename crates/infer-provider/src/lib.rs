@@ -3,11 +3,13 @@
 mod audio_stream;
 mod audio_worker;
 mod codex_app_server;
+mod ocr_worker;
 mod ollama_vision;
 mod onnx;
 mod probe;
+mod text_retrieval_worker;
 
-use std::{pin::Pin, sync::Arc};
+use std::{pin::Pin, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -25,6 +27,9 @@ pub use audio_worker::{
     AudioExecutionOutput, AudioExecutor, AudioWorkerExecutor, DynAudioExecutor,
 };
 pub use codex_app_server::CodexAppServerProvider;
+pub use ocr_worker::{
+    DynOcrExecutor, OcrBuildContract, OcrExecutionOutput, OcrExecutor, OcrWorkerExecutor,
+};
 pub use ollama_vision::{
     ClassificationReviewExecutionOutput, DynImageUnderstandingExecutor,
     ImageDescriptionExecutionOutput, ImageUnderstandingExecutor, OllamaVisionExecutor,
@@ -40,6 +45,11 @@ pub use onnx::{
 pub use probe::{
     ProviderProbeCheck, ProviderProbeReport, ProviderProbeStatus, probe_responses_provider,
     probe_responses_provider_with_effort,
+};
+pub use text_retrieval_worker::{
+    DynRetrievalExecutor, RetrievalBuildContract, RetrievalEmbeddingExecutionOutput,
+    RetrievalEmbeddingKind, RetrievalExecutor, RetrievalRerankExecutionOutput,
+    RetrievalWorkerExecutor,
 };
 
 pub type ProviderByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, ProviderError>> + Send>>;
@@ -91,7 +101,11 @@ pub enum ProviderError {
     /// prompt or other sensitive request context and therefore must not enter
     /// default API errors, logs, Job snapshots, or the usage ledger.
     #[error("provider returned HTTP {status}")]
-    Upstream { status: u16, body: String },
+    Upstream {
+        status: u16,
+        body: String,
+        retry_after: Option<Duration>,
+    },
     #[error("provider returned malformed JSON: {0}")]
     Malformed(#[from] serde_json::Error),
     #[error("local executor I/O error: {0}")]
@@ -129,6 +143,26 @@ impl ProviderError {
             Self::Malformed(_) | Self::Protocol(_) | Self::NativeRuntime(_) => {
                 ProviderFailureKind::Protocol
             }
+        }
+    }
+
+    pub fn retry_after(&self) -> Option<Duration> {
+        match self {
+            Self::Upstream { retry_after, .. } => *retry_after,
+            _ => None,
+        }
+    }
+
+    /// Payload-free summary safe for public responses, Job snapshots, audit,
+    /// and ordinary logs. `Display` remains an internal diagnostic surface.
+    pub fn public_message(&self) -> &'static str {
+        match self.kind() {
+            ProviderFailureKind::Authentication => "provider authentication failed",
+            ProviderFailureKind::RateLimited => "provider rate limit exceeded",
+            ProviderFailureKind::Timeout => "provider timed out",
+            ProviderFailureKind::Unavailable => "provider is unavailable",
+            ProviderFailureKind::InvalidRequest => "provider rejected the request",
+            ProviderFailureKind::Protocol => "provider protocol failed",
         }
     }
 }
@@ -188,13 +222,29 @@ impl ResponsesProvider {
             Ok(response)
         } else {
             let status = response.status().as_u16();
+            let retry_after = parse_retry_after(response.headers());
             let body = response
                 .text()
                 .await
                 .unwrap_or_else(|_| "<unreadable provider error body>".into());
-            Err(ProviderError::Upstream { status, body })
+            Err(ProviderError::Upstream {
+                status,
+                body,
+                retry_after,
+            })
         }
     }
+}
+
+fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    let value = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
+    if let Ok(seconds) = value.parse::<u64>() {
+        return Some(Duration::from_secs(seconds));
+    }
+    httpdate::parse_http_date(value)
+        .ok()?
+        .duration_since(std::time::SystemTime::now())
+        .ok()
 }
 
 #[async_trait]
@@ -232,6 +282,7 @@ mod tests {
             ProviderError::Upstream {
                 status: 429,
                 body: String::new(),
+                retry_after: None,
             }
             .kind(),
             ProviderFailureKind::RateLimited
@@ -240,6 +291,7 @@ mod tests {
             ProviderError::Upstream {
                 status: 503,
                 body: String::new(),
+                retry_after: None,
             }
             .kind(),
             ProviderFailureKind::Unavailable
@@ -248,6 +300,7 @@ mod tests {
             ProviderError::Upstream {
                 status: 400,
                 body: String::new(),
+                retry_after: None,
             }
             .kind(),
             ProviderFailureKind::InvalidRequest
@@ -259,6 +312,7 @@ mod tests {
         let error = ProviderError::Upstream {
             status: 400,
             body: "prompt=private meeting notes".into(),
+            retry_after: None,
         };
         assert_eq!(error.to_string(), "provider returned HTTP 400");
     }

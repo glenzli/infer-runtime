@@ -56,6 +56,26 @@ pub struct StoredBuildManifest {
     pub onnx: OnnxModelBuildConfig,
 }
 
+/// Exact multi-file identity for a trusted local worker Build.
+///
+/// The artifact store owns only immutable bytes and their stable names. Typed
+/// Providers continue to own preprocessing, instruction templates and output
+/// interpretation; this is not a generic execution API.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LocalWorkerBuildManifest {
+    pub schema_version: u16,
+    pub build_id: String,
+    pub adapter: String,
+    pub artifacts: std::collections::BTreeMap<String, ArtifactIdentityConfig>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedLocalWorkerBuild {
+    pub runtime_root: PathBuf,
+    pub manifest: LocalWorkerBuildManifest,
+}
+
 impl ArtifactStore {
     pub fn from_config(config: &ArtifactStoreConfig) -> Result<Self, ArtifactError> {
         let root = match config.root.as_deref() {
@@ -127,6 +147,115 @@ impl ArtifactStore {
         })?;
         self.verify_manifest(build_id, onnx)?;
         self.publish_file(&format!("{build_id}:{name}"), source.as_ref(), identity)
+    }
+
+    /// Publish and verify every file needed by one typed local worker Build,
+    /// then atomically publish its immutable manifest.
+    pub fn publish_local_worker_build(
+        &self,
+        manifest: &LocalWorkerBuildManifest,
+        sources: &std::collections::BTreeMap<String, PathBuf>,
+    ) -> Result<PathBuf, ArtifactError> {
+        validate_local_worker_manifest(manifest)?;
+        if sources.keys().ne(manifest.artifacts.keys()) {
+            return Err(ArtifactError::InvalidIdentity(format!(
+                "local worker Build {} sources do not match its artifact manifest",
+                manifest.build_id
+            )));
+        }
+        for (name, identity) in &manifest.artifacts {
+            let source = sources.get(name).expect("validated source identity");
+            self.publish_file(&format!("{}:{name}", manifest.build_id), source, identity)?;
+        }
+        self.write_local_worker_manifest(manifest)?;
+        self.materialize_local_worker_build(manifest)
+    }
+
+    /// Resolve a typed local worker Build, rejecting manifest drift or any
+    /// modified artifact before the Provider process is started.
+    pub fn resolve_local_worker_build(
+        &self,
+        expected: &LocalWorkerBuildManifest,
+    ) -> Result<PathBuf, ArtifactError> {
+        validate_local_worker_manifest(expected)?;
+        let path = self.local_worker_manifest_path(&expected.build_id)?;
+        let actual: LocalWorkerBuildManifest = serde_json::from_reader(File::open(path)?)?;
+        if actual != *expected {
+            return Err(ArtifactError::ManifestDrift(expected.build_id.clone()));
+        }
+        self.materialize_local_worker_build(expected)
+    }
+
+    /// Resolve from the compact artifact-set identity carried by versioned
+    /// config. Per-file receipts remain private in the managed manifest.
+    pub fn resolve_local_worker_build_identity(
+        &self,
+        build_id: &str,
+        adapter: &str,
+        artifact_set_sha256: &str,
+    ) -> Result<ResolvedLocalWorkerBuild, ArtifactError> {
+        validate_build_id(build_id)?;
+        validate_build_id(adapter)?;
+        validate_sha256(artifact_set_sha256)?;
+        let path = self.local_worker_manifest_path(build_id)?;
+        let manifest: LocalWorkerBuildManifest = serde_json::from_reader(File::open(path)?)?;
+        if manifest.build_id != build_id
+            || manifest.adapter != adapter
+            || local_worker_artifact_set_sha256(&manifest) != artifact_set_sha256
+        {
+            return Err(ArtifactError::ManifestDrift(build_id.into()));
+        }
+        let runtime_root = self.materialize_local_worker_build(&manifest)?;
+        Ok(ResolvedLocalWorkerBuild {
+            runtime_root,
+            manifest,
+        })
+    }
+
+    fn materialize_local_worker_build(
+        &self,
+        manifest: &LocalWorkerBuildManifest,
+    ) -> Result<PathBuf, ArtifactError> {
+        let root = self
+            .root
+            .join("builds")
+            .join(&manifest.build_id)
+            .join("runtime");
+        private_directory(&root)?;
+        for (relative, identity) in &manifest.artifacts {
+            let blob = self.blob_path(&identity.sha256)?;
+            verify_file(
+                &format!("{}:{relative}", manifest.build_id),
+                &blob,
+                identity,
+            )?;
+            let target = root.join(relative);
+            private_directory(target.parent().expect("artifact has a runtime parent"))?;
+            if target.exists() {
+                if !same_file(&blob, &target)? {
+                    verify_file(
+                        &format!("{}:{relative}", manifest.build_id),
+                        &target,
+                        identity,
+                    )?;
+                }
+            } else if fs::hard_link(&blob, &target).is_err() {
+                let mut input = File::open(&blob)?;
+                let mut output = private_file(&target)?;
+                std::io::copy(&mut input, &mut output)?;
+                output.sync_all()?;
+            }
+        }
+        Ok(root)
+    }
+
+    fn local_worker_manifest_path(&self, build_id: &str) -> Result<PathBuf, ArtifactError> {
+        validate_build_id(build_id)?;
+        Ok(self
+            .root
+            .join("builds")
+            .join(build_id)
+            .join("worker-manifest.json"))
     }
 
     pub fn resolve_onnx_auxiliary(
@@ -285,6 +414,101 @@ impl ArtifactStore {
         }
         Ok(())
     }
+
+    fn write_local_worker_manifest(
+        &self,
+        manifest: &LocalWorkerBuildManifest,
+    ) -> Result<(), ArtifactError> {
+        let path = self.local_worker_manifest_path(&manifest.build_id)?;
+        let directory = path.parent().expect("manifest has a build directory");
+        private_directory(directory)?;
+        if path.exists() {
+            let existing: LocalWorkerBuildManifest = serde_json::from_reader(File::open(&path)?)?;
+            return if existing == *manifest {
+                Ok(())
+            } else {
+                Err(ArtifactError::ManifestDrift(manifest.build_id.clone()))
+            };
+        }
+        let temporary = directory.join(format!("worker-manifest.{}.partial", Uuid::new_v4()));
+        let mut file = private_file(&temporary)?;
+        serde_json::to_writer_pretty(&mut file, manifest)?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+        drop(file);
+        if let Err(error) = fs::rename(&temporary, &path) {
+            if path.exists() {
+                let existing: LocalWorkerBuildManifest =
+                    serde_json::from_reader(File::open(&path)?)?;
+                let _ = fs::remove_file(&temporary);
+                if existing == *manifest {
+                    return Ok(());
+                }
+                return Err(ArtifactError::ManifestDrift(manifest.build_id.clone()));
+            }
+            return Err(error.into());
+        }
+        Ok(())
+    }
+}
+
+fn validate_local_worker_manifest(
+    manifest: &LocalWorkerBuildManifest,
+) -> Result<(), ArtifactError> {
+    validate_build_id(&manifest.build_id)?;
+    validate_build_id(&manifest.adapter)?;
+    if manifest.schema_version != 1 || manifest.artifacts.is_empty() {
+        return Err(ArtifactError::InvalidIdentity(format!(
+            "local worker Build {} needs schema version 1 and at least one artifact",
+            manifest.build_id
+        )));
+    }
+    for (name, identity) in &manifest.artifacts {
+        validate_artifact_relative_path(name)?;
+        validate_sha256(&identity.sha256)?;
+        if identity.size_bytes == 0
+            || identity.source_url.trim().is_empty()
+            || identity.source_revision.trim().is_empty()
+            || identity.license_spdx.trim().is_empty()
+        {
+            return Err(ArtifactError::InvalidIdentity(format!(
+                "local worker Build {} artifact {name} has incomplete supply-chain identity",
+                manifest.build_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn local_worker_artifact_set_sha256(manifest: &LocalWorkerBuildManifest) -> String {
+    let mut hasher = Sha256::new();
+    for (name, identity) in &manifest.artifacts {
+        hasher.update(name.as_bytes());
+        hasher.update([0]);
+        hasher.update(identity.sha256.as_bytes());
+        hasher.update(b"\n");
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+fn validate_artifact_relative_path(value: &str) -> Result<(), ArtifactError> {
+    let path = Path::new(value);
+    let valid = !value.is_empty()
+        && !value.contains('\\')
+        && !path.is_absolute()
+        && path.components().all(|component| {
+            matches!(component, std::path::Component::Normal(segment) if !segment.is_empty())
+        })
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/')
+        });
+    if valid {
+        Ok(())
+    } else {
+        Err(ArtifactError::InvalidIdentity(format!(
+            "invalid local worker artifact path {value:?}"
+        )))
+    }
 }
 
 fn verify_file(
@@ -392,6 +616,21 @@ fn private_file(path: &Path) -> Result<File, std::io::Error> {
         options.mode(0o600);
     }
     options.open(path)
+}
+
+fn same_file(left: &Path, right: &Path) -> Result<bool, std::io::Error> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let left = fs::metadata(left)?;
+        let right = fs::metadata(right)?;
+        Ok(left.dev() == right.dev() && left.ino() == right.ino())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (left, right);
+        Ok(false)
+    }
 }
 
 #[cfg(test)]
@@ -523,5 +762,85 @@ mod tests {
             store.resolve_onnx("siglip-text", &build),
             Err(ArtifactError::SizeMismatch { .. }) | Err(ArtifactError::DigestMismatch { .. })
         ));
+    }
+
+    #[test]
+    fn publishes_and_reverifies_typed_local_worker_build() {
+        let directory = tempdir().unwrap();
+        let model = directory.path().join("model.safetensors");
+        let tokenizer = directory.path().join("tokenizer.json");
+        fs::write(&model, b"model bytes").unwrap();
+        fs::write(&tokenizer, b"tokenizer bytes").unwrap();
+        let manifest = LocalWorkerBuildManifest {
+            schema_version: 1,
+            build_id: "qwen3_embedding_0_6b_mlx".into(),
+            adapter: "qwen3_embedding".into(),
+            artifacts: BTreeMap::from([
+                (
+                    "model".into(),
+                    ArtifactIdentityConfig {
+                        sha256: format!("{:x}", Sha256::digest(b"model bytes")),
+                        size_bytes: b"model bytes".len() as u64,
+                        source_url: "https://example.invalid/model".into(),
+                        source_revision: "revision".into(),
+                        license_spdx: "Apache-2.0".into(),
+                    },
+                ),
+                (
+                    "tokenizer".into(),
+                    ArtifactIdentityConfig {
+                        sha256: format!("{:x}", Sha256::digest(b"tokenizer bytes")),
+                        size_bytes: b"tokenizer bytes".len() as u64,
+                        source_url: "https://example.invalid/tokenizer".into(),
+                        source_revision: "revision".into(),
+                        license_spdx: "Apache-2.0".into(),
+                    },
+                ),
+            ]),
+        };
+        let store = ArtifactStore::at(directory.path().join("store")).unwrap();
+        let published = store
+            .publish_local_worker_build(
+                &manifest,
+                &BTreeMap::from([("model".into(), model), ("tokenizer".into(), tokenizer)]),
+            )
+            .unwrap();
+        assert_eq!(
+            published,
+            store.resolve_local_worker_build(&manifest).unwrap()
+        );
+
+        fs::write(published.join("model"), b"tampered").unwrap();
+        assert!(matches!(
+            store.resolve_local_worker_build(&manifest),
+            Err(ArtifactError::SizeMismatch { .. }) | Err(ArtifactError::DigestMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn local_worker_manifest_rejects_incomplete_supply_chain_identity() {
+        let manifest = LocalWorkerBuildManifest {
+            schema_version: 1,
+            build_id: "ocr".into(),
+            adapter: "pp_ocrv6".into(),
+            artifacts: BTreeMap::from([(
+                "detection".into(),
+                ArtifactIdentityConfig {
+                    sha256: "0".repeat(64),
+                    size_bytes: 1,
+                    source_url: String::new(),
+                    source_revision: "revision".into(),
+                    license_spdx: "Apache-2.0".into(),
+                },
+            )]),
+        };
+        assert!(validate_local_worker_manifest(&manifest).is_err());
+    }
+
+    #[test]
+    fn local_worker_artifact_paths_cannot_escape_the_build_root() {
+        assert!(validate_artifact_relative_path("1_Pooling/config.json").is_ok());
+        assert!(validate_artifact_relative_path("../model").is_err());
+        assert!(validate_artifact_relative_path("/tmp/model").is_err());
     }
 }

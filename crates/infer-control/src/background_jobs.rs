@@ -173,8 +173,9 @@ impl Runtime {
     pub async fn submit_background(
         self: &Arc<Self>,
         app_id: &str,
-        mut request: ResponsesRequest,
+        request: ResponsesRequest,
     ) -> Result<BackgroundSubmission, RuntimeError> {
+        let mut request = request;
         if !self.background.is_enabled() {
             return Err(RuntimeError::BackgroundDisabled);
         }
@@ -200,6 +201,9 @@ impl Runtime {
             estimated_tokens: estimate_response_tokens(&request),
             id_prefix: "resp",
             expected_data_plane: "responses",
+            capability_contract: super::current_admitted_capability_contract(
+                "infer.responses@20260812.1",
+            ),
             durable_payload: Some(&request_ref),
         };
         let prepared = match self.prepare_job(app_id, preparation).await {
@@ -298,12 +302,13 @@ impl Runtime {
                 Err(error) => {
                     let mut snapshot = record.snapshot.clone();
                     snapshot.state = JobState::Failed;
-                    snapshot.error = Some(error.to_string());
+                    let public_error = error.public_message();
+                    snapshot.error = Some(public_error.clone());
                     let _ = self.persist_snapshot(
                         &snapshot,
                         AuditEventInput {
                             kind: "background.recovery_failed".into(),
-                            details: json!({"reason": error.to_string()}),
+                            details: json!({"reason": public_error}),
                         },
                     );
                     self.retire_background_input(&record.snapshot.id, record.request)

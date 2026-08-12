@@ -964,6 +964,7 @@ mod tests {
             build = "small"
             [apps.test-app]
             credential = { source = "environment", variable = "INFER_TEST_TOKEN" }
+            allowed_intents = []
             "#,
         )
         .unwrap()

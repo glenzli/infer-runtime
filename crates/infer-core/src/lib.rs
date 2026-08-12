@@ -7,8 +7,11 @@ mod audio;
 mod config;
 mod image_understanding;
 mod job;
+mod ocr;
 mod payload;
 mod request;
+mod retrieval;
+mod routing;
 mod streaming;
 mod vision;
 
@@ -18,12 +21,25 @@ pub use audio::*;
 pub use config::*;
 pub use image_understanding::*;
 pub use job::*;
+pub use ocr::*;
 pub use payload::*;
 pub use request::*;
+pub use retrieval::*;
+pub use routing::*;
 pub use streaming::*;
 pub use vision::*;
 
 pub const INFER_METADATA_PREFIX: &str = "infer.";
+/// Infra Discovery protocol identifier for the dated Consumer Core.
+pub const CONSUMER_CORE_PROTOCOL: &str = "infer-runtime.consumer-core";
+/// Opaque protocol version published in the Infra Discovery offer.
+pub const CONSUMER_CORE_VERSION: &str = "20260813.1";
+/// The only complete Consumer Core identity accepted by this Runtime release.
+pub const CONSUMER_CORE_CONTRACT: &str = "infer-runtime.consumer-core@20260813.1";
+/// Required on every Consumer data/control request, including contract probe.
+pub const CONSUMER_CORE_HEADER: &str = "Infer-Consumer-Contract";
+/// Exact capability schema identity selected for one typed data-plane request.
+pub const CAPABILITY_CONTRACT_HEADER: &str = "Infer-Capability-Contract";
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum ContractError {

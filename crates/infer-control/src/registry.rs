@@ -5,8 +5,9 @@ use std::{cmp::Ordering, collections::BTreeSet};
 use infer_core::{
     CandidateDecision, CandidateDecisionStatus, CandidateReasonCode, CapabilityLevel,
     CapabilityRating, EvaluationStatus, ExecutionRequirements, Fallback, IntentProfile, Modality,
-    Placement, PlacementPreference, PolicyProfile, ProviderAccessClass, ReasoningEffort,
-    RequestConstraints, ResourceClass, RoutingDecision, RuntimeConfig, SortKey,
+    NamedRouteDecision, NamedRouteRequest, Placement, PlacementPreference, PolicyProfile,
+    ProviderAccessClass, ReasoningEffort, RequestConstraints, ResourceClass, RoutingDecision,
+    RoutingGrantConfig, RuntimeConfig, SortKey,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,6 +44,9 @@ pub struct CandidatePlanningContext<'a> {
     pub reasoning_effort: Option<ReasoningEffort>,
     pub allowed_provider_access_classes: &'a BTreeSet<ProviderAccessClass>,
     pub allowed_cloud_input_modalities: &'a BTreeSet<Modality>,
+    /// Applicable App execution grant. An Intent-specific rule has already
+    /// replaced the App-global rule before candidate planning.
+    pub routing_grant: Option<&'a RoutingGrantConfig>,
     pub unavailable_providers: &'a BTreeSet<String>,
     /// Last known local resource inventory failures. Provider health and
     /// resource inventory intentionally remain separate: a provider can be
@@ -63,6 +67,7 @@ pub fn plan_candidates(
         reasoning_effort,
         allowed_provider_access_classes,
         allowed_cloud_input_modalities,
+        routing_grant,
         unavailable_providers,
         unavailable_deployments,
     } = context;
@@ -90,6 +95,23 @@ pub fn plan_candidates(
             continue;
         };
         let mut reason_codes = Vec::new();
+        if routing_grant
+            .is_some_and(|grant| !grant.allows_deployment(deployment_id, &build.profile))
+        {
+            reason_codes.push(CandidateReasonCode::RoutingGrantExcluded);
+        }
+        if let Some(target) = constraints.named_route.as_ref() {
+            match target.rank(deployment_id, &build.profile) {
+                None => reason_codes.push(CandidateReasonCode::NamedRouteMismatch),
+                Some(rank)
+                    if rank > 0
+                        && constraints.fallback.unwrap_or(Fallback::None) == Fallback::None =>
+                {
+                    reason_codes.push(CandidateReasonCode::NamedRouteFallbackDisabled);
+                }
+                Some(_) => {}
+            }
+        }
         if !allowed_provider_access_classes.contains(&provider.access_class) {
             reason_codes.push(CandidateReasonCode::ProviderAccessNotAllowed);
         }
@@ -225,13 +247,17 @@ pub fn plan_candidates(
     }
 
     eligible.sort_by(|left, right| {
-        compare_candidates(
-            &left.0,
-            &right.0,
-            &profile.order,
-            constraints.prefer,
-            capability_floor,
-        )
+        named_rank(constraints.named_route.as_ref(), &left.1)
+            .cmp(&named_rank(constraints.named_route.as_ref(), &right.1))
+            .then_with(|| {
+                compare_candidates(
+                    &left.0,
+                    &right.0,
+                    &profile.order,
+                    constraints.prefer,
+                    capability_floor,
+                )
+            })
     });
     let candidates = eligible
         .into_iter()
@@ -243,13 +269,17 @@ pub fn plan_candidates(
         })
         .collect();
     lower_capability.sort_by(|left, right| {
-        compare_candidates(
-            &left.0,
-            &right.0,
-            &profile.order,
-            constraints.prefer,
-            capability_floor,
-        )
+        named_rank(constraints.named_route.as_ref(), &left.1)
+            .cmp(&named_rank(constraints.named_route.as_ref(), &right.1))
+            .then_with(|| {
+                compare_candidates(
+                    &left.0,
+                    &right.0,
+                    &profile.order,
+                    constraints.prefer,
+                    capability_floor,
+                )
+            })
     });
     let lower_capability_candidates = lower_capability
         .into_iter()
@@ -265,9 +295,25 @@ pub fn plan_candidates(
         lower_capability_candidates,
         decision: RoutingDecision {
             capability_floor,
+            named_route: constraints.named_route.as_ref().map(|target| match target {
+                NamedRouteRequest::Deployments(ids) => NamedRouteDecision {
+                    kind: "deployment".into(),
+                    ordered_ids: ids.clone(),
+                },
+                NamedRouteRequest::ModelProfiles(ids) => NamedRouteDecision {
+                    kind: "model_profile".into(),
+                    ordered_ids: ids.clone(),
+                },
+            }),
             candidates: decisions,
         },
     }
+}
+
+fn named_rank(target: Option<&NamedRouteRequest>, candidate: &Candidate) -> usize {
+    target
+        .and_then(|target| target.rank(&candidate.deployment_id, &candidate.model_profile_id))
+        .unwrap_or(usize::MAX)
 }
 
 /// Rehydrates one admission-time deployment from the same immutable config
@@ -316,6 +362,7 @@ pub fn select_candidate(
             reasoning_effort,
             allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
             allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+            routing_grant: None,
             unavailable_providers: &BTreeSet::new(),
             unavailable_deployments: &BTreeSet::new(),
         },
@@ -470,6 +517,7 @@ mod tests {
             build = "strong_cloud"
             [apps.test]
             credential = { source = "environment", variable = "INFER_TEST_TOKEN" }
+            allowed_intents = ["reasoning.solve"]
             "#,
         )
         .unwrap()
@@ -491,6 +539,7 @@ mod tests {
                 reasoning_effort: None,
                 allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
                 allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: None,
                 unavailable_providers: &BTreeSet::new(),
                 unavailable_deployments: &BTreeSet::new(),
             },
@@ -532,6 +581,7 @@ mod tests {
                 reasoning_effort: None,
                 allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
                 allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: None,
                 unavailable_providers: &BTreeSet::new(),
                 unavailable_deployments: &BTreeSet::new(),
             },
@@ -567,6 +617,7 @@ mod tests {
                 reasoning_effort: None,
                 allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
                 allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: None,
                 unavailable_providers: &BTreeSet::new(),
                 unavailable_deployments: &BTreeSet::new(),
             },
@@ -592,6 +643,7 @@ mod tests {
                     ProviderAccessClass::Subscription,
                 ]),
                 allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: None,
                 unavailable_providers: &BTreeSet::new(),
                 unavailable_deployments: &BTreeSet::new(),
             },
@@ -630,6 +682,7 @@ mod tests {
                 reasoning_effort: None,
                 allowed_provider_access_classes: &allowed,
                 allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: None,
                 unavailable_providers: &BTreeSet::new(),
                 unavailable_deployments: &BTreeSet::new(),
             },
@@ -682,6 +735,7 @@ mod tests {
                 reasoning_effort: None,
                 allowed_provider_access_classes: &allowed,
                 allowed_cloud_input_modalities: &cloud_inputs,
+                routing_grant: None,
                 unavailable_providers: &BTreeSet::new(),
                 unavailable_deployments: &BTreeSet::new(),
             },
@@ -699,6 +753,7 @@ mod tests {
                 reasoning_effort: None,
                 allowed_provider_access_classes: &allowed,
                 allowed_cloud_input_modalities: &cloud_inputs,
+                routing_grant: None,
                 unavailable_providers: &BTreeSet::new(),
                 unavailable_deployments: &BTreeSet::new(),
             },
@@ -731,6 +786,7 @@ mod tests {
                 reasoning_effort: None,
                 allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
                 allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: None,
                 unavailable_providers: &BTreeSet::new(),
                 unavailable_deployments: &BTreeSet::new(),
             },
@@ -753,6 +809,7 @@ mod tests {
                 reasoning_effort: None,
                 allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
                 allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text, Modality::Image]),
+                routing_grant: None,
                 unavailable_providers: &BTreeSet::new(),
                 unavailable_deployments: &BTreeSet::new(),
             },
@@ -795,6 +852,7 @@ mod tests {
                 reasoning_effort: None,
                 allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
                 allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: None,
                 unavailable_providers: &BTreeSet::new(),
                 unavailable_deployments: &BTreeSet::new(),
             },
@@ -828,6 +886,7 @@ mod tests {
                 reasoning_effort: None,
                 allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
                 allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: None,
                 unavailable_providers: &BTreeSet::new(),
                 unavailable_deployments: &BTreeSet::new(),
             },
@@ -861,6 +920,7 @@ mod tests {
                 reasoning_effort: None,
                 allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
                 allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: None,
                 unavailable_providers: &BTreeSet::new(),
                 unavailable_deployments: &unavailable,
             },
@@ -902,7 +962,11 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(local_without_credential.deployment_id, "ollama_qwen3_6_35b");
+        assert_eq!(local_without_credential.placement, Placement::Local);
+        assert_ne!(
+            config.deployments[&local_without_credential.deployment_id].provider,
+            "deepseek-cloud"
+        );
 
         config
             .providers
@@ -935,7 +999,11 @@ mod tests {
             None,
         )
         .unwrap();
-        assert_eq!(local.deployment_id, "ollama_qwen3_6_35b");
+        assert_eq!(local.placement, Placement::Local);
+        assert_ne!(
+            config.deployments[&local.deployment_id].provider,
+            "deepseek-cloud"
+        );
     }
 
     #[test]
@@ -966,6 +1034,7 @@ mod tests {
                 reasoning_effort: Some(ReasoningEffort::Low),
                 allowed_provider_access_classes: &allowed,
                 allowed_cloud_input_modalities: &cloud_inputs,
+                routing_grant: None,
                 unavailable_providers: &empty,
                 unavailable_deployments: &empty,
             },
@@ -995,6 +1064,7 @@ mod tests {
                 reasoning_effort: Some(ReasoningEffort::Max),
                 allowed_provider_access_classes: &allowed,
                 allowed_cloud_input_modalities: &cloud_inputs,
+                routing_grant: None,
                 unavailable_providers: &empty,
                 unavailable_deployments: &empty,
             },
@@ -1012,6 +1082,7 @@ mod tests {
                 reasoning_effort: Some(ReasoningEffort::Low),
                 allowed_provider_access_classes: &allowed,
                 allowed_cloud_input_modalities: &cloud_inputs,
+                routing_grant: None,
                 unavailable_providers: &empty,
                 unavailable_deployments: &empty,
             },
@@ -1029,6 +1100,7 @@ mod tests {
                 reasoning_effort: Some(ReasoningEffort::Ultra),
                 allowed_provider_access_classes: &allowed,
                 allowed_cloud_input_modalities: &cloud_inputs,
+                routing_grant: None,
                 unavailable_providers: &empty,
                 unavailable_deployments: &empty,
             },
@@ -1072,6 +1144,7 @@ mod tests {
                     reasoning_effort: None,
                     allowed_provider_access_classes: &allowed,
                     allowed_cloud_input_modalities: &cloud_inputs,
+                    routing_grant: None,
                     unavailable_providers: &empty,
                     unavailable_deployments: &empty,
                 },
@@ -1087,7 +1160,12 @@ mod tests {
             .decision
             .candidates
             .iter()
-            .find(|candidate| candidate.deployment == "ollama_qwen3_6_35b")
+            .find(|candidate| {
+                config.deployments[&candidate.deployment].provider == "ollama-local"
+                    && candidate
+                        .reason_codes
+                        .contains(&CandidateReasonCode::CapabilityBelowFloor)
+            })
             .unwrap();
         assert_eq!(capable_local.status, CandidateDecisionStatus::Rejected);
         assert_eq!(
@@ -1158,6 +1236,7 @@ mod tests {
                 reasoning_effort: None,
                 allowed_provider_access_classes: &allowed,
                 allowed_cloud_input_modalities: &cloud_inputs,
+                routing_grant: None,
                 unavailable_providers: &empty,
                 unavailable_deployments: &empty,
             },
@@ -1213,6 +1292,7 @@ mod tests {
                 reasoning_effort: None,
                 allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
                 allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: None,
                 unavailable_providers: &empty,
                 unavailable_deployments: &empty,
             },
@@ -1239,6 +1319,7 @@ mod tests {
                     ProviderAccessClass::Subscription,
                 ]),
                 allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: None,
                 unavailable_providers: &empty,
                 unavailable_deployments: &empty,
             },
@@ -1264,6 +1345,179 @@ mod tests {
         .unwrap();
         assert_eq!(selected.deployment_id, "ollama_qwen3_5_2b");
         assert_eq!(selected.resource_class, infer_core::ResourceClass::Light);
+    }
+
+    #[test]
+    fn bounded_text_deduplication_selects_the_foundational_local_build() {
+        let config: RuntimeConfig =
+            toml::from_str(include_str!("../../../config/infer.example.toml")).unwrap();
+        config.validate().unwrap();
+        let intent = config.intent("text.deduplicate").unwrap();
+        let selected = select_candidate(
+            &config,
+            "text.deduplicate",
+            intent,
+            &config.profiles[intent.default_policy.as_deref().unwrap()],
+            &RequestConstraints::default(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(selected.deployment_id, "ollama_qwen3_5_4b");
+        assert_eq!(selected.capability_level, CapabilityLevel::Foundational);
+        assert_eq!(selected.resource_class, infer_core::ResourceClass::Standard);
+    }
+
+    #[test]
+    fn named_route_is_ordered_and_never_escapes_the_effective_intent_grant() {
+        let config: RuntimeConfig =
+            toml::from_str(include_str!("../../../config/infer.example.toml")).unwrap();
+        config.validate().unwrap();
+        let intent = config.intent("text.summarize").unwrap();
+        let constraints = RequestConstraints {
+            named_route: Some(NamedRouteRequest::Deployments(vec![
+                "ollama_qwen3_5_4b".into(),
+                "ollama_qwen3_5_2b".into(),
+            ])),
+            fallback: Some(Fallback::Equivalent),
+            ..Default::default()
+        };
+        let grant = RoutingGrantConfig {
+            deployment_ids: BTreeSet::from([
+                "ollama_qwen3_5_2b".into(),
+                "ollama_qwen3_5_4b".into(),
+            ]),
+            model_profile_ids: BTreeSet::new(),
+        };
+        let empty = BTreeSet::new();
+        let plan = plan_candidates(
+            &config,
+            "text.summarize",
+            intent,
+            &config.profiles["cost-first"],
+            CandidatePlanningContext {
+                constraints: &constraints,
+                execution_requirements: &ExecutionRequirements::default(),
+                reasoning_effort: None,
+                allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
+                allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: Some(&grant),
+                unavailable_providers: &empty,
+                unavailable_deployments: &empty,
+            },
+        );
+        assert_eq!(plan.candidates[0].deployment_id, "ollama_qwen3_5_4b");
+        assert_eq!(plan.candidates[1].deployment_id, "ollama_qwen3_5_2b");
+        assert!(plan.decision.candidates.iter().all(|candidate| {
+            candidate.status == CandidateDecisionStatus::Rejected
+                || matches!(
+                    candidate.deployment.as_str(),
+                    "ollama_qwen3_5_4b" | "ollama_qwen3_5_2b"
+                )
+        }));
+    }
+
+    #[test]
+    fn empty_intent_grant_denies_candidates_without_using_routing_default() {
+        let config: RuntimeConfig =
+            toml::from_str(include_str!("../../../config/infer.example.toml")).unwrap();
+        let intent = config.intent("text.summarize").unwrap();
+        let empty = BTreeSet::new();
+        let grant = RoutingGrantConfig::default();
+        let plan = plan_candidates(
+            &config,
+            "text.summarize",
+            intent,
+            &config.profiles["balanced"],
+            CandidatePlanningContext {
+                constraints: &RequestConstraints::default(),
+                execution_requirements: &ExecutionRequirements::default(),
+                reasoning_effort: None,
+                allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
+                allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: Some(&grant),
+                unavailable_providers: &empty,
+                unavailable_deployments: &empty,
+            },
+        );
+        assert!(plan.candidates.is_empty());
+        for candidate in &plan.decision.candidates {
+            let deployment = &config.deployments[&candidate.deployment];
+            let profile = &config.model_builds[&deployment.build].profile;
+            if config.model_profiles[profile]
+                .ratings
+                .contains_key("text.summarize")
+            {
+                assert!(
+                    candidate
+                        .reason_codes
+                        .contains(&CandidateReasonCode::RoutingGrantExcluded)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unavailable_primary_does_not_enable_an_authorized_backup_when_fallback_is_none() {
+        let config: RuntimeConfig =
+            toml::from_str(include_str!("../../../config/infer.example.toml")).unwrap();
+        let intent = config.intent("text.summarize").unwrap();
+        let constraints = RequestConstraints {
+            named_route: Some(NamedRouteRequest::Deployments(vec![
+                "ollama_qwen3_5_4b".into(),
+                "ollama_qwen3_5_2b".into(),
+            ])),
+            fallback: Some(Fallback::None),
+            ..Default::default()
+        };
+        let grant = RoutingGrantConfig {
+            deployment_ids: BTreeSet::from([
+                "ollama_qwen3_5_4b".into(),
+                "ollama_qwen3_5_2b".into(),
+            ]),
+            model_profile_ids: BTreeSet::new(),
+        };
+        let empty = BTreeSet::new();
+        let unavailable = BTreeSet::from(["ollama_qwen3_5_4b".into()]);
+        let plan = plan_candidates(
+            &config,
+            "text.summarize",
+            intent,
+            &config.profiles["local-first"],
+            CandidatePlanningContext {
+                constraints: &constraints,
+                execution_requirements: &ExecutionRequirements::default(),
+                reasoning_effort: None,
+                allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
+                allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: Some(&grant),
+                unavailable_providers: &empty,
+                unavailable_deployments: &unavailable,
+            },
+        );
+        assert!(plan.candidates.is_empty());
+        let decision = plan
+            .decision
+            .candidates
+            .iter()
+            .find(|candidate| candidate.deployment == "ollama_qwen3_5_4b")
+            .unwrap();
+        assert_eq!(decision.status, CandidateDecisionStatus::Rejected);
+        assert!(
+            decision
+                .reason_codes
+                .contains(&CandidateReasonCode::DeploymentUnavailable)
+        );
+        let backup = plan
+            .decision
+            .candidates
+            .iter()
+            .find(|candidate| candidate.deployment == "ollama_qwen3_5_2b")
+            .unwrap();
+        assert!(
+            backup
+                .reason_codes
+                .contains(&CandidateReasonCode::NamedRouteFallbackDisabled)
+        );
     }
 
     #[test]

@@ -1,0 +1,5 @@
+# External, isolated worker runtime. These packages are not linked into or
+# redistributed with infer-runtime's Rust binaries.
+mlx-embeddings==0.1.0
+onnxruntime==1.28.0
+paddleocr==3.7.0

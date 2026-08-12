@@ -152,6 +152,7 @@ impl OllamaVisionExecutor {
             return Err(ProviderError::Upstream {
                 status,
                 body: "<redacted Ollama image-understanding error>".into(),
+                retry_after: None,
             });
         }
         let mut body = Vec::new();

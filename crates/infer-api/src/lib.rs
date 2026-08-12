@@ -4,7 +4,9 @@ mod audio_streaming;
 pub mod contract;
 mod image_understanding;
 mod observer;
+mod ocr;
 pub mod raw_foundation;
+mod retrieval;
 mod vision;
 
 #[cfg(test)]
@@ -12,7 +14,11 @@ mod contract_tests;
 #[cfg(test)]
 mod observer_tests;
 #[cfg(test)]
+mod ocr_tests;
+#[cfg(test)]
 mod real_vision_tests;
+#[cfg(test)]
+mod retrieval_tests;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -52,7 +58,11 @@ use infer_resource::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::contract::{ContractManifest, OPENAPI_JSON, PublicErrorEnvelope};
+use crate::contract::{
+    CAPABILITY_CONTRACT_HEADER, CONSUMER_CORE_HEADER, CORE_CONTRACT, CapabilityCatalog,
+    ContractManifest, OPENAPI_JSON, PublicErrorEnvelope, capability_schema_document,
+    required_capability_id,
+};
 
 #[derive(Clone)]
 pub struct ApiState {
@@ -60,10 +70,19 @@ pub struct ApiState {
 }
 
 pub fn router(runtime: Arc<Runtime>) -> Router {
+    with_consumer_contract_admission(base_router(runtime))
+}
+
+fn base_router(runtime: Arc<Runtime>) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/infer/v1/contract", get(get_contract))
+        .route("/infer/v1/capabilities", get(get_capabilities))
         .route("/infer/v1/openapi.json", get(get_openapi))
+        .route(
+            "/infer/v1/capability-schemas/{capability_id}/{version}/openapi.json",
+            get(get_capability_schema),
+        )
         .route("/infer/v1/observer/snapshot", get(observer::get_snapshot))
         .route("/v1/responses", post(create_response))
         .route("/v1/responses/{response_id}", get(get_response))
@@ -100,6 +119,16 @@ pub fn router(runtime: Arc<Runtime>) -> Router {
             "/infer/v1/vision/classification-reviews",
             post(image_understanding::create_classification_review),
         )
+        .route(
+            "/infer/v1/text/query-embeddings",
+            post(retrieval::create_query_embeddings),
+        )
+        .route(
+            "/infer/v1/text/document-embeddings",
+            post(retrieval::create_document_embeddings),
+        )
+        .route("/infer/v1/text/rerank", post(retrieval::create_rerank))
+        .route("/infer/v1/documents/ocr", post(ocr::create_document_ocr))
         .route("/infer/v1/jobs", get(get_jobs))
         .route("/infer/v1/jobs/{response_id}", get(get_job))
         .route("/infer/v1/jobs/{response_id}/cancel", post(cancel_job))
@@ -156,7 +185,97 @@ pub fn router_with_raw(
     runtime: Arc<Runtime>,
     raw: Arc<infer_control::RawFoundationControl>,
 ) -> Router {
-    router(Arc::clone(&runtime)).merge(raw_foundation::router(runtime, raw))
+    with_consumer_contract_admission(
+        base_router(Arc::clone(&runtime)).merge(raw_foundation::router(runtime, raw)),
+    )
+}
+
+fn with_consumer_contract_admission(router: Router) -> Router {
+    router.layer(middleware::from_fn(enforce_consumer_contract))
+}
+
+async fn enforce_consumer_contract(request: Request, next: Next) -> axum::response::Response {
+    if !requires_consumer_contract(request.uri().path()) {
+        return next.run(request).await;
+    }
+    match require_current_consumer_contract(request.headers()) {
+        Ok(()) => match require_current_capability_contract(
+            request.headers(),
+            required_capability_id(request.uri().path()),
+        ) {
+            Ok(Some(contract)) => {
+                infer_control::with_admitted_capability_contract(contract, next.run(request)).await
+            }
+            Ok(None) => next.run(request).await,
+            Err(error) => error.into_response(),
+        },
+        Err(error) => error.into_response(),
+    }
+}
+
+fn requires_consumer_contract(path: &str) -> bool {
+    path == "/infer/v1/contract"
+        || path == "/infer/v1/capabilities"
+        || path == "/v1/responses"
+        || path.starts_with("/v1/responses/")
+        || path.starts_with("/v1/audio/")
+        || path == "/infer/v1/jobs"
+        || path.starts_with("/infer/v1/jobs/")
+        || path.starts_with("/infer/v1/explain/")
+        || path.starts_with("/infer/v1/vision/")
+        || path.starts_with("/infer/v1/text/")
+        || path.starts_with("/infer/v1/documents/")
+        || path.starts_with("/infer/v1/raw/")
+}
+
+fn require_current_consumer_contract(headers: &HeaderMap) -> Result<(), ApiError> {
+    let values = headers.get_all(CONSUMER_CORE_HEADER);
+    let mut values = values.iter();
+    let Some(value) = values.next() else {
+        return Err(ApiError::upgrade_required(format!(
+            "{CONSUMER_CORE_HEADER} must be exactly {CORE_CONTRACT}; upgrade this Consumer before retrying"
+        )));
+    };
+    if values.next().is_some() {
+        return Err(ApiError::upgrade_required(
+            "consumer contract header must appear exactly once",
+        ));
+    }
+    if value.as_bytes() != CORE_CONTRACT.as_bytes() {
+        return Err(ApiError::upgrade_required(format!(
+            "only {CORE_CONTRACT} is supported; upgrade this Consumer before retrying"
+        )));
+    }
+    Ok(())
+}
+
+fn require_current_capability_contract(
+    headers: &HeaderMap,
+    capability_id: Option<&'static str>,
+) -> Result<Option<&'static str>, ApiError> {
+    let Some(capability_id) = capability_id else {
+        return Ok(None);
+    };
+    let values = headers.get_all(CAPABILITY_CONTRACT_HEADER);
+    let mut values = values.iter();
+    let Some(value) = values.next() else {
+        return Err(ApiError::capability_upgrade_required(format!(
+            "{CAPABILITY_CONTRACT_HEADER} must select a supported {capability_id} schema"
+        )));
+    };
+    let value = value.to_str().unwrap_or_default();
+    if values.next().is_some() {
+        return Err(ApiError::capability_upgrade_required(format!(
+            "no supported {capability_id} schema was selected for this route"
+        )));
+    }
+    contract::supported_capability_contract(capability_id, value)
+        .ok_or_else(|| {
+            ApiError::capability_upgrade_required(format!(
+                "no supported {capability_id} schema was selected for this route"
+            ))
+        })
+        .map(Some)
 }
 
 async fn log_request(request: Request, next: Next) -> axum::response::Response {
@@ -183,6 +302,7 @@ fn is_polling_endpoint(path: &str) -> bool {
         path,
         "/health"
             | "/infer/v1/contract"
+            | "/infer/v1/capabilities"
             | "/infer/v1/observer/snapshot"
             | "/infer/v1/metrics"
             | "/infer/v1/jobs"
@@ -200,11 +320,27 @@ async fn get_contract() -> Json<ContractManifest> {
     Json(ContractManifest::current())
 }
 
+async fn get_capabilities() -> Json<CapabilityCatalog> {
+    Json(CapabilityCatalog::current())
+}
+
 async fn get_openapi() -> Result<Response<Body>, ApiError> {
     response(
         StatusCode::OK,
         "application/json",
         OPENAPI_JSON.as_bytes().to_vec(),
+    )
+}
+
+async fn get_capability_schema(
+    Path((capability_id, version)): Path<(String, String)>,
+) -> Result<Response<Body>, ApiError> {
+    let document = capability_schema_document(&capability_id, &version)
+        .ok_or_else(|| ApiError::not_found("capability schema not found"))?;
+    response(
+        StatusCode::OK,
+        "application/json",
+        document.as_bytes().to_vec(),
     )
 }
 
@@ -734,6 +870,8 @@ async fn explain_job(
     Ok(Json(json!({
         "response_id": job.id,
         "intent": job.intent,
+        "consumer_core_contract": job.consumer_core_contract,
+        "capability_contract": job.capability_contract,
         "policy": job.policy,
         "selected_provider": job.provider,
         "selected_deployment": job.deployment,
@@ -757,7 +895,8 @@ async fn get_budget(
     State(state): State<ApiState>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
-    authenticate(&state, &headers)?;
+    let actor = authenticate(&state, &headers)?;
+    state.runtime.authorize_resource_admin(&actor)?;
     let budget = state.runtime.budget_snapshot()?;
     Ok(Json(
         serde_json::to_value(budget).expect("budget snapshot is serializable"),
@@ -768,7 +907,8 @@ async fn get_providers(
     State(state): State<ApiState>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
-    authenticate(&state, &headers)?;
+    let actor = authenticate(&state, &headers)?;
+    state.runtime.authorize_resource_admin(&actor)?;
     Ok(Json(
         json!({"providers": state.runtime.provider_snapshots()}),
     ))
@@ -791,7 +931,8 @@ async fn get_resources(
     State(state): State<ApiState>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
-    authenticate(&state, &headers)?;
+    let actor = authenticate(&state, &headers)?;
+    state.runtime.authorize_resource_admin(&actor)?;
     Ok(Json(
         serde_json::to_value(state.runtime.resource_snapshot().await)
             .expect("resource snapshot is serializable"),
@@ -802,7 +943,8 @@ async fn refresh_resources(
     State(state): State<ApiState>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
-    authenticate(&state, &headers)?;
+    let actor = authenticate(&state, &headers)?;
+    state.runtime.authorize_resource_admin(&actor)?;
     Ok(Json(
         serde_json::to_value(state.runtime.refresh_resources().await)
             .expect("resource snapshot is serializable"),
@@ -947,7 +1089,8 @@ async fn get_metrics(
     State(state): State<ApiState>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
-    authenticate(&state, &headers)?;
+    let actor = authenticate(&state, &headers)?;
+    state.runtime.authorize_resource_admin(&actor)?;
     Ok(Json(
         serde_json::to_value(state.runtime.metrics().await)
             .expect("metrics snapshot is serializable"),
@@ -1003,28 +1146,42 @@ impl ApiError {
     fn unauthorized() -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
-            code: "invalid_api_key",
+            code: contract::error_code::INVALID_API_KEY,
             message: "missing or invalid bearer credential".into(),
         }
     }
     fn not_found(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
-            code: "not_found",
+            code: contract::error_code::NOT_FOUND,
             message: message.into(),
         }
     }
     fn bad_request(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
-            code: "invalid_request_error",
+            code: contract::error_code::INVALID_REQUEST,
+            message: message.into(),
+        }
+    }
+    fn upgrade_required(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UPGRADE_REQUIRED,
+            code: contract::error_code::CONSUMER_CORE_UNSUPPORTED,
+            message: message.into(),
+        }
+    }
+    fn capability_upgrade_required(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UPGRADE_REQUIRED,
+            code: contract::error_code::CAPABILITY_CONTRACT_UNSUPPORTED,
             message: message.into(),
         }
     }
     fn internal(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "internal_error",
+            code: contract::error_code::INTERNAL,
             message: message.into(),
         }
     }
@@ -1036,46 +1193,76 @@ impl From<RuntimeError> for ApiError {
             return Self::internal("credential subsystem unavailable");
         }
         let (status, code) = match &error {
-            RuntimeError::Unauthorized => (StatusCode::UNAUTHORIZED, "invalid_api_key"),
-            RuntimeError::ObserverCredentialRestricted => {
-                (StatusCode::FORBIDDEN, "observer_credential_restricted")
-            }
-            RuntimeError::ObserverAccessRequired(_) => {
-                (StatusCode::FORBIDDEN, "observer_access_required")
-            }
+            RuntimeError::Unauthorized => (
+                StatusCode::UNAUTHORIZED,
+                contract::error_code::INVALID_API_KEY,
+            ),
+            RuntimeError::ObserverCredentialRestricted => (
+                StatusCode::FORBIDDEN,
+                contract::error_code::OBSERVER_CREDENTIAL_RESTRICTED,
+            ),
+            RuntimeError::ObserverAccessRequired(_) => (
+                StatusCode::FORBIDDEN,
+                contract::error_code::OBSERVER_ACCESS_REQUIRED,
+            ),
             RuntimeError::UnknownIntent(_)
             | RuntimeError::DataPlaneMismatch { .. }
             | RuntimeError::Contract(_)
-            | RuntimeError::ProviderProbeUnsupported(_) => {
-                (StatusCode::BAD_REQUEST, "invalid_request_error")
-            }
+            | RuntimeError::ProviderProbeUnsupported(_) => (
+                StatusCode::BAD_REQUEST,
+                contract::error_code::INVALID_REQUEST,
+            ),
             RuntimeError::UnknownApp(_)
             | RuntimeError::PolicyNotAllowed(_)
-            | RuntimeError::OverrideNotAllowed { .. } => {
-                (StatusCode::FORBIDDEN, "policy_violation")
-            }
-            RuntimeError::IntentNotAllowed { .. } => (StatusCode::FORBIDDEN, "intent_forbidden"),
-            RuntimeError::ResourceAdminRequired(_) => {
-                (StatusCode::FORBIDDEN, "resource_admin_required")
-            }
-            RuntimeError::NoCandidate => (StatusCode::CONFLICT, "no_candidate"),
-            RuntimeError::Cancelled => (StatusCode::CONFLICT, "cancelled"),
-            RuntimeError::QueueFull => (StatusCode::TOO_MANY_REQUESTS, "queue_full"),
-            RuntimeError::AppQueueFull => (StatusCode::TOO_MANY_REQUESTS, "app_queue_full"),
-            RuntimeError::QuotaExceeded { .. } => (StatusCode::TOO_MANY_REQUESTS, "quota_exceeded"),
-            RuntimeError::DeadlineExpired => (StatusCode::GATEWAY_TIMEOUT, "deadline_exceeded"),
-            RuntimeError::ProviderUnavailable(_) => {
-                (StatusCode::SERVICE_UNAVAILABLE, "provider_unavailable")
-            }
-            RuntimeError::ProviderProbeModelMissing(_) => {
-                (StatusCode::CONFLICT, "provider_probe_model_missing")
-            }
-            RuntimeError::BackgroundDisabled | RuntimeError::BackgroundLocalOnly => {
-                (StatusCode::CONFLICT, "background_unavailable")
-            }
+            | RuntimeError::OverrideNotAllowed { .. } => (
+                StatusCode::FORBIDDEN,
+                contract::error_code::POLICY_VIOLATION,
+            ),
+            RuntimeError::IntentNotAllowed { .. } => (
+                StatusCode::FORBIDDEN,
+                contract::error_code::INTENT_FORBIDDEN,
+            ),
+            RuntimeError::NamedRouteNotAllowed { .. } => (
+                StatusCode::FORBIDDEN,
+                contract::error_code::ROUTE_TARGET_FORBIDDEN,
+            ),
+            RuntimeError::ResourceAdminRequired(_) => (
+                StatusCode::FORBIDDEN,
+                contract::error_code::RESOURCE_ADMIN_REQUIRED,
+            ),
+            RuntimeError::NoCandidate => (StatusCode::CONFLICT, contract::error_code::NO_CANDIDATE),
+            RuntimeError::Cancelled => (StatusCode::CONFLICT, contract::error_code::CANCELLED),
+            RuntimeError::QueueFull => (
+                StatusCode::TOO_MANY_REQUESTS,
+                contract::error_code::QUEUE_FULL,
+            ),
+            RuntimeError::AppQueueFull => (
+                StatusCode::TOO_MANY_REQUESTS,
+                contract::error_code::APP_QUEUE_FULL,
+            ),
+            RuntimeError::QuotaExceeded { .. } => (
+                StatusCode::TOO_MANY_REQUESTS,
+                contract::error_code::QUOTA_EXCEEDED,
+            ),
+            RuntimeError::DeadlineExpired => (
+                StatusCode::GATEWAY_TIMEOUT,
+                contract::error_code::DEADLINE_EXCEEDED,
+            ),
+            RuntimeError::ProviderUnavailable(_) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                contract::error_code::PROVIDER_UNAVAILABLE,
+            ),
+            RuntimeError::ProviderProbeModelMissing(_) => (
+                StatusCode::CONFLICT,
+                contract::error_code::PROVIDER_PROBE_MODEL_MISSING,
+            ),
+            RuntimeError::BackgroundDisabled | RuntimeError::BackgroundLocalOnly => (
+                StatusCode::CONFLICT,
+                contract::error_code::BACKGROUND_UNAVAILABLE,
+            ),
             RuntimeError::Payload(PayloadError::TooLarge { .. }) => (
                 StatusCode::PAYLOAD_TOO_LARGE,
-                "background_payload_too_large",
+                contract::error_code::BACKGROUND_PAYLOAD_TOO_LARGE,
             ),
             RuntimeError::BackgroundDisabledWithPendingJobs
             | RuntimeError::BackgroundKeyUnavailable(_)
@@ -1084,70 +1271,110 @@ impl From<RuntimeError> for ApiError {
             | RuntimeError::BackgroundTaskFailed
             | RuntimeError::Payload(_) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "background_persistence_error",
+                contract::error_code::BACKGROUND_PERSISTENCE_ERROR,
             ),
             RuntimeError::Resource(
                 ResourceError::UnknownProvider(_) | ResourceError::UnknownDeployment { .. },
-            ) => (StatusCode::NOT_FOUND, "not_found"),
-            RuntimeError::Resource(ResourceError::UnknownEvictionDeployment(_)) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, "invalid_eviction_plan")
-            }
-            RuntimeError::Resource(ResourceError::Lifecycle(_)) => {
-                (StatusCode::CONFLICT, "resource_transition_conflict")
-            }
-            RuntimeError::Resource(ResourceError::ReloadBenchmarkRequest(_)) => {
-                (StatusCode::BAD_REQUEST, "invalid_reload_benchmark")
-            }
+            ) => (StatusCode::NOT_FOUND, contract::error_code::NOT_FOUND),
+            RuntimeError::Resource(ResourceError::UnknownEvictionDeployment(_)) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                contract::error_code::INVALID_EVICTION_PLAN,
+            ),
+            RuntimeError::Resource(ResourceError::Lifecycle(_)) => (
+                StatusCode::CONFLICT,
+                contract::error_code::RESOURCE_TRANSITION_CONFLICT,
+            ),
+            RuntimeError::Resource(ResourceError::ReloadBenchmarkRequest(_)) => (
+                StatusCode::BAD_REQUEST,
+                contract::error_code::INVALID_RELOAD_BENCHMARK,
+            ),
             RuntimeError::Resource(ResourceError::EvictionApply(
                 EvictionApplyError::MissingExpectedDeployment
                 | EvictionApplyError::MissingReason
                 | EvictionApplyError::ReasonTooLong,
-            )) => (StatusCode::BAD_REQUEST, "invalid_eviction_approval"),
+            )) => (
+                StatusCode::BAD_REQUEST,
+                contract::error_code::INVALID_EVICTION_APPROVAL,
+            ),
             RuntimeError::Resource(ResourceError::EvictionApply(
                 EvictionApplyError::NoActionableTarget | EvictionApplyError::TargetChanged { .. },
-            )) => (StatusCode::CONFLICT, "eviction_recommendation_changed"),
-            RuntimeError::Resource(ResourceError::NativeControl(_)) => {
-                (StatusCode::BAD_GATEWAY, "native_control_unavailable")
-            }
+            )) => (
+                StatusCode::CONFLICT,
+                contract::error_code::EVICTION_RECOMMENDATION_CHANGED,
+            ),
+            RuntimeError::Resource(ResourceError::NativeControl(_)) => (
+                StatusCode::BAD_GATEWAY,
+                contract::error_code::NATIVE_CONTROL_UNAVAILABLE,
+            ),
             RuntimeError::MaintenanceLease(
                 MaintenanceLeaseError::DurationTooShort
                 | MaintenanceLeaseError::DurationTooLong { .. }
                 | MaintenanceLeaseError::MissingReason
                 | MaintenanceLeaseError::ReasonTooLong,
-            ) => (StatusCode::BAD_REQUEST, "invalid_maintenance_lease"),
+            ) => (
+                StatusCode::BAD_REQUEST,
+                contract::error_code::INVALID_MAINTENANCE_LEASE,
+            ),
             RuntimeError::MaintenanceLease(
                 MaintenanceLeaseError::MonitorDisabled
                 | MaintenanceLeaseError::ActiveLease
                 | MaintenanceLeaseError::LeaseMismatch,
-            ) => (StatusCode::CONFLICT, "maintenance_lease_conflict"),
-            RuntimeError::Store(_) => (StatusCode::INTERNAL_SERVER_ERROR, "persistence_error"),
-            RuntimeError::Artifact(_) => {
-                (StatusCode::INTERNAL_SERVER_ERROR, "artifact_store_error")
-            }
+            ) => (
+                StatusCode::CONFLICT,
+                contract::error_code::MAINTENANCE_LEASE_CONFLICT,
+            ),
+            RuntimeError::Store(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                contract::error_code::PERSISTENCE_ERROR,
+            ),
+            RuntimeError::Artifact(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                contract::error_code::ARTIFACT_STORE_ERROR,
+            ),
             RuntimeError::Credential(_) => unreachable!("handled above"),
             RuntimeError::Provider(provider) => match provider.kind() {
-                ProviderFailureKind::Authentication => {
-                    (StatusCode::BAD_GATEWAY, "upstream_authentication")
-                }
-                ProviderFailureKind::RateLimited => {
-                    (StatusCode::TOO_MANY_REQUESTS, "upstream_rate_limited")
-                }
-                ProviderFailureKind::Timeout => (StatusCode::GATEWAY_TIMEOUT, "upstream_timeout"),
-                ProviderFailureKind::Unavailable => {
-                    (StatusCode::SERVICE_UNAVAILABLE, "upstream_unavailable")
-                }
-                ProviderFailureKind::InvalidRequest => {
-                    (StatusCode::BAD_REQUEST, "upstream_invalid_request")
-                }
-                ProviderFailureKind::Protocol => (StatusCode::BAD_GATEWAY, "upstream_protocol"),
+                ProviderFailureKind::Authentication => (
+                    StatusCode::BAD_GATEWAY,
+                    contract::error_code::UPSTREAM_AUTHENTICATION,
+                ),
+                ProviderFailureKind::RateLimited => (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    contract::error_code::UPSTREAM_RATE_LIMITED,
+                ),
+                ProviderFailureKind::Timeout => (
+                    StatusCode::GATEWAY_TIMEOUT,
+                    contract::error_code::UPSTREAM_TIMEOUT,
+                ),
+                ProviderFailureKind::Unavailable => (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    contract::error_code::UPSTREAM_UNAVAILABLE,
+                ),
+                ProviderFailureKind::InvalidRequest => (
+                    StatusCode::BAD_REQUEST,
+                    contract::error_code::UPSTREAM_INVALID_REQUEST,
+                ),
+                ProviderFailureKind::Protocol => (
+                    StatusCode::BAD_GATEWAY,
+                    contract::error_code::UPSTREAM_PROTOCOL,
+                ),
             },
         };
         Self {
             status,
             code,
-            message: error.to_string(),
+            message: error.public_message(),
         }
     }
+}
+
+#[cfg(test)]
+fn mapped_runtime_error_codes() -> std::collections::BTreeSet<&'static str> {
+    contract::CORE_ERROR_CODES
+        .iter()
+        .chain(contract::CAPABILITY_ERROR_CODES)
+        .chain(contract::OPERATOR_ERROR_CODES)
+        .copied()
+        .collect()
 }
 
 impl IntoResponse for ApiError {
@@ -1170,14 +1397,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn public_error_registry_is_unique_and_contains_every_direct_mapping() {
+        let codes = mapped_runtime_error_codes();
+        assert_eq!(
+            codes.len(),
+            contract::CORE_ERROR_CODES.len()
+                + contract::CAPABILITY_ERROR_CODES.len()
+                + contract::OPERATOR_ERROR_CODES.len()
+        );
+        for required in [
+            contract::error_code::CONSUMER_CORE_UNSUPPORTED,
+            contract::error_code::CAPABILITY_CONTRACT_UNSUPPORTED,
+            contract::error_code::INVALID_REQUEST,
+            contract::error_code::INVALID_API_KEY,
+            contract::error_code::NO_CANDIDATE,
+            contract::error_code::PROVIDER_UNAVAILABLE,
+            contract::error_code::RAW_EXECUTION_FAILED,
+        ] {
+            assert!(
+                codes.contains(required),
+                "missing public error code {required}"
+            );
+        }
+    }
+
+    #[test]
     fn upstream_rate_limit_keeps_its_public_error_semantics() {
         let error: ApiError = RuntimeError::Provider(ProviderError::Upstream {
             status: 429,
             body: String::new(),
+            retry_after: None,
         })
         .into();
         assert_eq!(error.status, StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(error.code, "upstream_rate_limited");
+    }
+
+    #[test]
+    fn provider_native_diagnostics_are_not_exposed_publicly() {
+        let error: ApiError = RuntimeError::Provider(ProviderError::NativeRuntime(
+            "/Users/example/private/model.onnx failed with secret payload".into(),
+        ))
+        .into();
+        assert_eq!(error.status, StatusCode::BAD_GATEWAY);
+        assert_eq!(error.code, "upstream_protocol");
+        assert_eq!(error.message, "provider protocol failed");
+        assert!(!error.message.contains("/Users"));
+        assert!(!error.message.contains("secret"));
     }
 
     #[test]
@@ -1233,6 +1499,44 @@ mod tests {
         .into();
         assert_eq!(error.status, StatusCode::FORBIDDEN);
         assert_eq!(error.code, "intent_forbidden");
+    }
+
+    #[test]
+    fn named_route_acl_has_a_distinct_non_enumerating_forbidden_code() {
+        let error: ApiError = RuntimeError::NamedRouteNotAllowed {
+            app_id: "reader".into(),
+            intent: "text.edit".into(),
+        }
+        .into();
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+        assert_eq!(error.code, "route_target_forbidden");
+    }
+
+    #[test]
+    fn missing_consumer_contract_header_is_upgrade_required() {
+        let error = require_current_consumer_contract(&HeaderMap::new()).unwrap_err();
+        assert_eq!(error.status, StatusCode::UPGRADE_REQUIRED);
+        assert_eq!(error.code, "consumer_core_unsupported");
+    }
+
+    #[test]
+    fn capability_contract_is_exact_and_route_scoped() {
+        let mut headers = HeaderMap::new();
+        let error =
+            require_current_capability_contract(&headers, Some("infer.audio.transcription"))
+                .unwrap_err();
+        assert_eq!(error.status, StatusCode::UPGRADE_REQUIRED);
+        assert_eq!(error.code, "capability_contract_unsupported");
+
+        headers.insert(
+            infer_core::CAPABILITY_CONTRACT_HEADER,
+            HeaderValue::from_static("infer.audio.transcription@20260811.1"),
+        );
+        assert!(
+            require_current_capability_contract(&headers, Some("infer.audio.transcription"))
+                .is_ok()
+        );
+        assert!(require_current_capability_contract(&headers, None).is_ok());
     }
 
     #[test]

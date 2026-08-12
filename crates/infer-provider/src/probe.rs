@@ -264,6 +264,7 @@ mod tests {
                 return Err(ProviderError::Upstream {
                     status: 400,
                     body: "temperature unsupported".into(),
+                    retry_after: None,
                 });
             }
             let image_generation = request.requests_image_generation();

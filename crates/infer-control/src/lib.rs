@@ -7,12 +7,15 @@ mod background_jobs;
 mod image_understanding;
 mod metrics;
 mod observer;
+mod ocr_execution;
 mod pressure_observation;
+mod provider_assembly;
 mod provider_health;
 mod raw_foundation;
 mod registry;
 mod resource_control;
 mod resource_monitor;
+mod retrieval_execution;
 mod scheduler;
 mod vision_execution;
 
@@ -26,27 +29,23 @@ use std::{
 use async_stream::stream;
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
-use infer_artifact::{ArtifactError, ArtifactStore};
+use infer_artifact::ArtifactError;
 use infer_auth::{AppCredentials, CredentialError};
 use infer_core::{
     AppConfig, AttemptOutcome, AttemptSnapshot, AttemptTrigger, AudioExecutionRequest, BuiltinTool,
     ContractError, DurablePayloadRef, ExecutionMode, ExecutionRequirements, Fallback,
-    IntentProfile, JobListPage, JobPageCursor, JobSnapshot, JobState, LocalInventoryKind, Modality,
-    Priority, ProviderCapability, ProviderConfig, ProviderProtocol, QuotaConfig,
-    RequestConstraints, ResponsesRequest, RuntimeConfig,
+    IntentProfile, JobListPage, JobPageCursor, JobSnapshot, JobState, Modality, Priority,
+    ProviderCapability, ProviderProtocol, QuotaConfig, RequestConstraints, ResponsesRequest,
+    RuntimeConfig,
 };
 use infer_payload::PayloadError;
 use infer_provider::{
-    AudioWorkerExecutor, CodexAppServerProvider, DynAudioDuplexExecutor, DynAudioExecutor,
-    DynAudioStreamExecutor, DynFaceDetectionExecutor, DynFaceEmbeddingExecutor,
-    DynImageEmbeddingExecutor, DynImageUnderstandingExecutor, DynProvider,
-    DynTextEmbeddingExecutor, OllamaVisionExecutor, OnnxProviderRuntime, ProviderError,
-    ProviderModelCatalog, ResponsesProvider, probe_responses_provider,
-    probe_responses_provider_with_effort,
+    DynAudioDuplexExecutor, DynAudioExecutor, DynAudioStreamExecutor, DynFaceDetectionExecutor,
+    DynFaceEmbeddingExecutor, DynImageEmbeddingExecutor, DynImageUnderstandingExecutor,
+    DynOcrExecutor, DynProvider, DynRetrievalExecutor, DynTextEmbeddingExecutor, ProviderError,
+    ProviderModelCatalog, probe_responses_provider, probe_responses_provider_with_effort,
 };
-use infer_resource::{
-    DynNativeModelController, ModelReservation, NativeControllerMap, ResourceError, ResourceManager,
-};
+use infer_resource::{ModelReservation, ResourceError, ResourceManager};
 use infer_store::{
     ActiveReservation, AttemptReservation, AuditEvent, AuditEventInput, ConfigSnapshot,
     QuotaLimits, QuotaResource, Store, StoreError, UsageLedgerEntry,
@@ -62,6 +61,7 @@ use uuid::Uuid;
 
 use app_admission::{AppAdmission, AppAdmissionPermit};
 use metrics::{MetricsSnapshot, RuntimeMetrics};
+use provider_assembly::ProviderAssembly;
 use provider_health::ProviderHealth;
 use registry::{Candidate, CandidatePlanningContext, plan_candidates};
 use resource_monitor::EvictionMonitor;
@@ -129,6 +129,10 @@ pub struct ProviderDeploymentSnapshot {
     /// Provider-facing model identity when it is already portable. Absolute
     /// local paths are projected to the semantic model family.
     pub model: String,
+    /// Non-sensitive supply-chain ownership; local paths and receipts remain
+    /// outside the operator inventory projection.
+    pub source_kind: infer_core::ModelSourceKind,
+    pub license_status: infer_core::ModelLicenseStatus,
     pub resource_class: infer_core::ResourceClass,
     pub supported_efforts: Vec<infer_core::ReasoningEffort>,
     pub execution_modes: BTreeSet<ExecutionMode>,
@@ -161,6 +165,8 @@ pub enum RuntimeError {
     UnknownApp(String),
     #[error("application `{app_id}` is not permitted to submit intent `{intent}`")]
     IntentNotAllowed { app_id: String, intent: String },
+    #[error("application `{app_id}` is not permitted to request the named route for `{intent}`")]
+    NamedRouteNotAllowed { app_id: String, intent: String },
     #[error("policy profile `{0}` is not permitted for this application")]
     PolicyNotAllowed(String),
     #[error("request override `{field}` is not permitted for this application")]
@@ -225,6 +231,22 @@ impl From<StoreError> for RuntimeError {
     }
 }
 
+impl RuntimeError {
+    pub fn public_message(&self) -> String {
+        match self {
+            Self::Provider(error) => error.public_message().into(),
+            Self::Credential(_) => "credential subsystem unavailable".into(),
+            Self::Artifact(_) => "artifact store unavailable".into(),
+            Self::Store(_) => "persistence subsystem unavailable".into(),
+            Self::Resource(ResourceError::NativeControl(_)) => {
+                "native resource control unavailable".into()
+            }
+            Self::BackgroundKeyUnavailable(_) => "durable background key is unavailable".into(),
+            _ => self.to_string(),
+        }
+    }
+}
+
 struct JobEntry {
     snapshot: JobSnapshot,
     cancellation: CancellationToken,
@@ -273,7 +295,29 @@ struct JobPreparation<'a> {
     estimated_tokens: u64,
     id_prefix: &'static str,
     expected_data_plane: &'static str,
+    capability_contract: &'a str,
     durable_payload: Option<&'a DurablePayloadRef>,
+}
+
+tokio::task_local! {
+    /// Exact capability identity admitted by the HTTP boundary for this one
+    /// request. It is scoped to the handler future and cannot leak across
+    /// requests. Non-HTTP/internal callers retain their explicit data-plane
+    /// default, preserving the existing control API.
+    static ADMITTED_CAPABILITY_CONTRACT: &'static str;
+}
+
+pub async fn with_admitted_capability_contract<F>(contract: &'static str, future: F) -> F::Output
+where
+    F: std::future::Future,
+{
+    ADMITTED_CAPABILITY_CONTRACT.scope(contract, future).await
+}
+
+pub fn current_admitted_capability_contract(default: &'static str) -> &'static str {
+    ADMITTED_CAPABILITY_CONTRACT
+        .try_with(|contract| *contract)
+        .unwrap_or(default)
 }
 
 /// Owns control-plane state. HTTP and CLI layers only call this facade.
@@ -289,6 +333,8 @@ pub struct Runtime {
     image_embedding_executors: BTreeMap<String, DynImageEmbeddingExecutor>,
     text_embedding_executors: BTreeMap<String, DynTextEmbeddingExecutor>,
     image_understanding_executors: BTreeMap<String, DynImageUnderstandingExecutor>,
+    retrieval_executors: BTreeMap<String, DynRetrievalExecutor>,
+    ocr_executors: BTreeMap<String, DynOcrExecutor>,
     schedulers: BTreeMap<String, ProviderScheduler>,
     jobs: Mutex<HashMap<String, JobEntry>>,
     metrics: RuntimeMetrics,
@@ -304,15 +350,28 @@ pub struct Runtime {
     observer: observer::ObserverRuntimeState,
 }
 
-fn scheduler_for(provider: &ProviderConfig) -> ProviderScheduler {
-    ProviderScheduler::new(
-        provider.max_concurrency,
-        provider.max_queue,
-        Duration::from_millis(provider.priority_aging_ms),
-    )
-}
-
 impl Runtime {
+    async fn wait_before_retry(
+        &self,
+        prepared: &PreparedRun,
+        kind: infer_provider::ProviderFailureKind,
+        retry_index: usize,
+        retry_after: Option<Duration>,
+    ) {
+        let delay = attempt_policy::retry_delay(kind, retry_index, retry_after, &prepared.job_id);
+        if delay.is_zero() {
+            return;
+        }
+        let wake = prepared.deadline.map_or_else(
+            || Instant::now() + delay,
+            |deadline| (Instant::now() + delay).min(deadline),
+        );
+        tokio::select! {
+            _ = prepared.cancellation.cancelled() => {},
+            _ = tokio::time::sleep_until(wake) => {},
+        }
+    }
+
     pub async fn from_config(config: RuntimeConfig) -> Result<Arc<Self>, RuntimeError> {
         let observer = observer::ObserverRuntimeState::new(&config.observer);
         let credentials = AppCredentials::load_or_create(&config)?;
@@ -347,128 +406,14 @@ impl Runtime {
                 .remove_orphans(store.background_payload_refs()?)
                 .await?;
         }
-        let mut providers = BTreeMap::new();
-        let mut audio_executors = BTreeMap::new();
-        let mut audio_stream_executors = BTreeMap::new();
-        let mut audio_duplex_executors = BTreeMap::new();
-        let mut face_detection_executors = BTreeMap::new();
-        let mut face_embedding_executors = BTreeMap::new();
-        let mut image_embedding_executors = BTreeMap::new();
-        let mut text_embedding_executors = BTreeMap::new();
-        let mut image_understanding_executors = BTreeMap::new();
-        let mut native_controllers = NativeControllerMap::new();
-        let mut schedulers = BTreeMap::new();
         let app_admission = AppAdmission::new(&config.apps);
         let resource_monitor = EvictionMonitor::new(config.resources.eviction.monitor.clone());
-        let artifact_store = config
-            .providers
-            .values()
-            .any(|provider| provider.kind == "onnx")
-            .then(|| ArtifactStore::from_config(&config.artifacts))
-            .transpose()?;
-        for (id, provider) in &config.providers {
-            match provider.kind.as_str() {
-                "responses" => {
-                    let api_key = provider
-                        .api_key_env
-                        .as_ref()
-                        .and_then(|name| std::env::var(name).ok());
-                    let adapter = ResponsesProvider::new(
-                        id,
-                        provider.base_url.as_deref().expect("validated base_url"),
-                        api_key,
-                    )?;
-                    providers.insert(id.clone(), Arc::new(adapter) as DynProvider);
-                    if let Some(inventory) = provider
-                        .local_inventory
-                        .as_ref()
-                        .filter(|inventory| inventory.kind == LocalInventoryKind::OllamaTags)
-                    {
-                        let adapter = OllamaVisionExecutor::new(
-                            id,
-                            inventory.endpoint.as_deref().expect("validated endpoint"),
-                        )?;
-                        image_understanding_executors.insert(
-                            id.clone(),
-                            Arc::new(adapter) as DynImageUnderstandingExecutor,
-                        );
-                    }
-                }
-                "codex_app_server" => {
-                    let admitted_models = config
-                        .deployments
-                        .values()
-                        .filter(|deployment| deployment.provider == *id)
-                        .filter_map(|deployment| config.model_builds.get(&deployment.build))
-                        .map(|build| build.model_id.clone())
-                        .collect::<BTreeSet<_>>();
-                    let adapter = CodexAppServerProvider::new(
-                        id,
-                        provider.command.clone().expect("validated command"),
-                        provider.args.clone(),
-                        admitted_models,
-                    );
-                    providers.insert(id.clone(), Arc::new(adapter) as DynProvider);
-                }
-                "audio_worker" => {
-                    let adapter = Arc::new(AudioWorkerExecutor::new(
-                        id,
-                        provider.command.clone().expect("validated command"),
-                        provider.args.clone(),
-                    ));
-                    audio_executors.insert(id.clone(), Arc::clone(&adapter) as DynAudioExecutor);
-                    audio_stream_executors
-                        .insert(id.clone(), Arc::clone(&adapter) as DynAudioStreamExecutor);
-                    audio_duplex_executors.insert(id.clone(), adapter as DynAudioDuplexExecutor);
-                }
-                "onnx" => {
-                    let builds = config
-                        .deployments
-                        .iter()
-                        .filter(|(_, deployment)| deployment.provider == *id)
-                        .filter_map(|(_, deployment)| {
-                            config.model_builds.get(&deployment.build).map(|build| {
-                                (
-                                    build.model_id.clone(),
-                                    (deployment.build.clone(), build.clone()),
-                                )
-                            })
-                        })
-                        .collect();
-                    let adapter = OnnxProviderRuntime::new(
-                        id,
-                        config.runtimes.onnx.clone(),
-                        artifact_store
-                            .as_ref()
-                            .expect("ONNX provider requires an artifact store")
-                            .clone(),
-                        builds,
-                    )?;
-                    face_detection_executors
-                        .insert(id.clone(), Arc::clone(&adapter) as DynFaceDetectionExecutor);
-                    face_embedding_executors
-                        .insert(id.clone(), Arc::clone(&adapter) as DynFaceEmbeddingExecutor);
-                    image_embedding_executors.insert(
-                        id.clone(),
-                        Arc::clone(&adapter) as DynImageEmbeddingExecutor,
-                    );
-                    text_embedding_executors
-                        .insert(id.clone(), Arc::clone(&adapter) as DynTextEmbeddingExecutor);
-                    native_controllers.insert(id.clone(), adapter as DynNativeModelController);
-                }
-                // RawFoundationControl owns its native graph and execution
-                // lifecycle. This provider exists only to reuse common Job,
-                // admission, scheduling, reservation, and provenance state.
-                "raw_foundation" => {}
-                _ => unreachable!("provider kind was validated"),
-            }
-            schedulers.insert(id.clone(), scheduler_for(provider));
-        }
+        let assembly = ProviderAssembly::from_config(&config)?;
         let pressure_refresh_interval =
             Duration::from_millis(config.resources.pressure.refresh_interval_ms);
         let resources = Arc::new(ResourceManager::with_native_controllers(
             &config,
-            native_controllers,
+            assembly.native_controllers,
         ));
         let pressure_observation = pressure_observation::PressureObservation::start(
             Arc::clone(&resources),
@@ -478,16 +423,18 @@ impl Runtime {
         let runtime = Arc::new(Self {
             config: Arc::new(config),
             credentials,
-            providers,
-            audio_executors,
-            audio_stream_executors,
-            audio_duplex_executors,
-            face_detection_executors,
-            face_embedding_executors,
-            image_embedding_executors,
-            text_embedding_executors,
-            image_understanding_executors,
-            schedulers,
+            providers: assembly.providers,
+            audio_executors: assembly.audio_executors,
+            audio_stream_executors: assembly.audio_stream_executors,
+            audio_duplex_executors: assembly.audio_duplex_executors,
+            face_detection_executors: assembly.face_detection_executors,
+            face_embedding_executors: assembly.face_embedding_executors,
+            image_embedding_executors: assembly.image_embedding_executors,
+            text_embedding_executors: assembly.text_embedding_executors,
+            image_understanding_executors: assembly.image_understanding_executors,
+            retrieval_executors: assembly.retrieval_executors,
+            ocr_executors: assembly.ocr_executors,
+            schedulers: assembly.schedulers,
             jobs: Mutex::new(HashMap::new()),
             metrics: RuntimeMetrics::default(),
             health: ProviderHealth::default(),
@@ -551,7 +498,16 @@ impl Runtime {
         let schedulers = config
             .providers
             .iter()
-            .map(|(id, provider)| (id.clone(), scheduler_for(provider)))
+            .map(|(id, provider)| {
+                (
+                    id.clone(),
+                    ProviderScheduler::new(
+                        provider.max_concurrency,
+                        provider.max_queue,
+                        Duration::from_millis(provider.priority_aging_ms),
+                    ),
+                )
+            })
             .collect();
         Arc::new(Self {
             config: Arc::new(config),
@@ -565,6 +521,8 @@ impl Runtime {
             image_embedding_executors: BTreeMap::new(),
             text_embedding_executors: BTreeMap::new(),
             image_understanding_executors: BTreeMap::new(),
+            retrieval_executors: BTreeMap::new(),
+            ocr_executors: BTreeMap::new(),
             schedulers,
             jobs: Mutex::new(HashMap::new()),
             metrics: RuntimeMetrics::default(),
@@ -592,6 +550,26 @@ impl Runtime {
         Arc::get_mut(&mut runtime)
             .expect("newly constructed Runtime has one owner")
             .image_understanding_executors = executors;
+        runtime
+    }
+
+    /// Constructor for typed local-worker contract tests and future embedded
+    /// integrations. Retrieval and OCR remain separate executor families even
+    /// though they share the common Job/admission control plane.
+    pub fn with_local_worker_executors(
+        config: RuntimeConfig,
+        providers: BTreeMap<String, DynProvider>,
+        credentials: AppCredentials,
+        retrieval_executors: BTreeMap<String, DynRetrievalExecutor>,
+        ocr_executors: BTreeMap<String, DynOcrExecutor>,
+    ) -> Arc<Self> {
+        let mut runtime = Self::with_providers_and_credentials(config, providers, credentials);
+        {
+            let runtime =
+                Arc::get_mut(&mut runtime).expect("newly constructed Runtime has one owner");
+            runtime.retrieval_executors = retrieval_executors;
+            runtime.ocr_executors = ocr_executors;
+        }
         runtime
     }
 
@@ -632,6 +610,9 @@ impl Runtime {
                     estimated_tokens: estimate_response_tokens(&request),
                     id_prefix: "resp",
                     expected_data_plane: "responses",
+                    capability_contract: current_admitted_capability_contract(
+                        "infer.responses@20260812.1",
+                    ),
                     durable_payload: None,
                 },
             )
@@ -726,7 +707,7 @@ impl Runtime {
                             attempt_number,
                             AttemptOutcome::Failed,
                             Some(attempt_policy::kind_code(kind).into()),
-                            Some(error.to_string()),
+                            Some(error.public_message().into()),
                             None,
                         )
                         .await?;
@@ -738,6 +719,14 @@ impl Runtime {
                             && attempts < attempt_policy::MAX_ATTEMPTS;
                         last_error = Some(error);
                         if can_retry {
+                            let error = last_error.as_ref().expect("retry has an error");
+                            self.wait_before_retry(
+                                &prepared,
+                                kind,
+                                retry_index,
+                                error.retry_after(),
+                            )
+                            .await;
                             continue;
                         }
                         if can_fallback {
@@ -784,8 +773,12 @@ impl Runtime {
             }
         }
         let error = last_error.expect("an exhausted attempt plan has a provider error");
-        self.mark(&prepared.job_id, JobState::Failed, Some(error.to_string()))
-            .await?;
+        self.mark(
+            &prepared.job_id,
+            JobState::Failed,
+            Some(error.public_message().into()),
+        )
+        .await?;
         self.metrics.failed();
         Err(RuntimeError::Provider(error))
     }
@@ -809,6 +802,9 @@ impl Runtime {
                     estimated_tokens: estimate_response_tokens(&request),
                     id_prefix: "resp",
                     expected_data_plane: "responses",
+                    capability_contract: current_admitted_capability_contract(
+                        "infer.responses@20260812.1",
+                    ),
                     durable_payload: None,
                 },
             )
@@ -867,7 +863,7 @@ impl Runtime {
                             attempt_number,
                             AttemptOutcome::Failed,
                             Some(attempt_policy::kind_code(kind).into()),
-                            Some(error.to_string()),
+                            Some(error.public_message().into()),
                             None,
                         )
                         .await?;
@@ -879,6 +875,14 @@ impl Runtime {
                             && attempts < attempt_policy::MAX_ATTEMPTS;
                         last_error = Some(error);
                         if can_retry {
+                            let error = last_error.as_ref().expect("retry has an error");
+                            self.wait_before_retry(
+                                &prepared,
+                                kind,
+                                retry_index,
+                                error.retry_after(),
+                            )
+                            .await;
                             continue;
                         }
                         if can_fallback {
@@ -925,8 +929,12 @@ impl Runtime {
             }
         }
         let error = last_error.expect("an exhausted attempt plan has a provider error");
-        self.mark(&prepared.job_id, JobState::Failed, Some(error.to_string()))
-            .await?;
+        self.mark(
+            &prepared.job_id,
+            JobState::Failed,
+            Some(error.public_message().into()),
+        )
+        .await?;
         self.metrics.failed();
         Err(RuntimeError::Provider(error))
     }
@@ -1095,6 +1103,8 @@ impl Runtime {
                                 } else {
                                     build.model_id.clone()
                                 },
+                                source_kind: build.provenance.source_kind,
+                                license_status: build.license.status,
                                 resource_class: deployment.resource_class,
                                 supported_efforts: deployment.supported_efforts.clone(),
                                 execution_modes: deployment.supported_execution_modes.clone(),
@@ -1120,7 +1130,7 @@ impl Runtime {
                 }
                 ProviderSnapshot {
                     id: id.clone(),
-                    kind: provider.kind.clone(),
+                    kind: provider.kind.to_string(),
                     access_class: provider.access_class,
                     placement: provider.placement,
                     configured: provider.is_configured(),
@@ -1235,6 +1245,15 @@ impl Runtime {
                     estimated_tokens: 0,
                     id_prefix: "audio",
                     expected_data_plane,
+                    capability_contract: current_admitted_capability_contract(
+                        match expected_data_plane {
+                            "audio.transcription" => "infer.audio.transcription@20260811.1",
+                            "audio.alignment" => "infer.audio.alignment@20260811.1",
+                            "audio.speech" => "infer.audio.speech@20260811.1",
+                            "audio.voice_clone" => "infer.audio.voice-clone@20260811.1",
+                            _ => unreachable!("validated audio data plane"),
+                        },
+                    ),
                     durable_payload: None,
                 },
             )
@@ -1329,13 +1348,17 @@ impl Runtime {
                         attempt_number,
                         AttemptOutcome::Failed,
                         Some(attempt_policy::kind_code(provider.kind()).into()),
-                        Some(provider.to_string()),
+                        Some(provider.public_message().into()),
                         None,
                     )
                     .await?;
                 }
-                self.mark(&prepared.job_id, JobState::Failed, Some(error.to_string()))
-                    .await?;
+                self.mark(
+                    &prepared.job_id,
+                    JobState::Failed,
+                    Some(error.public_message()),
+                )
+                .await?;
                 self.metrics.failed();
                 Err(error)
             }
@@ -1376,6 +1399,7 @@ impl Runtime {
             estimated_tokens,
             id_prefix,
             expected_data_plane,
+            capability_contract,
             durable_payload,
         } = preparation;
         let app = self
@@ -1410,6 +1434,20 @@ impl Runtime {
             });
         }
         validate_overrides(app, &constraints)?;
+        let routing_grant = app
+            .routing
+            .as_ref()
+            .map(|routing| routing.grant_for(logical_model));
+        if constraints.named_route.as_ref().is_some_and(|requested| {
+            routing_grant
+                .as_ref()
+                .is_none_or(|grant| !grant.allows_request(requested, &self.config))
+        }) {
+            return Err(RuntimeError::NamedRouteNotAllowed {
+                app_id: app_id.to_owned(),
+                intent: logical_model.to_owned(),
+            });
+        }
         let policy_name = effective_policy(&self.config, app, intent, &constraints)?;
         let profile = self
             .config
@@ -1429,6 +1467,7 @@ impl Runtime {
                 reasoning_effort,
                 allowed_provider_access_classes: &app.allowed_provider_access_classes,
                 allowed_cloud_input_modalities: &app.allowed_cloud_input_modalities,
+                routing_grant: routing_grant.as_ref(),
                 unavailable_providers: &unavailable_providers,
                 unavailable_deployments: &unavailable_deployments,
             },
@@ -1457,6 +1496,8 @@ impl Runtime {
             id: job_id.clone(),
             app_id: app_id.to_owned(),
             intent: logical_model.to_owned(),
+            consumer_core_contract: infer_core::CONSUMER_CORE_CONTRACT.into(),
+            capability_contract: Some(capability_contract.into()),
             provider: candidate.provider_id.clone(),
             deployment: candidate.deployment_id.clone(),
             model_profile: candidate.model_profile_id.clone(),
@@ -1871,10 +1912,10 @@ impl Runtime {
                     }
                     Some(Err(error)) => {
                         runtime.health.record_failure(&prepared.provider_id, &error);
-                        let _ = runtime.finish_attempt(&prepared, attempt_number, AttemptOutcome::Failed, Some(attempt_policy::kind_code(error.kind()).into()), Some(error.to_string()), None).await;
+                        let _ = runtime.finish_attempt(&prepared, attempt_number, AttemptOutcome::Failed, Some(attempt_policy::kind_code(error.kind()).into()), Some(error.public_message().into()), None).await;
                         attempt_finished = true;
                         failed = true;
-                        yield sse_error("upstream_error", &error.to_string());
+                        yield sse_error("upstream_error", error.public_message());
                         break;
                     }
                     None => break,
@@ -2222,6 +2263,7 @@ mod tests {
             Err(ProviderError::Upstream {
                 status: 503,
                 body: "unavailable".into(),
+                retry_after: None,
             })
         }
         async fn execute_stream(
@@ -2232,6 +2274,7 @@ mod tests {
             Err(ProviderError::Upstream {
                 status: 503,
                 body: "unavailable".into(),
+                retry_after: None,
             })
         }
     }
@@ -2419,6 +2462,8 @@ mod tests {
             estimated_cost_usd = 1.0
             [apps.test-app]
             credential = { source = "environment", variable = "INFER_TEST_TOKEN" }
+            allowed_intents = ["text.summarize"]
+            allowed_cloud_input_modalities = ["text"]
             max_pending_jobs = 2
             allowed_policies = ["balanced"]
             [apps.test-app.request_overrides]
@@ -2555,6 +2600,53 @@ mod tests {
         assert!(response["id"].as_str().unwrap().starts_with("resp_"));
         assert_eq!(response["model"], "text.summarize");
         assert_eq!(fake.seen_model.lock().await.as_deref(), Some("qwen"));
+    }
+
+    #[tokio::test]
+    async fn admitted_capability_identity_is_request_scoped_and_persisted_on_the_job() {
+        let store = Arc::new(
+            Store::open_in_memory(ConfigSnapshot::from_serializable(&config()).unwrap()).unwrap(),
+        );
+        let fake = Arc::new(FakeProvider {
+            id: "local".into(),
+            seen_model: Mutex::new(None),
+        });
+        let runtime = Runtime::with_providers_and_store(
+            config(),
+            BTreeMap::from([("local".into(), fake as DynProvider)]),
+            Some(store),
+            AppCredentials::empty(),
+        );
+
+        let response = with_admitted_capability_contract(
+            "infer.responses@20991231.1",
+            runtime.execute("test-app", summary_request()),
+        )
+        .await
+        .unwrap();
+        let job = runtime
+            .snapshot(response["id"].as_str().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            job.capability_contract.as_deref(),
+            Some("infer.responses@20991231.1")
+        );
+
+        let outside = runtime
+            .execute("test-app", summary_request())
+            .await
+            .unwrap();
+        let outside_job = runtime
+            .snapshot(outside["id"].as_str().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            outside_job.capability_contract.as_deref(),
+            Some("infer.responses@20260812.1")
+        );
     }
 
     #[tokio::test]
@@ -3342,6 +3434,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn named_route_acl_rejects_before_job_or_provider_admission() {
+        let mut config = config();
+        config.apps.get_mut("test-app").unwrap().routing = Some(infer_core::AppRoutingConfig {
+            deployment_ids: BTreeSet::from(["qwen_local".into()]),
+            model_profile_ids: BTreeSet::new(),
+            intents: BTreeMap::new(),
+        });
+        let provider = Arc::new(UnavailableProvider {
+            id: "local".into(),
+            calls: AtomicUsize::new(0),
+        });
+        let runtime = Runtime::with_providers(
+            config,
+            BTreeMap::from([("local".into(), provider.clone() as DynProvider)]),
+        );
+        let mut request = summary_request();
+        request
+            .metadata
+            .insert("infer.deployment_ids".into(), "qwen_cloud".into());
+        let result = runtime.execute("test-app", request).await;
+        assert!(matches!(
+            result,
+            Err(RuntimeError::NamedRouteNotAllowed { app_id, intent })
+                if app_id == "test-app" && intent == "text.summarize"
+        ));
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+        assert!(runtime.jobs.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn named_request_succeeds_and_records_the_current_core_revision() {
+        let mut config = config();
+        config.apps.get_mut("test-app").unwrap().routing = Some(infer_core::AppRoutingConfig {
+            deployment_ids: BTreeSet::from(["qwen_local".into()]),
+            model_profile_ids: BTreeSet::new(),
+            intents: BTreeMap::new(),
+        });
+        let provider = Arc::new(FakeProvider {
+            id: "local".into(),
+            seen_model: Mutex::new(None),
+        });
+        let runtime = Runtime::with_providers(
+            config,
+            BTreeMap::from([("local".into(), provider as DynProvider)]),
+        );
+        let mut request = summary_request();
+        request
+            .metadata
+            .insert("infer.deployment_ids".into(), "qwen_local".into());
+        let response = runtime.execute("test-app", request).await.unwrap();
+        let job = runtime
+            .snapshot(response["id"].as_str().unwrap())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            job.consumer_core_contract,
+            "infer-runtime.consumer-core@20260813.1"
+        );
+        assert_eq!(job.routing.named_route.unwrap().kind, "deployment");
+    }
+
+    #[tokio::test]
     async fn app_builtin_tool_acl_rejects_web_search_before_job_or_provider_admission() {
         let config = config();
         let provider = Arc::new(UnavailableProvider {
@@ -3646,6 +3801,7 @@ mod tests {
                     estimated_tokens: estimate_response_tokens(&request),
                     id_prefix: "resp",
                     expected_data_plane: "responses",
+                    capability_contract: "infer.responses@20260812.1",
                     durable_payload: Some(&request_ref),
                 },
             )
@@ -3753,6 +3909,7 @@ mod tests {
                     estimated_tokens: estimate_response_tokens(&request),
                     id_prefix: "resp",
                     expected_data_plane: "responses",
+                    capability_contract: "infer.responses@20260812.1",
                     durable_payload: Some(&reference),
                 },
             )

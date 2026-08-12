@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    ContractError, ExecutionMode, INFER_METADATA_PREFIX, IntentProfile, ProviderAccessClass,
-    string_enum,
+    ContractError, ExecutionMode, INFER_METADATA_PREFIX, IntentProfile, NamedRouteRequest,
+    ProviderAccessClass, parse_ordered_ids, string_enum,
 };
 
 pub const IMAGE_GENERATION_INTENT: &str = "image.generate";
@@ -32,7 +32,7 @@ pub struct ResponsesRequest {
     #[serde(default)]
     pub tools: Vec<Value>,
     /// Standard Responses tool selection for the explicitly supported string
-    /// forms. Object-form named tool selection is not part of candidate.3.
+    /// forms. Object-form named tool selection is not part of the frozen Responses capability.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<ToolChoice>,
     #[serde(default)]
@@ -152,7 +152,7 @@ impl ResponsesRequest {
             .any(|key| !matches!(key.as_str(), "type" | "external_web_access"))
         {
             return Err(ContractError::UnsupportedField(
-                "tools.web_search options outside candidate.3 subset",
+                "tools.web_search options outside the frozen subset",
             ));
         }
         if object
@@ -424,6 +424,8 @@ pub struct RequestConstraints {
     pub max_cost_usd: Option<f64>,
     pub fallback: Option<Fallback>,
     pub deadline_ms: Option<u64>,
+    /// Optional ordered hard narrowing to Runtime-owned route identities.
+    pub named_route: Option<NamedRouteRequest>,
 }
 
 impl RequestConstraints {
@@ -506,6 +508,26 @@ impl RequestConstraints {
                     }
                     result.deadline_ms = Some(deadline);
                 }
+                "infer.deployment_ids" => {
+                    if result.named_route.is_some() {
+                        return Err(invalid(
+                            "deployment_ids and model_profile_ids are mutually exclusive",
+                        ));
+                    }
+                    result.named_route = Some(NamedRouteRequest::Deployments(
+                        parse_ordered_ids(value).map_err(&invalid)?,
+                    ));
+                }
+                "infer.model_profile_ids" => {
+                    if result.named_route.is_some() {
+                        return Err(invalid(
+                            "deployment_ids and model_profile_ids are mutually exclusive",
+                        ));
+                    }
+                    result.named_route = Some(NamedRouteRequest::ModelProfiles(
+                        parse_ordered_ids(value).map_err(&invalid)?,
+                    ));
+                }
                 _ => return Err(invalid("unknown reserved infer.* key")),
             }
         }
@@ -552,6 +574,8 @@ string_enum!(ProviderProtocol {
     Responses => "responses",
     CodexAppServer => "codex_app_server",
     AudioWorker => "audio_worker",
+    RetrievalWorker => "retrieval_worker",
+    OcrWorker => "ocr_worker",
     Onnx => "onnx"
 });
 string_enum!(ProviderCapability {
@@ -641,6 +665,36 @@ mod tests {
         assert_eq!(
             constraints.provider_access_class,
             Some(ProviderAccessClass::Subscription)
+        );
+    }
+
+    #[test]
+    fn named_route_metadata_is_an_ordered_hard_narrowing() {
+        let constraints = RequestConstraints::from_metadata(&BTreeMap::from([(
+            "infer.deployment_ids".into(),
+            "preferred,backup".into(),
+        )]))
+        .unwrap();
+        assert_eq!(
+            constraints.named_route,
+            Some(NamedRouteRequest::Deployments(vec![
+                "preferred".into(),
+                "backup".into()
+            ]))
+        );
+        assert_eq!(
+            serde_json::to_value(&constraints).unwrap()["named_route"],
+            serde_json::json!({
+                "kind": "deployment",
+                "ordered_ids": ["preferred", "backup"]
+            })
+        );
+        assert!(
+            RequestConstraints::from_metadata(&BTreeMap::from([
+                ("infer.deployment_ids".into(), "preferred".into()),
+                ("infer.model_profile_ids".into(), "profile".into()),
+            ]))
+            .is_err()
         );
     }
 

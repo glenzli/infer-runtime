@@ -26,10 +26,18 @@ pub(super) async fn open_transcription_stream(
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
     let app_id = authenticate(&state, &headers)?;
+    let capability_contract = infer_control::current_admitted_capability_contract(
+        "infer.audio.transcription-stream@20260811.1",
+    );
     Ok(upgrade
         .max_frame_size(MAX_AUDIO_FRAME_BYTES)
         .max_message_size(MAX_AUDIO_FRAME_BYTES)
-        .on_upgrade(move |socket| run_session(state, app_id, socket)))
+        .on_upgrade(move |socket| {
+            infer_control::with_admitted_capability_contract(
+                capability_contract,
+                run_session(state, app_id, socket),
+            )
+        }))
 }
 
 #[derive(Debug, Deserialize)]

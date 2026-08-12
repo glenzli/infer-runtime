@@ -75,6 +75,7 @@ mod tests {
                 &ProviderError::Upstream {
                     status: 503,
                     body: String::new(),
+                    retry_after: None,
                 },
             );
         }

@@ -239,6 +239,15 @@ impl Runtime {
                 estimated_tokens: 0,
                 id_prefix: "vision",
                 expected_data_plane,
+                capability_contract: super::current_admitted_capability_contract(
+                    match expected_data_plane {
+                        "vision.face_detection" => "infer.vision.face-detection@20260811.1",
+                        "vision.face_embedding" => "infer.vision.face-embedding@20260811.1",
+                        "vision.image_embedding" => "infer.vision.image-embedding@20260811.1",
+                        "vision.text_embedding" => "infer.vision.text-embedding@20260811.1",
+                        _ => unreachable!("validated vision data plane"),
+                    },
+                ),
                 durable_payload: None,
             },
         )
@@ -353,17 +362,25 @@ impl Runtime {
                     attempt_number,
                     AttemptOutcome::Failed,
                     Some(attempt_policy::kind_code(provider.kind()).into()),
-                    Some(provider.to_string()),
+                    Some(provider.public_message().into()),
                     None,
                 )
                 .await?;
-                self.mark(&prepared.job_id, JobState::Failed, Some(error.to_string()))
-                    .await?;
+                self.mark(
+                    &prepared.job_id,
+                    JobState::Failed,
+                    Some(error.public_message()),
+                )
+                .await?;
                 self.metrics.failed();
             }
             _ => {
-                self.mark(&prepared.job_id, JobState::Failed, Some(error.to_string()))
-                    .await?;
+                self.mark(
+                    &prepared.job_id,
+                    JobState::Failed,
+                    Some(error.public_message()),
+                )
+                .await?;
                 self.metrics.failed();
             }
         }

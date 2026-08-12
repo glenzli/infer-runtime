@@ -16,6 +16,8 @@ fn snapshot(index: usize) -> JobSnapshot {
         id: format!("resp_soak_{index:08x}"),
         app_id: "test-app".into(),
         intent: "text.summarize".into(),
+        consumer_core_contract: infer_core::CONSUMER_CORE_CONTRACT.into(),
+        capability_contract: Some("infer.responses@20260812.1".into()),
         provider: "local".into(),
         deployment: "small".into(),
         model_profile: "qwen".into(),
@@ -31,6 +33,7 @@ fn snapshot(index: usize) -> JobSnapshot {
         constraints: RequestConstraints::default(),
         routing: RoutingDecision {
             capability_floor: CapabilityLevel::Foundational,
+            named_route: None,
             candidates: vec![CandidateDecision {
                 deployment: "small".into(),
                 provider: "local".into(),

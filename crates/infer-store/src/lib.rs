@@ -1220,6 +1220,8 @@ mod tests {
             id: "resp_test".into(),
             app_id: "test-app".into(),
             intent: "text.summarize".into(),
+            consumer_core_contract: infer_core::CONSUMER_CORE_CONTRACT.into(),
+            capability_contract: Some("infer.responses@20260812.1".into()),
             provider: "cloud".into(),
             deployment: "deepseek_flash".into(),
             model_profile: "deepseek".into(),
@@ -1235,6 +1237,7 @@ mod tests {
             constraints: RequestConstraints::default(),
             routing: RoutingDecision {
                 capability_floor: CapabilityLevel::Foundational,
+                named_route: None,
                 candidates: vec![CandidateDecision {
                     deployment: "deepseek_flash".into(),
                     provider: "cloud".into(),

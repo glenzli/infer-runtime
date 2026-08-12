@@ -107,6 +107,9 @@ impl Runtime {
                     estimated_tokens: 0,
                     id_prefix: "audio",
                     expected_data_plane: "audio.speech",
+                    capability_contract: super::current_admitted_capability_contract(
+                        "infer.audio.speech@20260811.1",
+                    ),
                     durable_payload: None,
                 },
             )
@@ -182,8 +185,8 @@ impl Runtime {
                     Some(Ok(chunk)) => yield Ok(chunk),
                     Some(Err(error)) => {
                         runtime.health.record_failure(&prepared.provider_id, &error);
-                        let _ = runtime.finish_attempt(prepared, attempt_number, AttemptOutcome::Failed, Some(crate::attempt_policy::kind_code(error.kind()).into()), Some(error.to_string()), None).await;
-                        let _ = runtime.mark(&prepared.job_id, JobState::Failed, Some(error.to_string())).await;
+                        let _ = runtime.finish_attempt(prepared, attempt_number, AttemptOutcome::Failed, Some(crate::attempt_policy::kind_code(error.kind()).into()), Some(error.public_message().into()), None).await;
+                        let _ = runtime.mark(&prepared.job_id, JobState::Failed, Some(error.public_message().into())).await;
                         runtime.metrics.failed();
                         terminal.disarm();
                         yield Err(error);
@@ -230,6 +233,9 @@ impl Runtime {
                     estimated_tokens: 0,
                     id_prefix: "audio_session",
                     expected_data_plane: "audio.transcription",
+                    capability_contract: super::current_admitted_capability_contract(
+                        "infer.audio.transcription-stream@20260811.1",
+                    ),
                     durable_payload: None,
                 },
             )
@@ -300,12 +306,16 @@ impl Runtime {
             attempt_number,
             AttemptOutcome::Failed,
             Some(code.into()),
-            Some(error.to_string()),
+            Some(error.public_message()),
             None,
         )
         .await?;
-        self.mark(prepared.job_id.as_str(), state, Some(error.to_string()))
-            .await?;
+        self.mark(
+            prepared.job_id.as_str(),
+            state,
+            Some(error.public_message()),
+        )
+        .await?;
         match state {
             JobState::Cancelled => self.metrics.cancelled(),
             JobState::Expired => self.metrics.expired(),
@@ -429,12 +439,12 @@ impl RuntimeTranscriptionSession {
                 self.attempt_number,
                 AttemptOutcome::Failed,
                 Some(code.into()),
-                Some(error.to_string()),
+                Some(error.public_message()),
                 None,
             )
             .await?;
         self.runtime
-            .mark(&prepared.job_id, state, Some(error.to_string()))
+            .mark(&prepared.job_id, state, Some(error.public_message()))
             .await?;
         match state {
             JobState::Cancelled => self.runtime.metrics.cancelled(),
@@ -549,6 +559,7 @@ for line in sys.stdin:
             [apps.test]
             credential = {{ source = "managed" }}
             allowed_intents = ["speech.synthesize"]
+            allowed_speech_voice_aliases = ["speech.voice.zh.bright_female.v1"]
             allowed_policies = ["balanced"]
             "#,
             credentials.display(),
@@ -564,9 +575,9 @@ for line in sys.stdin:
                 SpeechRequest {
                     model: "speech.synthesize".into(),
                     input: "hello".into(),
-                    voice: Some("default".into()),
+                    voice: Some("speech.voice.zh.bright_female.v1".into()),
                     instructions: None,
-                    language: None,
+                    language: Some("Chinese".into()),
                     speed: 1.0,
                     response_format: SpeechFormat::Pcm,
                     execution_mode: ExecutionMode::ServerStream,

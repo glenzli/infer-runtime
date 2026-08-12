@@ -417,8 +417,8 @@ mod recovery_soak_tests;
 mod tests {
     use infer_core::{
         AttemptSnapshot, AttemptTrigger, CandidateDecision, CandidateDecisionStatus,
-        CapabilityLevel, EvaluationStatus, Placement, Priority, RequestConstraints, ResourceClass,
-        RoutingDecision,
+        CapabilityLevel, EvaluationStatus, NamedRouteDecision, NamedRouteRequest, Placement,
+        Priority, RequestConstraints, ResourceClass, RoutingDecision,
     };
 
     use super::*;
@@ -434,6 +434,8 @@ mod tests {
             id: "resp_background".into(),
             app_id: "test-app".into(),
             intent: "text.summarize".into(),
+            consumer_core_contract: infer_core::CONSUMER_CORE_CONTRACT.into(),
+            capability_contract: Some("infer.responses@20260812.1".into()),
             provider: "local".into(),
             deployment: "small".into(),
             model_profile: "qwen".into(),
@@ -449,6 +451,7 @@ mod tests {
             constraints: RequestConstraints::default(),
             routing: RoutingDecision {
                 capability_floor: CapabilityLevel::Foundational,
+                named_route: None,
                 candidates: vec![CandidateDecision {
                     deployment: "small".into(),
                     provider: "local".into(),
@@ -519,6 +522,51 @@ mod tests {
         );
         assert_eq!(recovery.runnable[0].recovery_replays, 1);
         assert_eq!(store.usage_entries().unwrap()[0].outcome, "interrupted");
+    }
+
+    #[test]
+    fn durable_recovery_preserves_core_capability_and_named_route_wire_shape() {
+        let store = store();
+        let mut snapshot = snapshot(JobState::Running, AttemptOutcome::Running);
+        snapshot.consumer_core_contract = "infer-runtime.consumer-core@20260813.1".into();
+        snapshot.constraints.named_route = Some(NamedRouteRequest::Deployments(vec![
+            "preferred".into(),
+            "backup".into(),
+        ]));
+        snapshot.routing.named_route = Some(NamedRouteDecision {
+            kind: "deployment".into(),
+            ordered_ids: vec!["preferred".into(), "backup".into()],
+        });
+        let request = payload(
+            infer_core::DurablePayloadKind::ResponsesRequest,
+            "pay_00000000000000000000000000000004",
+        );
+        store
+            .persist_background_job_with_event(
+                &snapshot,
+                &request,
+                AuditEventInput {
+                    kind: "job.admitted".into(),
+                    details: json!({}),
+                },
+            )
+            .unwrap();
+
+        let recovery = store.recover_background_jobs(Some(2)).unwrap();
+        let recovered = &recovery.runnable[0].snapshot;
+        let json = serde_json::to_value(recovered).unwrap();
+        let expected = json!({
+            "kind": "deployment",
+            "ordered_ids": ["preferred", "backup"]
+        });
+        assert_eq!(json["constraints"]["named_route"], expected);
+        assert_eq!(json["routing"]["named_route"], expected);
+        assert_eq!(
+            json["consumer_core_contract"],
+            "infer-runtime.consumer-core@20260813.1"
+        );
+        assert_eq!(json["capability_contract"], "infer.responses@20260812.1");
+        assert!(json.get("consumer_contract_version").is_none());
     }
 
     #[test]

@@ -91,6 +91,7 @@ fn config(database: &Path) -> RuntimeConfig {
         estimated_cost_usd = 0.0
         [apps.test-app]
         credential = { source = "environment", variable = "INFER_TEST_TOKEN" }
+        allowed_intents = ["text.summarize"]
         max_pending_jobs = 16
         allowed_policies = ["balanced"]
         [apps.test-app.request_overrides]
@@ -161,6 +162,7 @@ async fn admit(
                 estimated_tokens: estimate_response_tokens(&request),
                 id_prefix: "resp",
                 expected_data_plane: "responses",
+                capability_contract: "infer.responses@20260812.1",
                 durable_payload: Some(&request_ref),
             },
         )

@@ -143,6 +143,15 @@ impl Runtime {
                 estimated_tokens: 0,
                 id_prefix: "vision",
                 expected_data_plane,
+                capability_contract: super::current_admitted_capability_contract(
+                    match expected_data_plane {
+                        "vision.image_description" => "infer.vision.image-description@20260811.1",
+                        "vision.classification_review" => {
+                            "infer.vision.classification-review@20260811.1"
+                        }
+                        _ => unreachable!("validated image-understanding data plane"),
+                    },
+                ),
                 durable_payload: None,
             },
         )

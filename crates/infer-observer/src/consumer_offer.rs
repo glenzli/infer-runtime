@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use crate::DiscoveryOffer;
 
-pub const CONSUMER_PROTOCOL: &str = "infer-runtime.consumer";
+pub const CONSUMER_PROTOCOL: &str = "infer-runtime.consumer-core";
 pub const CONSUMER_HTTP_LOOPBACK_BINDING: &str = "infer-runtime.http-loopback";
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -22,14 +22,22 @@ pub enum ConsumerOfferError {
 
 pub fn consumer_http_offer(
     address: SocketAddr,
-    protocol_version: &str,
+    protocol_versions: &[&str],
 ) -> Result<DiscoveryOffer, ConsumerOfferError> {
-    validate_protocol_version(protocol_version)?;
+    if protocol_versions.is_empty() {
+        return Err(ConsumerOfferError::InvalidProtocolVersion(String::new()));
+    }
+    for protocol_version in protocol_versions {
+        validate_protocol_version(protocol_version)?;
+    }
     let endpoint = format!("http://{address}");
     validate_consumer_http_endpoint(&endpoint)?;
     Ok(DiscoveryOffer {
         protocol: CONSUMER_PROTOCOL.to_owned(),
-        protocol_versions: vec![protocol_version.to_owned()],
+        protocol_versions: protocol_versions
+            .iter()
+            .map(|version| (*version).to_owned())
+            .collect(),
         binding: CONSUMER_HTTP_LOOPBACK_BINDING.to_owned(),
         endpoint,
     })
@@ -73,20 +81,17 @@ mod tests {
     #[test]
     fn builds_exact_ipv4_consumer_offer() {
         let offer =
-            consumer_http_offer("127.0.0.1:8787".parse().unwrap(), "0.1.0-candidate.3").unwrap();
+            consumer_http_offer("127.0.0.1:8787".parse().unwrap(), &["20260812.1"]).unwrap();
 
         assert_eq!(offer.protocol, CONSUMER_PROTOCOL);
-        assert_eq!(
-            offer.protocol_versions,
-            vec!["0.1.0-candidate.3".to_owned()]
-        );
+        assert_eq!(offer.protocol_versions, vec!["20260812.1".to_owned()]);
         assert_eq!(offer.binding, CONSUMER_HTTP_LOOPBACK_BINDING);
         assert_eq!(offer.endpoint, "http://127.0.0.1:8787");
     }
 
     #[test]
     fn preserves_canonical_ipv6_loopback_endpoint() {
-        let offer = consumer_http_offer("[::1]:8787".parse().unwrap(), "20260811.1").unwrap();
+        let offer = consumer_http_offer("[::1]:8787".parse().unwrap(), &["20260811.1"]).unwrap();
         assert_eq!(offer.endpoint, "http://[::1]:8787");
         assert_eq!(
             validate_consumer_http_endpoint(&offer.endpoint).unwrap(),
@@ -117,13 +122,13 @@ mod tests {
     fn rejects_invalid_protocol_versions() {
         for version in ["", "invalid version"] {
             assert!(matches!(
-                consumer_http_offer("127.0.0.1:8787".parse().unwrap(), version),
+                consumer_http_offer("127.0.0.1:8787".parse().unwrap(), &[version]),
                 Err(ConsumerOfferError::InvalidProtocolVersion(_))
             ));
         }
         let too_long = "x".repeat(65);
         assert!(matches!(
-            consumer_http_offer("127.0.0.1:8787".parse().unwrap(), &too_long),
+            consumer_http_offer("127.0.0.1:8787".parse().unwrap(), &[&too_long]),
             Err(ConsumerOfferError::InvalidProtocolVersion(_))
         ));
     }
