@@ -1365,7 +1365,7 @@ impl Runtime {
                         match expected_data_plane {
                             "audio.transcription" => "infer.audio.transcription@20260811.1",
                             "audio.alignment" => "infer.audio.alignment@20260811.1",
-                            "audio.event_detection" => "infer.audio.event-detection@20260813.1",
+                            "audio.event_detection" => "infer.audio.event-detection@20260813.2",
                             "audio.speech" => "infer.audio.speech@20260811.1",
                             "audio.voice_clone" => "infer.audio.voice-clone@20260811.1",
                             _ => unreachable!("validated audio data plane"),

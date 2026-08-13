@@ -657,7 +657,7 @@
       },
       "EventDetectionCapability": {
         "name": "Infer-Capability-Contract", "in": "header", "required": true,
-        "schema": { "const": "infer.audio.event-detection@20260813.1" }
+        "schema": { "const": "infer.audio.event-detection@20260813.2" }
       },
       "AlignmentCapability": {
         "name": "Infer-Capability-Contract", "in": "header", "required": true,
@@ -985,7 +985,7 @@
         "additionalProperties": false,
         "required": ["class_id", "label", "start_seconds", "end_seconds", "score"],
         "properties": {
-          "class_id": { "type": "string", "pattern": "^/m/", "description": "Stable AudioSet MID, never a model output index" },
+          "class_id": { "type": "string", "pattern": "^/(m|t)/", "description": "Stable class id from the pinned AudioSet class map, never a model output index" },
           "label": { "type": "string", "minLength": 1 },
           "start_seconds": { "type": "number", "minimum": 0 },
           "end_seconds": { "type": "number", "exclusiveMinimum": 0 },

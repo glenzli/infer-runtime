@@ -257,7 +257,7 @@ impl EventDetectionResult {
         }
         let mut previous_start = 0.0;
         for (index, event) in self.events.iter().enumerate() {
-            if !event.class_id.starts_with("/m/")
+            if !(event.class_id.starts_with("/m/") || event.class_id.starts_with("/t/"))
                 || event.label.trim().is_empty()
                 || !finite_non_negative(event.start_seconds)
                 || !finite_non_negative(event.end_seconds)
@@ -348,6 +348,18 @@ mod tests {
         result.validate().expect("high score is present");
 
         result.speech_presence.status = SpeechPresenceStatus::Unknown;
+        assert!(result.validate().is_err());
+    }
+
+    #[test]
+    fn pinned_audioset_class_map_accepts_machine_and_taxonomy_ids_only() {
+        let mut result = event_result(SpeechPresenceStatus::Unknown, 0.12);
+        result.events[0].class_id = "/t/dd00129".into();
+        result
+            .validate()
+            .expect("AudioSet taxonomy id is stable evidence");
+
+        result.events[0].class_id = "/x/private".into();
         assert!(result.validate().is_err());
     }
 

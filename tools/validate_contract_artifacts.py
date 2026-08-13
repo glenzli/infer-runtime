@@ -122,7 +122,7 @@ def validate_fixtures(source: dict[str, Any]) -> None:
 
     event_fixtures = (
         ROOT
-        / "contracts/capabilities/infer.audio.event-detection/20260813.1/fixtures"
+        / "contracts/capabilities/infer.audio.event-detection/20260813.2/fixtures"
     )
     event_schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
