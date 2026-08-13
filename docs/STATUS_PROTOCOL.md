@@ -85,7 +85,7 @@ Schema: `infer-runtime.status.snapshot`
     "infer-runtime": {
       "usage_daily": {
         "schema": "infer-runtime.usage.daily",
-        "schema_version": "20260813.2",
+        "schema_version": "20260813.3",
         "calendar": "host_local",
         "days": [
           {
@@ -154,9 +154,11 @@ identity.
 - `days` contains zero or one complete, day-to-date aggregate. Sentinel owns
   historical retention and must upsert `date + models[].id`; it must not add
   repeated snapshots together.
-- A model row contains only provider-reported input/output/total token sums and
-  the Runtime's settled USD sum. Rows without reported token usage contribute
-  zero tokens but may still contribute cost.
+- This is a Token-panel projection: a model row exists only when its aggregated
+  provider-reported input, output, or total text-token count is nonzero.
+  Vision/audio attempts with no reported text tokens remain visible only in
+  execution/resource telemetry. Their cost is deliberately not folded into
+  this token-only projection.
 - `execution_origin` is a closed Runtime-derived identity: `"codex"` only
   when the selected Provider kind was `codex_app_server` at Attempt settlement;
   `"other"` for every other configured Provider kind. It is not inferred from

@@ -132,7 +132,15 @@ impl Store {
             aggregate.total_tokens = aggregate.total_tokens.saturating_add(total_tokens);
             aggregate.cost_usd += cost_usd;
         }
-        let models = models.into_values().collect::<Vec<_>>();
+        // `usage_daily` feeds the Token panel. Vision/audio attempts without
+        // provider-reported text tokens belong in execution/resource telemetry,
+        // not alongside text-model token totals. Filtering only after
+        // aggregation preserves a model with mixed zero- and nonzero-token
+        // attempts.
+        let models = models
+            .into_values()
+            .filter(has_any_reported_tokens)
+            .collect::<Vec<_>>();
         if models.is_empty() {
             Ok(None)
         } else {
@@ -152,6 +160,10 @@ pub(crate) fn public_model_id(snapshot: &JobSnapshot) -> Option<String> {
 
 fn non_negative_u64(value: i64) -> u64 {
     value.max(0) as u64
+}
+
+fn has_any_reported_tokens(usage: &DailyModelUsageModel) -> bool {
+    usage.input_tokens > 0 || usage.output_tokens > 0 || usage.total_tokens > 0
 }
 
 #[cfg(test)]
@@ -252,6 +264,36 @@ mod tests {
             super::public_model_id(&snapshot).as_deref(),
             Some("safe-build")
         );
+    }
+
+    #[test]
+    fn zero_token_vision_or_audio_rows_do_not_appear_in_the_token_projection() {
+        let store = Store::open_in_memory(config()).unwrap();
+        let mut snapshot = job(JobState::Succeeded, AttemptOutcome::Succeeded);
+        snapshot.id = "vision_zero_tokens".into();
+        snapshot.physical_model = "sha256:not-a-token-model".into();
+        store.persist_job(&snapshot).unwrap();
+        store
+            .reserve_attempt(&reservation(snapshot.id.clone(), 1, 0.0, 0))
+            .unwrap();
+        store
+            .settle_attempt(UsageLedgerEntry {
+                job_id: snapshot.id,
+                attempt_number: 1,
+                app_id: snapshot.app_id,
+                provider: snapshot.provider,
+                deployment: snapshot.deployment,
+                outcome: "succeeded".into(),
+                amount_usd: 0.0,
+                estimated: true,
+                input_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                execution_origin: Some(ExecutionOrigin::Other),
+            })
+            .unwrap();
+
+        assert!(store.current_local_day_model_usage().unwrap().is_none());
     }
 
     #[test]
