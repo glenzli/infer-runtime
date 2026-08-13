@@ -11,6 +11,7 @@ mod discovery;
 mod error;
 mod jobs;
 mod ocr;
+mod raw_foundation;
 mod responses;
 mod retrieval;
 mod transport;
@@ -36,6 +37,13 @@ pub use jobs::{
     JobSnapshot, NamedRouteDecision, RoutingDecision,
 };
 pub use ocr::{DocumentOcrResponse, OcrProvenance, OcrTextLine};
+pub use raw_foundation::{
+    RAW_FOUNDATION_CAPABILITIES, RAW_FOUNDATION_ENDPOINT, RAW_FOUNDATION_INTENT,
+    RAW_FOUNDATION_LEASE_ENDPOINT, RAW_FOUNDATION_STAGING_SCHEMA, RawFoundationArtifactReceipt,
+    RawFoundationCancellation, RawFoundationExecuteResponse, RawFoundationLeaseBinding,
+    RawFoundationLeaseGrant, RawFoundationLeaseRequest, RawFoundationPriority,
+    RawFoundationProvenance, RawFoundationSource, RawFoundationStagingDescriptor,
+};
 pub use responses::{ResponsesEventStream, ResponsesRequest, ResponsesResult};
 pub use retrieval::{
     RetrievalEmbeddingItem, RetrievalEmbeddingRequest, RetrievalEmbeddingResponse,
@@ -45,11 +53,12 @@ pub use retrieval::{
 pub use transport::{Client, ClientBuilder, CredentialSource};
 pub use vision::{
     BoundingBox, ClassificationCategory, ClassificationDisposition, ClassificationReviewResponse,
-    ClassificationSuggestion, EncodedLabelMap, EncodedSegmentationMask, FaceDetection,
-    FaceDetectionResponse, FaceEmbeddingEligibility, FaceEmbeddingResponse, FaceParsingOntology,
-    FaceParsingRegion, FaceParsingResponse, FivePointLandmarks, ImageDescriptionResponse,
-    ImageDescriptionResult, ImageEmbeddingResponse, ImageGeometry, ImageUnderstandingProvenance,
-    NormalizedBoundingBox, Point, SegmentationPromptLabel, SegmentationPromptPoint,
-    SemanticEmbeddingVector, SubjectSegmentationResponse, TextEmbeddingRequest,
-    TextEmbeddingResponse, VisionProvenance,
+    ClassificationSuggestion, EncodedLabelMap, EncodedSegmentationMask,
+    EncodedSoftSegmentationMask, FaceDetection, FaceDetectionResponse, FaceEmbeddingEligibility,
+    FaceEmbeddingResponse, FaceParsingOntology, FaceParsingRegion, FaceParsingResponse,
+    FivePointLandmarks, ImageDescriptionResponse, ImageDescriptionResult, ImageEmbeddingResponse,
+    ImageGeometry, ImageUnderstandingProvenance, NormalizedBoundingBox, Point,
+    SegmentationMaskRasterExtent, SegmentationPromptLabel, SegmentationPromptPoint,
+    SemanticEmbeddingVector, SubjectSegmentationResponse, SubjectSegmentationSoftMaskResponse,
+    TextEmbeddingRequest, TextEmbeddingResponse, VisionProvenance,
 };

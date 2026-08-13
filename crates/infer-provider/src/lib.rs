@@ -32,6 +32,7 @@ pub use codex_app_server::CodexAppServerProvider;
 pub use coreml_sam::{
     CoremlSamExecutor, DynSubjectSegmentationExecutor, SamBuildContract,
     SubjectSegmentationExecutionOutput, SubjectSegmentationExecutor,
+    SubjectSegmentationSoftMaskExecutionOutput,
 };
 pub use ocr_worker::{
     DynOcrExecutor, OcrBuildContract, OcrExecutionOutput, OcrExecutor, OcrWorkerExecutor,

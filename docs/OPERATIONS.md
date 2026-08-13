@@ -342,6 +342,12 @@ SAM 2.1 Small 使用 `coreml_all` 时触发 405–539 秒的异常 ANE 首请求
 HTTP cold 为 1.26 秒，同图第二次点击因 image embedding cache 为 48.5 ms。改变 compute
 units 必须同步 Build provenance 并重新做真实 cold/warm smoke，不能把 `ALL` 当作自动更快。
 
+`infer.vision.subject-segmentation-soft-mask@20260814.1` 复用同一个 session、compiled cache 与
+单项 image-embedding cache，但不复用旧二值输出：adapter 将选中 mask 的原生 256×256 logits 做稳定
+sigmoid Gray8 量化，并声明线性 pixel-centre 映射。当前隔离真实 HTTP smoke 的 cold 为 991 ms、同图
+warm 为 38.6 ms；它是本机单次验收，不是跨机性能承诺。请求断开、deadline 或显式 Job cancel 都由
+`CancellationToken` 终止 worker 并 `kill/wait`，不会发布迟到 mask。
+
 BiSeNet ResNet18 使用普通 `infer import-onnx`，但 typed adapter 会同时锁定 opset 20、
 动态 batch `input=[N,3,512,512]`、三个已命名的动态输出（typed adapter 只消费主 `output`）、
 ImageNet RGB normalization、1.8 倍 face context crop 与 19-class argmax/restore policy。任何

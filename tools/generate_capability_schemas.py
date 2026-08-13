@@ -68,6 +68,10 @@ CAPABILITIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "20260813.1",
         ("/infer/v1/vision/subject-segmentations",),
     ),
+    "infer.vision.subject-segmentation-soft-mask": (
+        "20260814.1",
+        ("/infer/v1/vision/subject-segmentations/soft-mask",),
+    ),
     "infer.vision.face-parsing": (
         "20260813.1",
         ("/infer/v1/vision/face-parsings",),

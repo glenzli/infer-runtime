@@ -9,6 +9,8 @@ pub const FACE_DETECTION_CAPABILITIES: &[&str] = &["infer.vision.face-detection@
 pub const FACE_EMBEDDING_CAPABILITIES: &[&str] = &["infer.vision.face-embedding@20260811.1"];
 pub const SUBJECT_SEGMENTATION_CAPABILITIES: &[&str] =
     &["infer.vision.subject-segmentation@20260813.1"];
+pub const SUBJECT_SEGMENTATION_SOFT_MASK_CAPABILITIES: &[&str] =
+    &["infer.vision.subject-segmentation-soft-mask@20260814.1"];
 pub const FACE_PARSING_CAPABILITIES: &[&str] = &["infer.vision.face-parsing@20260813.1"];
 pub const IMAGE_EMBEDDING_CAPABILITIES: &[&str] = &["infer.vision.image-embedding@20260811.1"];
 pub const TEXT_EMBEDDING_CAPABILITIES: &[&str] = &["infer.vision.text-embedding@20260811.1"];
@@ -158,6 +160,38 @@ pub struct SubjectSegmentationResponse {
     pub source_revision: String,
     pub image: ImageGeometry,
     pub mask: EncodedSegmentationMask,
+    pub score: f32,
+    pub prompt_count: usize,
+    pub provenance: VisionProvenance,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SegmentationMaskRasterExtent {
+    pub width: u32,
+    pub height: u32,
+    pub coordinate_mapping: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct EncodedSoftSegmentationMask {
+    pub content_type: String,
+    pub encoding: String,
+    pub data_base64: String,
+    pub sha256: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct SubjectSegmentationSoftMaskResponse {
+    pub id: String,
+    pub object: String,
+    pub created_at: u64,
+    pub status: String,
+    pub source_revision: String,
+    pub input_coordinate_extent: ImageGeometry,
+    pub raster_extent: SegmentationMaskRasterExtent,
+    pub mask: EncodedSoftSegmentationMask,
     pub score: f32,
     pub prompt_count: usize,
     pub provenance: VisionProvenance,
@@ -408,6 +442,50 @@ impl Client {
         self.vision_multipart(
             SUBJECT_SEGMENTATION_CAPABILITIES,
             "/infer/v1/vision/subject-segmentations",
+            image,
+            content_type,
+            fields,
+            metadata,
+        )
+        .await
+    }
+
+    /// Returns SAM's native 256x256 Gray8 sigmoid-probability raster.  The
+    /// raster extent declares the deterministic mapping back to the supplied
+    /// orientation-normalized display pixels.
+    pub async fn segment_subject_soft_mask(
+        &self,
+        image: &Path,
+        content_type: &'static str,
+        source_revision: &str,
+        points: &[SegmentationPromptPoint],
+        box_prompt: Option<NormalizedBoundingBox>,
+        metadata: &BTreeMap<String, String>,
+    ) -> Result<SubjectSegmentationSoftMaskResponse> {
+        let mut fields = vec![
+            ("model", "vision.segment_subject".into()),
+            ("source_revision", source_revision.into()),
+            (
+                "image_orientation",
+                "display_pixels_orientation_normalized".into(),
+            ),
+            ("prompt_coordinate_space", "normalized_0_1".into()),
+            (
+                "points",
+                serde_json::to_string(points)
+                    .map_err(|error| Error::MalformedResponse(error.to_string()))?,
+            ),
+        ];
+        if let Some(box_prompt) = box_prompt {
+            fields.push((
+                "box_prompt",
+                serde_json::to_string(&box_prompt)
+                    .map_err(|error| Error::MalformedResponse(error.to_string()))?,
+            ));
+        }
+        self.vision_multipart(
+            SUBJECT_SEGMENTATION_SOFT_MASK_CAPABILITIES,
+            "/infer/v1/vision/subject-segmentations/soft-mask",
             image,
             content_type,
             fields,

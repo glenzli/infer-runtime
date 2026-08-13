@@ -205,7 +205,10 @@ def _validate_request(request: dict) -> None:
         "points",
         "box_prompt",
     }
-    if set(request) - expected or request.get("operation") != "segment_subject":
+    if set(request) - expected or request.get("operation") not in (
+        "segment_subject",
+        "segment_subject_soft_mask",
+    ):
         raise StableWorkerError("sam_invalid_request")
     if not isinstance(request.get("request_id"), str) or not request["request_id"]:
         raise StableWorkerError("sam_invalid_request")
@@ -310,14 +313,27 @@ def _segment(request: dict) -> dict:
     if scores.size != 3 or masks.shape != (1, 3, 256, 256) or not np.all(np.isfinite(scores)):
         raise StableWorkerError("sam_model_contract_mismatch")
     best = int(np.argmax(scores))
-    logits = Image.fromarray(masks[0, best].astype(np.float32))
-    resized_logits = logits.resize(original_size, Image.Resampling.BILINEAR)
-    binary = (np.asarray(resized_logits, dtype=np.float32) > 0).astype(np.uint8) * 255
+    logits = masks[0, best].astype(np.float32)
     output_path = Path(request["output_path"])
     if not output_path.is_absolute() or output_path.exists() or not output_path.parent.is_dir():
         raise StableWorkerError("sam_invalid_request")
     partial = output_path.with_suffix(".partial")
-    Image.fromarray(binary).save(partial, format="PNG", optimize=True)
+    if request["operation"] == "segment_subject":
+        resized_logits = Image.fromarray(logits).resize(
+            original_size, Image.Resampling.BILINEAR
+        )
+        output = (np.asarray(resized_logits, dtype=np.float32) > 0).astype(np.uint8) * 255
+    else:
+        # Keep the native 256x256 SAM raster.  Gray8 uses a stable sigmoid
+        # quantization, so consumers can map it to input pixels themselves
+        # without a hidden resize/threshold policy in the Runtime.
+        positive = logits >= 0
+        probabilities = np.empty_like(logits)
+        probabilities[positive] = 1.0 / (1.0 + np.exp(-logits[positive]))
+        negative = np.exp(logits[~positive])
+        probabilities[~positive] = negative / (1.0 + negative)
+        output = np.floor(np.clip(probabilities, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+    Image.fromarray(output, mode="L").save(partial, format="PNG", optimize=True)
     os.replace(partial, output_path)
     return {"score": float(np.clip(scores[best], 0.0, 1.0))}
 

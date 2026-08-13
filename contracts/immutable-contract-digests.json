@@ -21,6 +21,7 @@
     "contracts/capabilities/infer.vision.image-description/20260811.1/openapi.json": "e655e711e8101ed5f3c11c52fff1eb5fee1ebebb5f51cdd265d0a983d8aa5793",
     "contracts/capabilities/infer.vision.image-embedding/20260811.1/openapi.json": "1f30793c1c7866f1cd4239e35dcdb10842b609f021731882810d4de143df42e9",
     "contracts/capabilities/infer.vision.subject-segmentation/20260813.1/openapi.json": "4df56eefaa7ced43ef3c823f933e9bea689bee23f60d3279c3d84f75414bdb1d",
+    "contracts/capabilities/infer.vision.subject-segmentation-soft-mask/20260814.1/openapi.json": "8ae50dcde6459072bc09a0f32b7a391df62cb0eae27d45879a3441aa203330d4",
     "contracts/capabilities/infer.vision.text-embedding/20260811.1/openapi.json": "b1bc536f7ded5f1397c739c2b1a282d460ff4b59923fb4f6fd3c564a8627be71",
     "contracts/consumer-core/20260813.1/openapi.json": "08dcb1cc800b3eb5a8f63d45e8767404a40e8d36d7be391f5e7dd73c085f5801"
   }

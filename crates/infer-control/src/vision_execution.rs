@@ -10,8 +10,11 @@ use infer_core::{
     AttemptOutcome, AttemptTrigger, ExecutionMode, ExecutionRequirements, FaceDetectionRequest,
     FaceDetectionResponse, FaceEmbeddingRequest, FaceEmbeddingResponse, FaceParsingRequest,
     FaceParsingResponse, ImageEmbeddingRequest, ImageEmbeddingResponse, JobState, Modality,
-    SENSITIVE_BIOMETRIC_CLASSIFICATION, SubjectSegmentationRequest, SubjectSegmentationResponse,
-    TextEmbeddingRequest, TextEmbeddingResponse, VisionProvenance, VisionTokenizerProvenance,
+    SENSITIVE_BIOMETRIC_CLASSIFICATION, SUBJECT_SEGMENTATION_SOFT_MASK_COORDINATE_MAPPING,
+    SUBJECT_SEGMENTATION_SOFT_MASK_HEIGHT, SUBJECT_SEGMENTATION_SOFT_MASK_WIDTH,
+    SegmentationMaskRasterExtent, SubjectSegmentationRequest, SubjectSegmentationResponse,
+    SubjectSegmentationSoftMaskResponse, TextEmbeddingRequest, TextEmbeddingResponse,
+    VisionProvenance, VisionTokenizerProvenance,
 };
 use infer_provider::{
     DynFaceDetectionExecutor, DynFaceEmbeddingExecutor, DynFaceParsingExecutor,
@@ -69,6 +72,67 @@ impl Runtime {
             status: "completed".into(),
             source_revision,
             image: output.image,
+            mask: output.mask,
+            score: output.score,
+            prompt_count,
+            provenance: vision_provenance(&prepared, output.provenance),
+        })
+    }
+
+    /// Additive SAM 2.1 route that preserves the selected native 256x256
+    /// probability raster.  It deliberately shares admission, cancellation,
+    /// residency, and the logical Intent with binary subject segmentation.
+    pub async fn execute_subject_segmentation_soft_mask(
+        self: &Arc<Self>,
+        app_id: &str,
+        request: SubjectSegmentationRequest,
+    ) -> Result<SubjectSegmentationSoftMaskResponse, RuntimeError> {
+        request.validate()?;
+        let logical_model = request.model.clone();
+        let source_revision = request.source_revision.clone();
+        let prompt_count = request.points.len() + usize::from(request.box_prompt.is_some()) * 2;
+        let constraints = request.constraints()?;
+        let prepared = self
+            .prepare_vision_job(
+                app_id,
+                &logical_model,
+                constraints,
+                "vision.subject_segmentation_soft_mask",
+            )
+            .await?;
+        let _resource_reservation = self.reserve_resource(&prepared).await?;
+        let _permit = self.acquire(&prepared).await?;
+        let attempt_number = self.start_vision_attempt(&prepared).await?;
+        let executor = self.subject_segmentation_executor(&prepared.provider_id)?;
+        let upstream = executor.segment_subject_soft_mask(
+            &prepared.physical_model,
+            request,
+            prepared.cancellation.clone(),
+        );
+        let output = match self.await_vision(&prepared, upstream).await {
+            Ok(output) => {
+                self.complete_vision_success(&prepared, attempt_number)
+                    .await?;
+                output
+            }
+            Err(error) => {
+                return Err(self
+                    .complete_vision_error(&prepared, attempt_number, error)
+                    .await?);
+            }
+        };
+        Ok(SubjectSegmentationSoftMaskResponse {
+            id: prepared.job_id.clone(),
+            object: "vision.subject_segmentation_soft_mask".into(),
+            created_at: (unix_time_ms() / 1_000).try_into().unwrap_or_default(),
+            status: "completed".into(),
+            source_revision,
+            input_coordinate_extent: output.input_coordinate_extent,
+            raster_extent: SegmentationMaskRasterExtent {
+                width: SUBJECT_SEGMENTATION_SOFT_MASK_WIDTH,
+                height: SUBJECT_SEGMENTATION_SOFT_MASK_HEIGHT,
+                coordinate_mapping: SUBJECT_SEGMENTATION_SOFT_MASK_COORDINATE_MAPPING.into(),
+            },
             mask: output.mask,
             score: output.score,
             prompt_count,
@@ -323,6 +387,13 @@ impl Runtime {
         constraints: infer_core::RequestConstraints,
         expected_data_plane: &'static str,
     ) -> Result<PreparedRun, RuntimeError> {
+        // Soft-mask output is an additive representation of the same SAM
+        // execution plane; deployments continue to declare the existing
+        // subject-segmentation plane rather than requiring config duplication.
+        let provider_data_plane = match expected_data_plane {
+            "vision.subject_segmentation_soft_mask" => "vision.subject_segmentation",
+            other => other,
+        };
         self.prepare_job(
             app_id,
             JobPreparation {
@@ -342,13 +413,16 @@ impl Runtime {
                 reasoning_effort: None,
                 estimated_tokens: 0,
                 id_prefix: "vision",
-                expected_data_plane,
+                expected_data_plane: provider_data_plane,
                 capability_contract: super::current_admitted_capability_contract(
                     match expected_data_plane {
                         "vision.face_detection" => "infer.vision.face-detection@20260811.1",
                         "vision.face_embedding" => "infer.vision.face-embedding@20260811.1",
                         "vision.subject_segmentation" => {
                             "infer.vision.subject-segmentation@20260813.1"
+                        }
+                        "vision.subject_segmentation_soft_mask" => {
+                            "infer.vision.subject-segmentation-soft-mask@20260814.1"
                         }
                         "vision.face_parsing" => "infer.vision.face-parsing@20260813.1",
                         "vision.image_embedding" => "infer.vision.image-embedding@20260811.1",

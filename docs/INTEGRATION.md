@@ -396,6 +396,11 @@ retention 和删除语义。为对应 App 的 `allowed_intents` 显式加入 `vi
 - `segment_subject(...)` 对应 `vision.segment_subject` 与
   `infer.vision.subject-segmentation@20260813.1`。输入为 1–16 个归一化前景/背景点击；可选 box
   占两个 prompt slot。返回与输入同尺寸、仅含 0/255 的 PNG mask、摘要和完整 provenance。
+- `segment_subject_soft_mask(...)` 对应同一 Intent 和新增的
+  `infer.vision.subject-segmentation-soft-mask@20260814.1`。输入合同完全相同，但返回 SAM
+  原生 256×256 Gray8 sigmoid probability PNG；`input_coordinate_extent` 与
+  `raster_extent.coordinate_mapping=linear_full_extent_pixel_centers_v1` 规定它如何映射回提交的
+  display raster。Consumer 自己决定 feather、opacity 和持久化，Runtime 不保存像素或 mask。
 - `parse_face(...)` 对应 `vision.parse_face` 与 `infer.vision.face-parsing@20260813.1`。输入为
   orientation-normalized display raster 上的 YuNet face box；Runtime 固定扩张 1.8 倍上下文，
   返回全图尺寸的 19-class indexed PNG label map。结果标记为 `sensitive_biometric`。
@@ -746,7 +751,9 @@ Consumer 通过官方 SDK / Infra Discovery 精确选择 `infer-runtime.consumer
 `infer-runtime.http-loopback`；短期 UDS endpoint 只在 bearer 鉴权成功的 lease grant 中返回，
 不新增 Discovery offer。
 
-完整顺序固定为：
+官方 Rust client 已提供 `create_raw_foundation_lease(...)`、
+`register_raw_foundation_handles(&File, &File)`、`execute_raw_foundation(...)` 与
+`cancel_raw_foundation(...)`；应用不应自行拼接 UDS frame 或复制 generic handle transport。完整顺序固定为：
 
 1. `POST /infer/v1/raw/foundations/leases` 创建 Job 与 30 秒、one-shot ticket；
 2. 向返回的 owner-only UDS 发送 `infer.artifact-lease.register@20260811.1` 单行 JSON 和两个

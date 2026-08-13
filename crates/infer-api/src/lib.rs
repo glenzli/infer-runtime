@@ -111,6 +111,10 @@ fn base_router(runtime: Arc<Runtime>) -> Router {
             post(vision::create_subject_segmentation),
         )
         .route(
+            "/infer/v1/vision/subject-segmentations/soft-mask",
+            post(vision::create_subject_segmentation_soft_mask),
+        )
+        .route(
             "/infer/v1/vision/face-parsings",
             post(vision::create_face_parsing),
         )

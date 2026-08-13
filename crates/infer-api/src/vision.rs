@@ -68,6 +68,67 @@ pub(super) async fn create_subject_segmentation(
     )
 }
 
+/// Additive probability-mask endpoint.  The multipart input is deliberately
+/// identical to the legacy binary endpoint; only the explicitly negotiated
+/// capability and returned representation differ.
+pub(super) async fn create_subject_segmentation_soft_mask(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    multipart: Multipart,
+) -> Result<Response<axum::body::Body>, ApiError> {
+    let app_id = authenticate(&state, &headers)?;
+    let request = parse_subject_segmentation_request(multipart).await?;
+    let result = state
+        .runtime
+        .execute_subject_segmentation_soft_mask(&app_id, request)
+        .await?;
+    response(
+        StatusCode::OK,
+        "application/json",
+        serde_json::to_vec(&result).expect("soft subject segmentation response is serializable"),
+    )
+}
+
+async fn parse_subject_segmentation_request(
+    multipart: Multipart,
+) -> Result<SubjectSegmentationRequest, ApiError> {
+    let mut form = VisionMultipart::parse(
+        multipart,
+        &[
+            "model",
+            "source_revision",
+            "image_orientation",
+            "prompt_coordinate_space",
+            "points",
+            "box_prompt",
+        ],
+    )
+    .await?;
+    let points =
+        serde_json::from_str::<Vec<SegmentationPromptPoint>>(&form.required_text("points")?)
+            .map_err(|_| ApiError::bad_request("invalid points JSON"))?;
+    let box_prompt = form
+        .optional_text("box_prompt")
+        .map(|value| {
+            serde_json::from_str::<NormalizedBoundingBox>(value)
+                .map_err(|_| ApiError::bad_request("invalid box_prompt JSON"))
+        })
+        .transpose()?;
+    Ok(SubjectSegmentationRequest {
+        model: form.required_text("model")?,
+        image: form
+            .image
+            .take()
+            .ok_or_else(|| ApiError::bad_request("missing image file"))?,
+        source_revision: form.required_text("source_revision")?,
+        image_orientation: form.required_text("image_orientation")?,
+        prompt_coordinate_space: form.required_text("prompt_coordinate_space")?,
+        points,
+        box_prompt,
+        metadata: fail_closed_metadata(form.metadata, "subject segmentation")?,
+    })
+}
+
 pub(super) async fn create_face_parsing(
     State(state): State<ApiState>,
     headers: HeaderMap,

@@ -18,6 +18,12 @@ pub const VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS: &str =
 pub const MAX_VISION_TEXT_BYTES: usize = 4 * 1024;
 pub const MAX_SEGMENTATION_PROMPTS: usize = 16;
 pub const MAX_SEGMENTATION_MASK_BYTES: usize = 16 * 1024 * 1024;
+/// SAM's selected low-resolution mask has this fixed raster extent.  Its
+/// pixels map linearly (by pixel centres) to the submitted display raster.
+pub const SUBJECT_SEGMENTATION_SOFT_MASK_WIDTH: u32 = 256;
+pub const SUBJECT_SEGMENTATION_SOFT_MASK_HEIGHT: u32 = 256;
+pub const SUBJECT_SEGMENTATION_SOFT_MASK_COORDINATE_MAPPING: &str =
+    "linear_full_extent_pixel_centers_v1";
 pub const MAX_FACE_PARSING_PIXELS: u64 = 16_000_000;
 pub const SEGMENTATION_PROMPT_COORDINATE_SPACE: &str = "normalized_0_1";
 pub const FACE_PARSING_ONTOLOGY_ID: &str = "celebamask_hq_19";
@@ -420,6 +426,33 @@ pub struct SubjectSegmentationResponse {
     pub provenance: VisionProvenance,
 }
 
+/// Additive SAM 2.1 probability-mask result.  Unlike the legacy binary mask,
+/// this keeps the selected 256x256 low-resolution logits as Gray8 sigmoid
+/// probabilities.  The raster is intentionally not resized: consumers can
+/// apply their own feathering/opacity policy without silently changing the
+/// model's sampling grid.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SubjectSegmentationSoftMaskResponse {
+    pub id: String,
+    pub object: String,
+    pub created_at: u64,
+    pub status: String,
+    pub source_revision: String,
+    pub input_coordinate_extent: ImageGeometry,
+    pub raster_extent: SegmentationMaskRasterExtent,
+    pub mask: EncodedSoftSegmentationMask,
+    pub score: f32,
+    pub prompt_count: usize,
+    pub provenance: VisionProvenance,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SegmentationMaskRasterExtent {
+    pub width: u32,
+    pub height: u32,
+    pub coordinate_mapping: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FaceParsingResponse {
     pub id: String,
@@ -446,6 +479,16 @@ pub struct EncodedSegmentationMask {
     pub height: u32,
     pub foreground_pixels: u64,
     pub bounding_box: Option<BoundingBox>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EncodedSoftSegmentationMask {
+    pub content_type: String,
+    pub encoding: String,
+    pub data_base64: String,
+    pub sha256: String,
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -402,6 +402,58 @@ async fn subject_segmentation_traverses_auth_acl_job_attempt_and_coreml_provider
 }
 
 #[tokio::test]
+#[ignore = "requires the pinned Apple SAM 2.1 Small Core ML artifact and runtime"]
+async fn subject_segmentation_soft_mask_preserves_native_probability_raster() {
+    let (service, token, _temporary) = real_service(&["vision.segment_subject"]).await;
+    let image = RgbImage::from_fn(512, 512, |x, y| {
+        image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8])
+    });
+    let mut encoded = Cursor::new(Vec::new());
+    image.write_to(&mut encoded, ImageFormat::Png).unwrap();
+    let response =
+        subject_segmentation_soft_mask_response(&service, &token, encoded.into_inner()).await;
+    assert_eq!(response["object"], "vision.subject_segmentation_soft_mask");
+    assert_eq!(response["source_revision"], "photo:test:segment:1");
+    assert_eq!(response["input_coordinate_extent"]["width"], 512);
+    assert_eq!(response["input_coordinate_extent"]["height"], 512);
+    assert_eq!(response["raster_extent"]["width"], 256);
+    assert_eq!(response["raster_extent"]["height"], 256);
+    assert_eq!(
+        response["raster_extent"]["coordinate_mapping"],
+        "linear_full_extent_pixel_centers_v1"
+    );
+    assert_eq!(
+        response["mask"]["encoding"],
+        "gray8_sigmoid_probability_png"
+    );
+    assert_eq!(response["mask"]["width"], 256);
+    assert_eq!(response["mask"]["height"], 256);
+    let job_id = response["id"].as_str().unwrap();
+    let job = service
+        .clone()
+        .oneshot(
+            Request::get(format!("/infer/v1/jobs/{job_id}"))
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let job = job.into_body().collect().await.unwrap().to_bytes();
+    let job: serde_json::Value = serde_json::from_slice(&job).unwrap();
+    assert_eq!(
+        job["capability_contract"],
+        "infer.vision.subject-segmentation-soft-mask@20260814.1"
+    );
+    assert!(job.get("mask").is_none());
+    assert!(job.get("image").is_none());
+}
+
+#[tokio::test]
 #[ignore = "requires the pinned BiSeNet ResNet18 ONNX artifact"]
 async fn face_parsing_traverses_auth_acl_job_attempt_and_cpu_provider() {
     let (service, token, _temporary) = real_service(&["vision.parse_face"]).await;
@@ -650,6 +702,38 @@ async fn subject_segmentation_response(
                 .header(
                     crate::contract::CAPABILITY_CONTRACT_HEADER,
                     "infer.vision.subject-segmentation@20260813.1",
+                )
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(
+                    header::CONTENT_TYPE,
+                    "multipart/form-data; boundary=infer-boundary",
+                )
+                .body(Body::from(subject_segmentation_multipart(image)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&body).unwrap()
+}
+
+async fn subject_segmentation_soft_mask_response(
+    service: &axum::Router,
+    token: &str,
+    image: Vec<u8>,
+) -> serde_json::Value {
+    let response = service
+        .clone()
+        .oneshot(
+            Request::post("/infer/v1/vision/subject-segmentations/soft-mask")
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .header(
+                    crate::contract::CAPABILITY_CONTRACT_HEADER,
+                    "infer.vision.subject-segmentation-soft-mask@20260814.1",
                 )
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .header(

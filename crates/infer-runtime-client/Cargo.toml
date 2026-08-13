@@ -11,6 +11,7 @@ categories = ["api-bindings"]
 
 [dependencies]
 bytes.workspace = true
+infer-artifact-lease = { path = "../infer-artifact-lease" }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
