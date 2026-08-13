@@ -7,6 +7,7 @@ mod ocr_worker;
 mod ollama_vision;
 mod onnx;
 mod probe;
+mod runtime_dependency;
 mod text_retrieval_worker;
 
 use std::{pin::Pin, sync::Arc, time::Duration};
@@ -45,6 +46,11 @@ pub use onnx::{
 pub use probe::{
     ProviderProbeCheck, ProviderProbeReport, ProviderProbeStatus, probe_responses_provider,
     probe_responses_provider_with_effort,
+};
+pub use runtime_dependency::{
+    ProviderReadinessStatus, ProviderRuntimeReadiness, ResolvedProviderProcess,
+    RuntimeDependencyCheck, preflight_provider_runtime, provider_requires_ffmpeg,
+    resolve_provider_process, verify_yamnet_worker,
 };
 pub use text_retrieval_worker::{
     DynRetrievalExecutor, RetrievalBuildContract, RetrievalEmbeddingExecutionOutput,

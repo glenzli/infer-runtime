@@ -102,7 +102,17 @@ impl Runtime {
             .iter()
             .filter(|provider| provider.configured && provider.circuit_open)
             .count();
-        let available_providers = configured_providers.saturating_sub(circuit_open_providers);
+        let available_providers = providers
+            .iter()
+            .filter(|provider| {
+                provider.configured
+                    && !provider.circuit_open
+                    && provider
+                        .readiness
+                        .as_ref()
+                        .is_none_or(|readiness| readiness.is_ready())
+            })
+            .count();
 
         let pressure = pressure_name(resources.system_pressure.level);
         let pressure_condition = pressure_condition(&resources.system_pressure);

@@ -329,8 +329,21 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> int:
     global FFMPEG
-    if len(sys.argv) == 3 and sys.argv[1] == "--verify-model":
-        _, classes, runtime_version = _load_model(sys.argv[2])
+    verify_model = None
+    arguments = list(sys.argv[1:])
+    while arguments:
+        option = arguments.pop(0)
+        if option == "--verify-model" and arguments and verify_model is None:
+            verify_model = arguments.pop(0)
+        elif option == "--ffmpeg" and arguments:
+            FFMPEG = arguments.pop(0)
+        else:
+            raise SystemExit(
+                "usage: yamnet_audio_worker.py [--ffmpeg EXECUTABLE] [--verify-model DIRECTORY]"
+            )
+
+    if verify_model is not None:
+        _, classes, runtime_version = _load_model(verify_model)
         print(
             json.dumps(
                 {
@@ -338,18 +351,13 @@ def main() -> int:
                     "model_archive_sha256": MODEL_ARCHIVE_SHA256,
                     "classes": len(classes),
                     "runtime_version": runtime_version,
+                    "decoder_version": _decoder_version(),
                     "policy_revision": POLICY_REVISION,
                 },
                 sort_keys=True,
             )
         )
         return 0
-    if len(sys.argv) == 3 and sys.argv[1] == "--ffmpeg":
-        FFMPEG = sys.argv[2]
-    elif len(sys.argv) != 1:
-        raise SystemExit(
-            "usage: yamnet_audio_worker.py [--verify-model DIRECTORY | --ffmpeg EXECUTABLE]"
-        )
 
     while True:
         encoded = sys.stdin.buffer.readline(MAX_REQUEST_LINE_BYTES + 1)

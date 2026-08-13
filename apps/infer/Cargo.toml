@@ -13,6 +13,7 @@ futures-util.workspace = true
 infer-auth = { path = "../../crates/infer-auth" }
 infer-artifact = { path = "../../crates/infer-artifact" }
 infer-core = { path = "../../crates/infer-core" }
+infer-provider = { path = "../../crates/infer-provider" }
 ratatui.workspace = true
 reqwest.workspace = true
 serde.workspace = true

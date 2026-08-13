@@ -151,6 +151,7 @@ pub struct ProviderSnapshot {
     /// is distinct from provider-native discovery and local residency state.
     pub deployments: Vec<ProviderDeploymentSnapshot>,
     pub circuit_open: bool,
+    pub readiness: Option<infer_provider::ProviderRuntimeReadiness>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -382,6 +383,7 @@ pub struct Runtime {
     jobs: Mutex<HashMap<String, JobEntry>>,
     metrics: RuntimeMetrics,
     health: ProviderHealth,
+    provider_readiness: BTreeMap<String, infer_provider::ProviderRuntimeReadiness>,
     resources: Arc<ResourceManager>,
     node_capacity: NodeCapacity,
     _pressure_observation: Option<pressure_observation::PressureObservation>,
@@ -395,6 +397,16 @@ pub struct Runtime {
 }
 
 impl Runtime {
+    fn unavailable_providers(&self) -> BTreeSet<String> {
+        let mut unavailable = self.health.unavailable_providers();
+        unavailable.extend(
+            self.provider_readiness
+                .iter()
+                .filter_map(|(id, readiness)| (!readiness.is_ready()).then_some(id.clone())),
+        );
+        unavailable
+    }
+
     async fn wait_before_retry(
         &self,
         prepared: &PreparedRun,
@@ -483,6 +495,7 @@ impl Runtime {
             jobs: Mutex::new(HashMap::new()),
             metrics: RuntimeMetrics::default(),
             health: ProviderHealth::default(),
+            provider_readiness: assembly.readiness,
             resources,
             node_capacity,
             _pressure_observation: Some(pressure_observation),
@@ -574,6 +587,7 @@ impl Runtime {
             jobs: Mutex::new(HashMap::new()),
             metrics: RuntimeMetrics::default(),
             health: ProviderHealth::default(),
+            provider_readiness: BTreeMap::new(),
             resources,
             node_capacity,
             _pressure_observation: None,
@@ -1175,7 +1189,7 @@ impl Runtime {
     /// only by `configured`; environment variable names and values remain out
     /// of this control response.
     pub fn provider_snapshots(&self) -> Vec<ProviderSnapshot> {
-        let unavailable = self.health.unavailable_providers();
+        let circuit_open = self.health.unavailable_providers();
         self.config
             .providers
             .iter()
@@ -1251,7 +1265,8 @@ impl Runtime {
                     capability_profile: provider.capability_profile.clone(),
                     execution_modes,
                     deployments,
-                    circuit_open: unavailable.contains(id),
+                    circuit_open: circuit_open.contains(id),
+                    readiness: self.provider_readiness.get(id).cloned(),
                 }
             })
             .collect()
@@ -1585,7 +1600,7 @@ impl Runtime {
             .profiles
             .get(&policy_name)
             .expect("validated profile");
-        let unavailable_providers = self.health.unavailable_providers();
+        let unavailable_providers = self.unavailable_providers();
         let unavailable_deployments = self.resources.unavailable_deployments().await;
         let queue_estimates = self.provider_queue_estimates().await;
         let plan = plan_candidates_with_queue(

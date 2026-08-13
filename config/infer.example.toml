@@ -172,13 +172,17 @@ protocol = "audio_worker"
 [providers.yamnet-local]
 kind = "audio_worker"
 command = ".infer-runtime/runtimes/yamnet/bin/python"
-# Use the audited absolute decoder path when Console is launched without the
-# interactive shell PATH (for example by launchd).
-args = ["workers/yamnet_audio_worker.py", "--ffmpeg", "/absolute/path/to/ffmpeg"]
+args = ["workers/yamnet_audio_worker.py"]
 placement = "local"
 max_concurrency = 1
 max_queue = 16
 priority_aging_ms = 10000
+
+[providers.yamnet-local.runtime_dependencies]
+# A bare name is resolved once from absolute PATH entries plus Homebrew and
+# system binary directories, then canonicalized. An absolute override remains
+# available for pinned deployments.
+ffmpeg = "ffmpeg"
 
 [providers.yamnet-local.capability_profile]
 version = 1
