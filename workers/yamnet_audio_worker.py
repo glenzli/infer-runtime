@@ -328,6 +328,7 @@ def handle(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def main() -> int:
+    global FFMPEG
     if len(sys.argv) == 3 and sys.argv[1] == "--verify-model":
         _, classes, runtime_version = _load_model(sys.argv[2])
         print(
@@ -343,8 +344,12 @@ def main() -> int:
             )
         )
         return 0
-    if len(sys.argv) != 1:
-        raise SystemExit("usage: yamnet_audio_worker.py [--verify-model DIRECTORY]")
+    if len(sys.argv) == 3 and sys.argv[1] == "--ffmpeg":
+        FFMPEG = sys.argv[2]
+    elif len(sys.argv) != 1:
+        raise SystemExit(
+            "usage: yamnet_audio_worker.py [--verify-model DIRECTORY | --ffmpeg EXECUTABLE]"
+        )
 
     while True:
         encoded = sys.stdin.buffer.readline(MAX_REQUEST_LINE_BYTES + 1)
