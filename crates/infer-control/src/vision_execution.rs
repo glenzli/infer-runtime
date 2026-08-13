@@ -22,6 +22,7 @@ use infer_provider::{
     ProviderError, VisionExecutionProvenance,
 };
 use tokio::time::{sleep_until, timeout};
+use tokio_util::sync::CancellationToken;
 
 use super::{JobPreparation, PreparedRun, Runtime, RuntimeError, attempt_policy, unix_time_ms};
 
@@ -87,6 +88,23 @@ impl Runtime {
         app_id: &str,
         request: SubjectSegmentationRequest,
     ) -> Result<SubjectSegmentationSoftMaskResponse, RuntimeError> {
+        self.execute_subject_segmentation_soft_mask_cancellable(
+            app_id,
+            request,
+            CancellationToken::new(),
+        )
+        .await
+    }
+
+    /// Same logical operation with a Consumer transport cancellation signal.
+    /// The handler owns the signal; the Runtime forwards it into the prepared
+    /// Job token and waits for the native worker's bounded kill/wait cleanup.
+    pub async fn execute_subject_segmentation_soft_mask_cancellable(
+        self: &Arc<Self>,
+        app_id: &str,
+        request: SubjectSegmentationRequest,
+        request_cancellation: CancellationToken,
+    ) -> Result<SubjectSegmentationSoftMaskResponse, RuntimeError> {
         request.validate()?;
         let logical_model = request.model.clone();
         let source_revision = request.source_revision.clone();
@@ -104,12 +122,19 @@ impl Runtime {
         let _permit = self.acquire(&prepared).await?;
         let attempt_number = self.start_vision_attempt(&prepared).await?;
         let executor = self.subject_segmentation_executor(&prepared.provider_id)?;
+        let prepared_cancellation = prepared.cancellation.clone();
+        let cancellation_forwarder = tokio::spawn(async move {
+            request_cancellation.cancelled().await;
+            prepared_cancellation.cancel();
+        });
         let upstream = executor.segment_subject_soft_mask(
             &prepared.physical_model,
             request,
             prepared.cancellation.clone(),
         );
-        let output = match self.await_vision(&prepared, upstream).await {
+        let result = self.await_vision(&prepared, upstream).await;
+        cancellation_forwarder.abort();
+        let output = match result {
             Ok(output) => {
                 self.complete_vision_success(&prepared, attempt_number)
                     .await?;

@@ -1,7 +1,11 @@
 //! Explicit real-provider contract tests. They stay ignored in the portable
 //! suite because they require this host's pinned ONNX Runtime and artifacts.
 
-use std::{io::Cursor, path::Path, time::Instant};
+use std::{
+    io::Cursor,
+    path::Path,
+    time::{Duration, Instant},
+};
 
 use axum::{
     body::Body,
@@ -451,6 +455,49 @@ async fn subject_segmentation_soft_mask_preserves_native_probability_raster() {
     );
     assert!(job.get("mask").is_none());
     assert!(job.get("image").is_none());
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned Apple SAM 2.1 Small Core ML artifact and runtime"]
+async fn dropped_soft_mask_http_request_cancels_the_native_worker_attempt() {
+    let (service, token, _temporary) = real_service(&["vision.segment_subject"]).await;
+    let image = RgbImage::from_fn(2048, 2048, |x, y| {
+        image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8])
+    });
+    let mut encoded = Cursor::new(Vec::new());
+    image.write_to(&mut encoded, ImageFormat::Png).unwrap();
+    let pending_service = service.clone();
+    let pending_token = token.clone();
+    let pending = tokio::spawn(async move {
+        subject_segmentation_soft_mask_response(
+            &pending_service,
+            &pending_token,
+            encoded.into_inner(),
+        )
+        .await
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    pending.abort();
+    let _ = pending.await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let response = service
+        .oneshot(
+            Request::get("/infer/v1/jobs")
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["jobs"][0]["state"], "cancelled");
 }
 
 #[tokio::test]

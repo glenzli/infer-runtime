@@ -13,6 +13,7 @@ use infer_core::{
     FivePointLandmarks, ImageEmbeddingRequest, MAX_VISION_IMAGE_BYTES, NormalizedBoundingBox,
     SegmentationPromptPoint, SubjectSegmentationRequest, TextEmbeddingRequest, VisionImage,
 };
+use tokio_util::sync::CancellationToken;
 
 use crate::{ApiError, ApiState, authenticate, response, strict_json};
 
@@ -78,15 +79,52 @@ pub(super) async fn create_subject_segmentation_soft_mask(
 ) -> Result<Response<axum::body::Body>, ApiError> {
     let app_id = authenticate(&state, &headers)?;
     let request = parse_subject_segmentation_request(multipart).await?;
-    let result = state
-        .runtime
-        .execute_subject_segmentation_soft_mask(&app_id, request)
-        .await?;
+    let cancellation = CancellationToken::new();
+    let request_guard = CancelOnDrop::new(cancellation.clone());
+    let runtime = state.runtime.clone();
+    let task = tokio::spawn(async move {
+        runtime
+            .execute_subject_segmentation_soft_mask_cancellable(&app_id, request, cancellation)
+            .await
+    });
+    let result = task
+        .await
+        .map_err(|_| ApiError::internal("subject segmentation worker task failed"))??;
+    request_guard.disarm();
     response(
         StatusCode::OK,
         "application/json",
         serde_json::to_vec(&result).expect("soft subject segmentation response is serializable"),
     )
+}
+
+/// A unary request can be dropped by the HTTP server when its peer disconnects.
+/// Keep its Runtime task alive long enough to relay that fact to native worker
+/// cleanup; the guard is disarmed only once a normal response is ready.
+struct CancelOnDrop {
+    cancellation: CancellationToken,
+    armed: bool,
+}
+
+impl CancelOnDrop {
+    fn new(cancellation: CancellationToken) -> Self {
+        Self {
+            cancellation,
+            armed: true,
+        }
+    }
+
+    fn disarm(mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        if self.armed {
+            self.cancellation.cancel();
+        }
+    }
 }
 
 async fn parse_subject_segmentation_request(
