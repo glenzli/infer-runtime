@@ -13,8 +13,8 @@ Provider 与 Deployment，并统一处理排队、配额、模型驻留、取消
 | 能力 | 当前实现 | 稳定性 |
 | --- | --- | --- |
 | 文本推理 | Responses-shaped unary/SSE、本地加密 background；可连接本地、云端和订阅式 Provider | `infer.responses@20260812.1`；订阅桥仍 experimental |
-| 本地音频 | 转写、强制对齐、语音合成、声音设计与声音克隆等 typed 能力 | 文件接口可接入；流式 TTS/ASR 仍 experimental |
-| 本地视觉 | ONNX Runtime Session Registry；人脸检测/向量与图文语义向量等 typed 能力 | 收窄的 experimental slices |
+| 本地音频 | 转写、强制对齐、语音合成、声音设计、声音克隆与 AudioSet 声音事件检测 | 事件检测为 stable；流式 TTS/ASR 与部分生成能力仍 experimental |
+| 本地视觉 | ONNX/Core ML typed Provider；人脸检测/向量、图文语义向量、点击式主体分割与人脸解析 | 收窄的 experimental slices；人脸解析为受限研究用途 |
 | 路由与执行 | Intent → Model Profile → Build → Deployment；优先队列、deadline、cancel、retry/fallback、熔断 | M1/M2 已闭环 |
 | 预算与恢复 | App/provider/global quota、reservation、usage ledger、SQLite migration、local background recovery | M3 已闭环 |
 | 资源治理 | Ollama/ONNX lifecycle、pressure sampling、reload benchmark、eviction recommendation 与维护租约 | M4 已闭环；自动 eviction 默认关闭 |
@@ -67,6 +67,27 @@ cargo run -p infer -- run \
 
 内置 CLI 默认连接开发地址 `http://127.0.0.1:8787`，也可用 `--server` 或 `INFER_URL` 覆盖；
 产品 Consumer 应使用下文的 Infra Discovery，而不是继续硬编码端口。
+
+### 启用可选本地能力
+
+启动 Runtime 不代表每个可选模型都已可路由。每个能力都必须同时具备：已配置的 Provider、已准入的
+Build/Deployment、必要的本机 runtime 与目标 App 的最小 ACL；其中任一条件缺失时，Runtime 会从候选
+计划中排除它，而不会下载模型、放宽 placement，或改走云端。Console 的 **模型与资源** 页面会显示具体
+缺项和修复提示。
+
+`config/infer.example.toml` 展示完整的 typed 配置，但模型文件、ArtifactStore 内容、owner-only Python
+venv 与凭据均由本机所有者管理，不会随仓库分发。常见准备路径如下：
+
+- **声音事件检测**：导入验证过的 YAMNet artifact，并提供 Python/TensorFlow 与 `ffmpeg`。Runtime 会从
+  继承的绝对 `PATH`、Homebrew 常见目录和系统目录安全发现 `ffmpeg`；也可在配置中使用绝对路径固定它。
+- **主体分割**：为 SAM 2.1 Small 的三个 Core ML package 发布 manifest，并在维护窗口预编译派生
+  `.mlmodelc` cache。默认 `cpu_and_gpu`；不要使用未验证的 `coreml_all` 让首次请求承担编译或 ANE
+  specialization。
+- **人脸检测、向量与解析**：将 YuNet、SFace、BiSeNet ONNX 文件通过 ArtifactStore 导入。当前受支持
+  Host 上这些 ONNX Build 固定 CPU，避免把不兼容的 Core ML EP 尝试伪装成加速；BiSeNet 权重还有
+  非商业研究限制。
+
+完整的 artifact、license、runtime 与 readiness 流程见 [`docs/OPERATIONS.md`](docs/OPERATIONS.md)。
 
 ## Web Console
 
@@ -176,8 +197,8 @@ curl "$INFER_BASE_URL/infer/v1/openapi.json"
 当前实现正在收口 `infer-runtime.consumer-core@20260813.1` 的本机 Consumer hard migration，
 不是正式对外发布版。
 M1–M4 的核心纵向切片已经闭环；完整 traces、24 小时混合 soak、更多连续 Consumer 使用与正式
-发布门槛仍在推进。ONNX 视觉、流式音频和 Codex subscription bridge 保持 experimental，不会
-借由配置存在就自动升级为稳定合同。
+发布门槛仍在推进。除稳定的文本、基础音频和事件检测合同外，ONNX/Core ML 视觉、流式音频和
+Codex subscription bridge 保持 experimental，不会借由配置存在就自动升级为稳定合同。
 
 精确进度、验收门槛和后续 M5/M6/M7 工作见 [`ROADMAP.md`](ROADMAP.md)。
 
