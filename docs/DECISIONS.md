@@ -219,10 +219,11 @@
 
 ### D-107：同一 Node 上跨 Provider Resource Pool 的容量合同
 
-- **状态**：Accepted for current synchronous ONNX slices；QwenVL + SigLIP/MLX 混合负载、视觉 durable 或 M5 capacity schema 再触发复审
-- **决定**：YuNet/SFace 不足以证明需要通用多资源池。SigLIP image+text 两 Session 的 release 实测驻留约 1.9 GiB，已登记为 heavy；当前同步 slice 继续复用全机 pressure、deployment lifecycle reservation 与 per-provider queue/capacity。真实数值证明需要保守 admission/residency，但仍没有证明必须在核心中预建 system/GPU/CPU 多资源原子池。
-- **备选**：保持 provider 局部容量并增加统一 admission estimate；或显式建模 system memory、unified/GPU memory、CPU slots、accelerator queue、resident-model budget 等 Node Resource Pool。
-- **复审门槛**：用 Shadow 背景 SigLIP 索引与交互 QwenVL/音频混合负载建立资源估算误差、原子多资源 reservation、回收和 fail-closed 模拟；同时确认与 M5 远程 Node 声明共享什么 schema。没有证据时不建设通用集群调度器。
+- **状态**：Accepted；以最小、显式且本机限定的 admission capacity 取代“预建通用资源池”假设
+- **决定**：Provider scheduler 继续独立拥有 priority/aging/max concurrency，所以云端和本地、不同本地 Provider 均可并行。新增的 node admission capacity 只在 operator 配置了测量值时启用，当前仅有 `cpu_slots`、`unified_memory_mib`、`accelerator_slots` 三个共享维度；每个 local Deployment 再声明对应的实测 claim。所有未配置的维度保持不受约束，Runtime 不从参数量、artifact size 或 resource class 猜测内存。
+- **调度语义**：一个 Attempt 先取得共享 node claim，再进入其 Provider 的优先队列；claim 持有到 Attempt 终态/stream drop。取消与 deadline 在 node admission 等待中同样生效。固定 acquisition order 防止多维 claim 死锁；Provider 之间没有共同 claim 时仍可完全并行。
+- **边界**：这不是远程 Node、GPU 枚举、resident-model budget 或通用集群调度器；cloud/trusted-node Deployment 不得声明本机 claim。Node capacity 仅是安全 admission envelope，host pressure、native lifecycle 和 eviction 仍各自保留 owner。
+- **证据门槛**：启用前必须以该机器/Build/workload 的 warm 与 peak 测量填写 capacity/claim；配置交叉校验拒绝零容量、超额 claim 和非 local claim。后续只有在 measured error、multi-device 或 remote Node 证明需要时，才扩展维度或引入更强的原子资源模型。
 - **ADR**：[ADR-0011](adr/0011-heterogeneous-local-runtimes-and-typed-vision.md)
 
 ### D-108：视觉 payload、SensitiveBiometric 与 durable ownership
@@ -311,6 +312,13 @@
   迁移，再做一次 Console-owned 单实例切换。旧 Job 数据只保留内部读取兼容，不构成旧 wire 支持。
 - **规范**：[Core Contract](CORE-CONTRACT-20260813.1.md) 与
   [Capability Catalog](CAPABILITY-CATALOG-20260813.1.md)
+
+### D-116：持久化调度遥测与 queue-aware routing
+
+- **状态**：Accepted
+- **统计边界**：process-local metrics 用于当前 daemon 的 active/pending/dispatch；Console 的完成与失败趋势改由 SQLite 中 payload-free terminal Job 状态聚合，按固定时间桶提供 `1h`、`24h`、`7d`。因此刷新 Console 或重启 daemon 不再清空历史；Job id、payload、错误正文和完整 ledger 不进入该面。
+- **路由边界**：每个 Provider scheduler 从最近 32 个已结束 Attempt 保留滚动服务时间，非空队列尚无样本时明确标为 unknown 而非零。策略实际启用 `queue_time` 或 `deadline_fit` 时才读取这份瞬时观察：已知更短等待优先；deadline 下已知可按时启动优先于 unknown，unknown 优先于已知不能满足。硬 deadline、ACL、placement、capability 和 fallback 规则不因此放宽。
+- **可解释性**：Candidate Plan 仍是 durable decision；队列估计不是稳定 provenance，因为它在 admission 后可立即变化。Operator metrics 公开 Provider slots、active/pending、估计等待和显式 node capacity，但不公开 Consumer payload。
 
 ## 已关闭的阶段决策
 

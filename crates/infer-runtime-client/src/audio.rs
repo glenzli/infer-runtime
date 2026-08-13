@@ -13,6 +13,7 @@ use crate::{
 };
 
 pub const TRANSCRIPTION_CAPABILITIES: &[&str] = &["infer.audio.transcription@20260811.1"];
+pub const EVENT_DETECTION_CAPABILITIES: &[&str] = &["infer.audio.event-detection@20260813.1"];
 pub const ALIGNMENT_CAPABILITIES: &[&str] = &["infer.audio.alignment@20260811.1"];
 pub const SPEECH_CAPABILITIES: &[&str] = &["infer.audio.speech@20260811.1"];
 
@@ -136,7 +137,210 @@ pub struct AlignmentItem {
     pub end: f64,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioEventDetectionResponse {
+    pub id: String,
+    pub model: String,
+    pub object: String,
+    pub events: Vec<DetectedSoundEvent>,
+    pub speech_presence: SpeechPresence,
+    pub coverage: AudioAnalysisCoverage,
+    pub ontology: SoundEventOntology,
+    pub policy: SoundEventDetectionPolicy,
+    pub provenance: SoundEventProvenance,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DetectedSoundEvent {
+    pub class_id: String,
+    pub label: String,
+    pub start_seconds: f64,
+    pub end_seconds: f64,
+    pub score: f64,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeechPresenceStatus {
+    Present,
+    Absent,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpeechPresence {
+    pub status: SpeechPresenceStatus,
+    pub max_score: f64,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioCoverageStatus {
+    Full,
+    Partial,
+    None,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioAnalysisCoverage {
+    pub status: AudioCoverageStatus,
+    pub input_duration_seconds: f64,
+    pub analyzed_start_seconds: f64,
+    pub analyzed_end_seconds: f64,
+    pub analyzed_seconds: f64,
+    pub ratio: f64,
+    pub window_count: usize,
+    pub window_seconds: f64,
+    pub hop_seconds: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SoundEventOntology {
+    pub id: String,
+    pub revision: String,
+    pub class_id_namespace: String,
+    pub class_count: usize,
+    pub artifact_sha256: String,
+    pub license_spdx: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SoundEventSmoothingPolicy {
+    pub method: String,
+    pub window_frames: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SoundEventDetectionPolicy {
+    pub revision: String,
+    pub score_kind: String,
+    pub event_score_threshold: f64,
+    pub smoothing: SoundEventSmoothingPolicy,
+    pub max_classes_per_window: usize,
+    pub max_events: usize,
+    pub speech_class_set_revision: String,
+    pub speech_present_threshold: f64,
+    pub speech_absent_threshold: f64,
+    pub max_audio_seconds: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SoundEventProvenance {
+    pub model: String,
+    pub model_archive_sha256: String,
+    pub artifact_set_sha256: String,
+    pub model_license_spdx: String,
+    pub training_data_license_spdx: String,
+    pub runtime: String,
+    pub runtime_version: String,
+    pub decoder: String,
+    pub decoder_version: String,
+    pub preprocessing_identity: String,
+}
+
+impl AudioEventDetectionResponse {
+    fn validate(&self) -> Result<()> {
+        let unit = |value: f64| value.is_finite() && (0.0..=1.0).contains(&value);
+        let digest =
+            |value: &str| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit());
+        let valid = !self.id.is_empty()
+            && self.model == "audio.detect_events"
+            && self.object == "audio.event_detection"
+            && self.events.len() <= self.policy.max_events
+            && self.ontology.id == "audioset"
+            && self.ontology.class_id_namespace == "audioset_mid"
+            && self.ontology.class_count > 0
+            && digest(&self.ontology.artifact_sha256)
+            && digest(&self.provenance.model_archive_sha256)
+            && digest(&self.provenance.artifact_set_sha256)
+            && unit(self.policy.event_score_threshold)
+            && unit(self.policy.speech_present_threshold)
+            && unit(self.policy.speech_absent_threshold)
+            && self.policy.speech_absent_threshold < self.policy.speech_present_threshold
+            && self.policy.smoothing.window_frames > 0
+            && !self.policy.smoothing.window_frames.is_multiple_of(2)
+            && !self.policy.speech_class_set_revision.is_empty()
+            && unit(self.speech_presence.max_score)
+            && self.coverage.input_duration_seconds > 0.0
+            && self.coverage.input_duration_seconds <= self.policy.max_audio_seconds as f64 + 1e-6
+            && unit(self.coverage.ratio);
+        if !valid {
+            return Err(Error::MalformedResponse(
+                "audio event evidence violates the dated capability contract".into(),
+            ));
+        }
+        if self.speech_presence.status == SpeechPresenceStatus::Absent
+            && (self.coverage.status != AudioCoverageStatus::Full
+                || self.speech_presence.max_score > self.policy.speech_absent_threshold)
+        {
+            return Err(Error::MalformedResponse(
+                "speech absence requires complete low-score model evidence".into(),
+            ));
+        }
+        for event in &self.events {
+            if !event.class_id.starts_with("/m/")
+                || event.label.is_empty()
+                || event.start_seconds < self.coverage.analyzed_start_seconds
+                || event.end_seconds <= event.start_seconds
+                || event.end_seconds > self.coverage.analyzed_end_seconds + 1e-6
+                || !unit(event.score)
+                || event.score < self.policy.event_score_threshold
+            {
+                return Err(Error::MalformedResponse(
+                    "audio event interval or AudioSet evidence is invalid".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 impl Client {
+    pub async fn detect_audio_events_file(
+        &self,
+        path: &Path,
+        content_type: &'static str,
+        metadata: &BTreeMap<String, String>,
+    ) -> Result<AudioEventDetectionResponse> {
+        let bytes = read_bounded_file(path, MAX_AUDIO_INPUT_BYTES, "audio").await?;
+        let filename = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("audio.bin")
+            .to_owned();
+        let metadata = serde_json::to_string(metadata)
+            .map_err(|error| Error::MalformedResponse(error.to_string()))?;
+        let response = self
+            .send_capability_with(EVENT_DETECTION_CAPABILITIES, move |http, endpoint| {
+                let file = Part::bytes(bytes.clone())
+                    .file_name(filename.clone())
+                    .mime_str(content_type)
+                    .expect("static MIME type is valid");
+                http.post(format!("{endpoint}/v1/audio/event-detections"))
+                    .multipart(
+                        Form::new()
+                            .text("model", "audio.detect_events")
+                            .text("metadata", metadata.clone())
+                            .part("file", file),
+                    )
+            })
+            .await?;
+        let response = ensure_success(response).await?;
+        let parsed: AudioEventDetectionResponse =
+            serde_json::from_slice(&read_bounded(response, MAX_JSON_RESPONSE_BYTES).await?)
+                .map_err(|error| Error::MalformedResponse(error.to_string()))?;
+        parsed.validate()?;
+        Ok(parsed)
+    }
+
     pub async fn transcribe_file(
         &self,
         path: &Path,
@@ -310,6 +514,23 @@ mod tests {
             "server_stream"
         );
         assert_eq!(serde_json::to_value(SpeechFormat::Pcm).unwrap(), "pcm");
+    }
+
+    #[test]
+    fn dated_audio_event_fixtures_are_typed_and_absence_is_fail_closed() {
+        let present: AudioEventDetectionResponse = serde_json::from_str(include_str!(
+            "../../../contracts/capabilities/infer.audio.event-detection/20260813.1/fixtures/event-present.json"
+        ))
+        .unwrap();
+        present.validate().unwrap();
+
+        let mut partial: AudioEventDetectionResponse = serde_json::from_str(include_str!(
+            "../../../contracts/capabilities/infer.audio.event-detection/20260813.1/fixtures/partial-unknown.json"
+        ))
+        .unwrap();
+        partial.validate().unwrap();
+        partial.speech_presence.status = SpeechPresenceStatus::Absent;
+        assert!(partial.validate().is_err());
     }
 
     #[tokio::test]

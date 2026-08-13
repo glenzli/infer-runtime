@@ -189,6 +189,60 @@ pub struct ResourceConfig {
     /// backend and host hardware all materially affect residency behavior.
     #[serde(default)]
     pub reload_benchmarks: BTreeMap<String, ReloadBenchmarkConfig>,
+    /// Optional, explicit node-wide admission budget shared by all local
+    /// Providers. Omitted dimensions are intentionally ungoverned: runtime
+    /// never invents a memory estimate from a model name or artifact size.
+    #[serde(default)]
+    pub admission_capacity: AdmissionCapacityConfig,
+}
+
+/// Measured host capacity made available to ordinary execution admission.
+/// These values are a safety envelope, not a hardware inventory probe.
+#[derive(Debug, Clone, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AdmissionCapacityConfig {
+    /// Concurrent CPU work units available to configured local deployments.
+    pub cpu_slots: Option<u32>,
+    /// Unified/system memory budget expressed in MiB. It must be based on an
+    /// operator-owned measurement, not a model family heuristic.
+    pub unified_memory_mib: Option<u32>,
+    /// Accelerator work units shared by configured local deployments.
+    pub accelerator_slots: Option<u32>,
+    /// Bounded number of jobs waiting for node capacity before their Provider
+    /// queue. This bound is active only when at least one capacity dimension
+    /// is configured.
+    #[serde(default = "default_admission_capacity_max_waiting_jobs")]
+    pub max_waiting_jobs: usize,
+    /// Shared-capacity priority aging. It uses the same three priority bands
+    /// as Provider queues, but has its own owner and bounded queue.
+    #[serde(default = "default_admission_capacity_priority_aging_ms")]
+    pub priority_aging_ms: u64,
+}
+
+impl Default for AdmissionCapacityConfig {
+    fn default() -> Self {
+        Self {
+            cpu_slots: None,
+            unified_memory_mib: None,
+            accelerator_slots: None,
+            max_waiting_jobs: default_admission_capacity_max_waiting_jobs(),
+            priority_aging_ms: default_admission_capacity_priority_aging_ms(),
+        }
+    }
+}
+
+/// Per-deployment reservation claim against the optional node-wide budget.
+/// A zero value means that dimension is not yet measured for this deployment,
+/// so it does not consume an unverified synthetic reservation.
+#[derive(Debug, Clone, Default, Deserialize, serde::Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DeploymentResourceEstimateConfig {
+    #[serde(default)]
+    pub cpu_slots: u32,
+    #[serde(default)]
+    pub unified_memory_mib: u32,
+    #[serde(default)]
+    pub accelerator_slots: u32,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, serde::Serialize)]
@@ -408,6 +462,14 @@ fn default_eviction_monitor_poll_interval_ms() -> u64 {
 
 fn default_pressure_refresh_interval_ms() -> u64 {
     30_000
+}
+
+fn default_admission_capacity_max_waiting_jobs() -> usize {
+    128
+}
+
+fn default_admission_capacity_priority_aging_ms() -> u64 {
+    10_000
 }
 
 fn default_eviction_monitor_max_lease_ms() -> u64 {
@@ -667,6 +729,10 @@ pub struct ModelBuildConfig {
     /// protocol details.
     #[serde(default)]
     pub local_worker: Option<LocalWorkerModelBuildConfig>,
+    /// Policy and evidence identity for a typed AudioSet event Build. The
+    /// executable files remain owned by `local_worker` and ArtifactStore.
+    #[serde(default)]
+    pub audio_event: Option<AudioEventModelBuildConfig>,
 }
 
 string_enum!(ModelSourceKind {
@@ -791,10 +857,41 @@ pub struct LocalWorkerModelBuildConfig {
     pub actual_execution_provider: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, serde::Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AudioEventModelBuildConfig {
+    pub model_archive_sha256: String,
+    pub runtime: String,
+    pub runtime_version: String,
+    pub decoder: String,
+    pub preprocessing_identity: String,
+    pub ontology_id: String,
+    pub ontology_revision: String,
+    pub class_id_namespace: String,
+    pub class_count: usize,
+    pub ontology_artifact_sha256: String,
+    pub ontology_license_spdx: String,
+    pub training_data_license_spdx: String,
+    pub policy_revision: String,
+    pub score_kind: String,
+    pub window_seconds: f64,
+    pub hop_seconds: f64,
+    pub event_score_threshold: f64,
+    pub smoothing_method: String,
+    pub smoothing_window_frames: usize,
+    pub max_classes_per_window: usize,
+    pub max_events: usize,
+    pub speech_class_set_revision: String,
+    pub speech_present_threshold: f64,
+    pub speech_absent_threshold: f64,
+    pub max_audio_seconds: u64,
+}
+
 string_enum!(LocalWorkerAdapterKind {
     Qwen3Embedding => "qwen3_embedding",
     Qwen3Reranker => "qwen3_reranker",
-    PpOcrv6 => "pp_ocrv6"
+    PpOcrv6 => "pp_ocrv6",
+    YamnetAudioEvents => "yamnet_audio_events"
 });
 
 impl std::fmt::Display for LocalWorkerAdapterKind {
@@ -803,6 +900,7 @@ impl std::fmt::Display for LocalWorkerAdapterKind {
             Self::Qwen3Embedding => "qwen3_embedding",
             Self::Qwen3Reranker => "qwen3_reranker",
             Self::PpOcrv6 => "pp_ocrv6",
+            Self::YamnetAudioEvents => "yamnet_audio_events",
         })
     }
 }
@@ -877,6 +975,11 @@ pub struct DeploymentConfig {
     pub supported_efforts: Vec<ReasoningEffort>,
     #[serde(default)]
     pub estimated_cost_usd: f64,
+    /// An optional measured claim against `resources.admission_capacity`.
+    /// The reservation is local execution control data, never a model rating
+    /// or public Consumer selection parameter.
+    #[serde(default)]
+    pub resource_estimate: DeploymentResourceEstimateConfig,
     /// Execution shapes verified for this concrete deployment. The default is
     /// unary-only so a new provider cannot accidentally inherit streaming.
     #[serde(default = "default_execution_modes")]
@@ -1460,6 +1563,7 @@ impl RuntimeConfig {
                     "responses"
                         | "audio.transcription"
                         | "audio.alignment"
+                        | "audio.event_detection"
                         | "audio.speech"
                         | "audio.voice_clone"
                         | "vision.face_detection"
@@ -1539,6 +1643,48 @@ impl RuntimeConfig {
                 return Err(configuration(format!("model build {id} needs model_id")));
             }
             validate_build_supply_chain(id, build)?;
+            if let Some(audio_event) = &build.audio_event {
+                let digest = |value: &str| {
+                    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+                };
+                let unit = |value: f64| value.is_finite() && (0.0..=1.0).contains(&value);
+                if build.local_worker.as_ref().map(|worker| worker.adapter)
+                    != Some(LocalWorkerAdapterKind::YamnetAudioEvents)
+                    || !digest(&audio_event.model_archive_sha256)
+                    || !digest(&audio_event.ontology_artifact_sha256)
+                    || audio_event.runtime.trim().is_empty()
+                    || audio_event.runtime_version.trim().is_empty()
+                    || audio_event.decoder != "ffmpeg"
+                    || audio_event.preprocessing_identity.trim().is_empty()
+                    || audio_event.ontology_id != "audioset"
+                    || audio_event.ontology_revision.trim().is_empty()
+                    || audio_event.class_id_namespace != "audioset_mid"
+                    || audio_event.class_count == 0
+                    || audio_event.ontology_license_spdx.trim().is_empty()
+                    || audio_event.training_data_license_spdx.trim().is_empty()
+                    || audio_event.policy_revision.trim().is_empty()
+                    || audio_event.score_kind != "raw_sigmoid"
+                    || !audio_event.window_seconds.is_finite()
+                    || audio_event.window_seconds <= 0.0
+                    || !audio_event.hop_seconds.is_finite()
+                    || audio_event.hop_seconds <= 0.0
+                    || !unit(audio_event.event_score_threshold)
+                    || audio_event.smoothing_method.trim().is_empty()
+                    || audio_event.smoothing_window_frames == 0
+                    || audio_event.smoothing_window_frames.is_multiple_of(2)
+                    || audio_event.max_classes_per_window == 0
+                    || audio_event.max_events == 0
+                    || audio_event.speech_class_set_revision.trim().is_empty()
+                    || !unit(audio_event.speech_present_threshold)
+                    || !unit(audio_event.speech_absent_threshold)
+                    || audio_event.speech_absent_threshold >= audio_event.speech_present_threshold
+                    || audio_event.max_audio_seconds == 0
+                {
+                    return Err(configuration(format!(
+                        "audio-event model build {id} needs a typed YAMNet worker and complete artifact, ontology, decode, policy, and license identity"
+                    )));
+                }
+            }
             if let Some(onnx) = &build.onnx {
                 if onnx.opset == 0
                     || onnx.artifact.size_bytes == 0
@@ -1711,7 +1857,8 @@ impl RuntimeConfig {
             let worker_provider = matches!(
                 provider.kind,
                 ProviderKind::RetrievalWorker | ProviderKind::OcrWorker
-            );
+            ) || (provider.kind == ProviderKind::AudioWorker
+                && build.local_worker.is_some());
             if worker_provider && build.local_worker.is_none() {
                 return Err(configuration(format!(
                     "local worker deployment {id} requires model_builds.{}.local_worker",
@@ -1732,6 +1879,10 @@ impl RuntimeConfig {
                         LocalWorkerAdapterKind::Qwen3Embedding
                             | LocalWorkerAdapterKind::Qwen3Reranker
                     ) | (ProviderKind::OcrWorker, LocalWorkerAdapterKind::PpOcrv6)
+                        | (
+                            ProviderKind::AudioWorker,
+                            LocalWorkerAdapterKind::YamnetAudioEvents
+                        )
                 );
                 if !adapter_matches {
                     return Err(configuration(format!(
@@ -1739,6 +1890,15 @@ impl RuntimeConfig {
                         deployment.build
                     )));
                 }
+            }
+            let serves_audio_events = model
+                .ratings
+                .keys()
+                .any(|intent_id| self.intents[intent_id].data_plane == "audio.event_detection");
+            if serves_audio_events != build.audio_event.is_some() {
+                return Err(configuration(format!(
+                    "audio-event deployment {id} must pair its Intent with one exact Build policy identity"
+                )));
             }
             if !deployment.estimated_cost_usd.is_finite() || deployment.estimated_cost_usd < 0.0 {
                 return Err(configuration(format!(
@@ -1914,6 +2074,66 @@ impl RuntimeConfig {
             return Err(configuration(
                 "resources.pressure critical threshold must not exceed elevated threshold",
             ));
+        }
+        let capacity = &self.resources.admission_capacity;
+        for (name, value) in [
+            ("cpu_slots", capacity.cpu_slots),
+            ("unified_memory_mib", capacity.unified_memory_mib),
+            ("accelerator_slots", capacity.accelerator_slots),
+        ] {
+            if value == Some(0) {
+                return Err(configuration(format!(
+                    "resources.admission_capacity.{name} must be positive when configured"
+                )));
+            }
+        }
+        if (capacity.cpu_slots.is_some()
+            || capacity.unified_memory_mib.is_some()
+            || capacity.accelerator_slots.is_some())
+            && !(1..=4_096).contains(&capacity.max_waiting_jobs)
+        {
+            return Err(configuration(
+                "resources.admission_capacity.max_waiting_jobs must be 1..=4096 when capacity is enabled",
+            ));
+        }
+        if (capacity.cpu_slots.is_some()
+            || capacity.unified_memory_mib.is_some()
+            || capacity.accelerator_slots.is_some())
+            && !(1_000..=3_600_000).contains(&capacity.priority_aging_ms)
+        {
+            return Err(configuration(
+                "resources.admission_capacity.priority_aging_ms must be 1000..=3600000 when capacity is enabled",
+            ));
+        }
+        for (deployment_id, deployment) in &self.deployments {
+            let estimate = &deployment.resource_estimate;
+            let provider = &self.providers[&deployment.provider];
+            if provider.placement != Placement::Local
+                && *estimate != DeploymentResourceEstimateConfig::default()
+            {
+                return Err(configuration(format!(
+                    "deployments.{deployment_id}.resource_estimate is only valid for local placement"
+                )));
+            }
+            for (name, claim, limit) in [
+                ("cpu_slots", estimate.cpu_slots, capacity.cpu_slots),
+                (
+                    "unified_memory_mib",
+                    estimate.unified_memory_mib,
+                    capacity.unified_memory_mib,
+                ),
+                (
+                    "accelerator_slots",
+                    estimate.accelerator_slots,
+                    capacity.accelerator_slots,
+                ),
+            ] {
+                if limit.is_some_and(|limit| claim > limit) {
+                    return Err(configuration(format!(
+                        "deployments.{deployment_id}.resource_estimate.{name} exceeds resources.admission_capacity.{name}"
+                    )));
+                }
+            }
         }
         if eviction.max_benchmark_age_ms == 0 {
             return Err(configuration(
@@ -2161,6 +2381,21 @@ fn validate_build_supply_chain(id: &str, build: &ModelBuildConfig) -> Result<(),
                     )));
                 }
             }
+            LocalWorkerAdapterKind::YamnetAudioEvents => {
+                let Some(audio_event) = &build.audio_event else {
+                    return Err(configuration(format!(
+                        "YAMNet audio-event build {id} needs audio_event identity"
+                    )));
+                };
+                if worker.preprocessing_identity.as_deref()
+                    != Some(audio_event.preprocessing_identity.as_str())
+                    || worker.postprocessing_identity != audio_event.policy_revision
+                {
+                    return Err(configuration(format!(
+                        "YAMNet audio-event build {id} worker identity does not match its policy"
+                    )));
+                }
+            }
         }
     }
     if matches!(
@@ -2245,6 +2480,33 @@ mod tests {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
         RuntimeConfig::load(path).expect("example registry must remain valid");
+    }
+
+    #[test]
+    fn audio_event_registry_fails_closed_on_policy_and_ontology_drift() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let mut config = RuntimeConfig::load(&path).unwrap();
+        config
+            .model_builds
+            .get_mut("yamnet_tfhub_v1_tensorflow_2_20")
+            .unwrap()
+            .audio_event
+            .as_mut()
+            .unwrap()
+            .ontology_artifact_sha256 = "not-a-digest".into();
+        assert!(config.validate().is_err());
+
+        let mut config = RuntimeConfig::load(path).unwrap();
+        config
+            .model_builds
+            .get_mut("yamnet_tfhub_v1_tensorflow_2_20")
+            .unwrap()
+            .audio_event
+            .as_mut()
+            .unwrap()
+            .smoothing_method = String::new();
+        assert!(config.validate().is_err());
     }
 
     #[test]
@@ -2802,6 +3064,40 @@ mod tests {
         config.resources.pressure.refresh_interval_ms = 5_000;
         assert!(config.validate().is_ok());
         config.resources.pressure.refresh_interval_ms = 3_600_001;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn local_admission_capacity_requires_explicit_positive_measured_claims() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let mut config = RuntimeConfig::load(path).unwrap();
+        config.resources.admission_capacity.cpu_slots = Some(0);
+        assert!(config.validate().is_err());
+
+        config.resources.admission_capacity.cpu_slots = Some(2);
+        config
+            .deployments
+            .get_mut("ollama_qwen3_5_2b")
+            .unwrap()
+            .resource_estimate
+            .cpu_slots = 3;
+        assert!(config.validate().is_err());
+
+        config
+            .deployments
+            .get_mut("ollama_qwen3_5_2b")
+            .unwrap()
+            .resource_estimate
+            .cpu_slots = 1;
+        assert!(config.validate().is_ok());
+
+        config
+            .deployments
+            .get_mut("deepseek_v4_flash")
+            .unwrap()
+            .resource_estimate
+            .cpu_slots = 1;
         assert!(config.validate().is_err());
     }
 

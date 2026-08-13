@@ -17,8 +17,11 @@ mod transport;
 mod vision;
 
 pub use audio::{
-    AlignmentItem, AlignmentResponse, AudioBytesResponse, ExecutionMode, SpeechByteStream,
-    SpeechFormat, SpeechRequest, TranscriptionFormat, TranscriptionResponse,
+    AlignmentItem, AlignmentResponse, AudioAnalysisCoverage, AudioBytesResponse,
+    AudioCoverageStatus, AudioEventDetectionResponse, DetectedSoundEvent, ExecutionMode,
+    SoundEventDetectionPolicy, SoundEventOntology, SoundEventProvenance, SoundEventSmoothingPolicy,
+    SpeechByteStream, SpeechFormat, SpeechPresence, SpeechPresenceStatus, SpeechRequest,
+    TranscriptionFormat, TranscriptionResponse,
 };
 pub use contract::{
     CAPABILITY_CATALOG_SCHEMA, CAPABILITY_CATALOG_VERSION, CAPABILITY_CONTRACT_HEADER,

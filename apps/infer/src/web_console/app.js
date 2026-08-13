@@ -4,9 +4,6 @@ const csrf = document.querySelector('meta[name="infer-console-session"]').conten
 const state = {
   snapshot: null,
   logs: [],
-  history: [],
-  previousCounters: null,
-  lastGeneration: 0,
   configLoaded: false,
   configDirty: false,
   refreshing: false,
@@ -59,7 +56,6 @@ async function refreshAll({ quiet = false } = {}) {
     ]);
     state.snapshot = snapshotPayload;
     state.logs = logPayload.logs || [];
-    recordHistory();
     renderAll();
     if (!state.configLoaded) await loadConfig();
   } catch (error) {
@@ -70,25 +66,6 @@ async function refreshAll({ quiet = false } = {}) {
     button.disabled = false;
     button.textContent = "立即刷新";
   }
-}
-
-function recordHistory() {
-  const generation = state.snapshot?.runtime?.generation || 0;
-  if (!generation || generation === state.lastGeneration) return;
-  state.lastGeneration = generation;
-  const metrics = endpoint("metrics") || {};
-  const current = {
-    succeeded: number(metrics.succeeded),
-    failed: number(metrics.failed) + number(metrics.expired) + number(metrics.cancelled),
-  };
-  if (state.previousCounters) {
-    state.history.push({
-      succeeded: Math.max(0, current.succeeded - state.previousCounters.succeeded),
-      failed: Math.max(0, current.failed - state.previousCounters.failed),
-    });
-    if (state.history.length > 60) state.history.shift();
-  }
-  state.previousCounters = current;
 }
 
 function renderAll() {
@@ -169,25 +146,44 @@ function renderCharts() {
     return;
   }
   target.className = "queue-list";
-  target.innerHTML = queues.map(([provider, queue]) => {
+  const capacity = metrics.node_capacity || {};
+  const capacityDimensions = [
+    capacity.cpu_slots && `CPU ${number(capacity.cpu_slots.reserved)}/${number(capacity.cpu_slots.limit)}`,
+    capacity.unified_memory_mib && `统一内存 ${number(capacity.unified_memory_mib.reserved)}/${number(capacity.unified_memory_mib.limit)} MiB`,
+    capacity.accelerator_slots && `加速器 ${number(capacity.accelerator_slots.reserved)}/${number(capacity.accelerator_slots.limit)}`,
+  ].filter(Boolean);
+  const capacityRow = capacityDimensions.length
+    ? `<div class="queue-row"><div class="queue-row-header"><strong>共享本机容量</strong><span>${escapeHtml(capacityDimensions.join(" · "))} · ${number(capacity.pending)} 等待</span></div></div>`
+    : `<div class="queue-row"><div class="queue-row-header"><strong>共享本机容量</strong><span>未启用；各 Provider 仅受自身 slots 限制</span></div></div>`;
+  target.innerHTML = capacityRow + queues.map(([provider, queue]) => {
     const active = number(queue.active);
     const pending = number(queue.pending_interactive) + number(queue.pending_normal) + number(queue.pending_background);
+    const capacity = Math.max(1, number(queue.max_concurrency) || 1);
+    const visibleSlots = Math.min(10, capacity);
+    const wait = queue.estimated_wait_ms;
+    const waitLabel = wait === null || wait === undefined
+      ? (pending ? "等待估计积累中" : "空闲")
+      : `预计等待 ${formatMilliseconds(wait)}`;
     const slots = [];
-    for (let index = 0; index < 10; index += 1) {
-      const className = index < Math.min(active, 10) ? "active" : index < Math.min(active + pending, 10) ? "pending" : "";
+    for (let index = 0; index < visibleSlots; index += 1) {
+      const className = index < Math.min(active, visibleSlots) ? "active" : index < Math.min(active + pending, visibleSlots) ? "pending" : "";
       slots.push(`<i class="${className}"></i>`);
     }
-    return `<div class="queue-row"><div class="queue-row-header"><strong>${escapeHtml(provider)}</strong><span>${active} active · ${pending} pending</span></div><div class="queue-track">${slots.join("")}</div></div>`;
+    return `<div class="queue-row"><div class="queue-row-header"><strong>${escapeHtml(provider)}</strong><span>${active}/${capacity} active · ${pending} pending · ${escapeHtml(waitLabel)}</span></div><div class="queue-track">${slots.join("")}</div></div>`;
   }).join("");
 }
 
 function renderHistoryChart(id, limit) {
   const target = document.getElementById(id);
-  const history = state.history.slice(-limit);
+  const telemetry = endpoint("telemetry");
+  const history = (telemetry?.buckets || []).slice(-limit).map(bucket => ({
+    succeeded: number(bucket.succeeded),
+    failed: number(bucket.failed) + number(bucket.cancelled) + number(bucket.expired),
+  }));
   const max = Math.max(0, ...history.flatMap(item => [item.succeeded, item.failed]));
   if (!history.length || max === 0) {
     target.className = target.className.replace(/\s*empty-chart/g, "") + " empty-chart";
-    target.innerHTML = "<span>暂无任务活动</span>";
+    target.innerHTML = `<span>${escapeHtml(endpointError("telemetry") || "过去 24 小时暂无终态任务")}</span>`;
     return;
   }
   target.classList.remove("empty-chart");

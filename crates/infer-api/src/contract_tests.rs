@@ -388,6 +388,32 @@ async fn audio_multipart_rejects_unknown_and_wrong_file_fields() {
 }
 
 #[tokio::test]
+async fn audio_event_route_rejects_any_attempt_to_widen_local_offline_execution() {
+    let body = "--x\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\naudio.detect_events\r\n--x\r\nContent-Disposition: form-data; name=\"infer.placement\"\r\n\r\ncloud_only\r\n--x\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.wav\"\r\nContent-Type: audio/wav\r\n\r\naudio\r\n--x--\r\n";
+    let response = contract_router()
+        .oneshot(
+            capability(
+                authenticated(Request::builder()),
+                "infer.audio.event-detection@20260813.1",
+            )
+            .method("POST")
+            .uri("/v1/audio/event-detections")
+            .header(header::CONTENT_TYPE, "multipart/form-data; boundary=x")
+            .body(Body::from(body))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(
+        body_json(response).await["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("infer.placement is fixed to local_only")
+    );
+}
+
+#[tokio::test]
 async fn authentication_failures_use_the_same_error_envelope() {
     let response = contract_router()
         .oneshot(

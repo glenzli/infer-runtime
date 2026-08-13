@@ -4,6 +4,7 @@ mod app_admission;
 mod attempt_policy;
 mod audio_streaming;
 mod background_jobs;
+mod capacity;
 mod image_understanding;
 mod metrics;
 mod observer;
@@ -33,8 +34,8 @@ use infer_artifact::ArtifactError;
 use infer_auth::{AppCredentials, CredentialError};
 use infer_core::{
     AppConfig, AttemptOutcome, AttemptSnapshot, AttemptTrigger, AudioExecutionRequest, BuiltinTool,
-    ContractError, DurablePayloadRef, ExecutionMode, ExecutionRequirements, Fallback,
-    IntentProfile, JobListPage, JobPageCursor, JobSnapshot, JobState, Modality, Priority,
+    ContractError, DurablePayloadRef, EventDetectionResult, ExecutionMode, ExecutionRequirements,
+    Fallback, IntentProfile, JobListPage, JobPageCursor, JobSnapshot, JobState, Modality, Priority,
     ProviderCapability, ProviderProtocol, QuotaConfig, RequestConstraints, ResponsesRequest,
     RuntimeConfig,
 };
@@ -48,7 +49,8 @@ use infer_provider::{
 use infer_resource::{ModelReservation, ResourceError, ResourceManager};
 use infer_store::{
     ActiveReservation, AttemptReservation, AuditEvent, AuditEventInput, ConfigSnapshot,
-    QuotaLimits, QuotaResource, Store, StoreError, UsageLedgerEntry,
+    QuotaLimits, QuotaResource, Store, StoreError, TelemetryBucket, TelemetryWindow,
+    UsageLedgerEntry,
 };
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -60,10 +62,13 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use app_admission::{AppAdmission, AppAdmissionPermit};
+use capacity::{NodeCapacity, NodeCapacityError, NodeCapacityReservation};
 use metrics::{MetricsSnapshot, RuntimeMetrics};
 use provider_assembly::ProviderAssembly;
 use provider_health::ProviderHealth;
-use registry::{Candidate, CandidatePlanningContext, plan_candidates};
+use registry::{
+    Candidate, CandidatePlanningContext, ProviderQueueEstimate, plan_candidates_with_queue,
+};
 use resource_monitor::EvictionMonitor;
 use scheduler::{ProviderScheduler, ScheduledPermit, SchedulerError};
 
@@ -99,6 +104,34 @@ pub struct BudgetSnapshot {
     pub quota: QuotaConfig,
     pub usage_ledger: Vec<UsageLedgerEntry>,
     pub active_reservations: Vec<ActiveReservation>,
+}
+
+/// Bounded operator-only durable-throughput windows. These values are not
+/// Consumer-facing model telemetry and never include payload or Job identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TelemetryRange {
+    LastHour,
+    LastDay,
+    LastWeek,
+}
+
+impl TelemetryRange {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "1h" => Some(Self::LastHour),
+            "24h" => Some(Self::LastDay),
+            "7d" => Some(Self::LastWeek),
+            _ => None,
+        }
+    }
+
+    fn dimensions(self) -> (i64, i64) {
+        match self {
+            Self::LastHour => (60 * 60 * 1_000, 5 * 60 * 1_000),
+            Self::LastDay => (24 * 60 * 60 * 1_000, 60 * 60 * 1_000),
+            Self::LastWeek => (7 * 24 * 60 * 60 * 1_000, 2 * 60 * 60 * 1_000),
+        }
+    }
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -180,10 +213,12 @@ pub enum RuntimeError {
     #[error(transparent)]
     Resource(#[from] ResourceError),
     #[error(transparent)]
+    NodeCapacity(#[from] NodeCapacityError),
+    #[error(transparent)]
     MaintenanceLease(#[from] MaintenanceLeaseError),
     #[error("response was cancelled before execution started")]
     Cancelled,
-    #[error("provider queue is full")]
+    #[error("execution queue is full")]
     QueueFull,
     #[error("application pending Job limit has been reached")]
     AppQueueFull,
@@ -271,6 +306,14 @@ struct PreparedRun {
     recovered: bool,
 }
 
+/// Holds every execution-wide reservation until an Attempt finishes. Provider
+/// scheduling remains per Provider; this guard only adds explicitly measured
+/// node-wide local capacity and native model lifecycle protection.
+struct ExecutionResourceReservation {
+    _node_capacity: NodeCapacityReservation,
+    _model: Option<ModelReservation>,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CompletionMode {
     Immediate,
@@ -340,6 +383,7 @@ pub struct Runtime {
     metrics: RuntimeMetrics,
     health: ProviderHealth,
     resources: Arc<ResourceManager>,
+    node_capacity: NodeCapacity,
     _pressure_observation: Option<pressure_observation::PressureObservation>,
     resource_monitor: EvictionMonitor,
     app_admission: AppAdmission,
@@ -415,6 +459,7 @@ impl Runtime {
             &config,
             assembly.native_controllers,
         ));
+        let node_capacity = NodeCapacity::from_config(&config.resources.admission_capacity);
         let pressure_observation = pressure_observation::PressureObservation::start(
             Arc::clone(&resources),
             pressure_refresh_interval,
@@ -439,6 +484,7 @@ impl Runtime {
             metrics: RuntimeMetrics::default(),
             health: ProviderHealth::default(),
             resources,
+            node_capacity,
             _pressure_observation: Some(pressure_observation),
             resource_monitor,
             app_admission,
@@ -494,6 +540,7 @@ impl Runtime {
         let observer = observer::ObserverRuntimeState::new(&config.observer);
         let app_admission = AppAdmission::new(&config.apps);
         let resources = Arc::new(ResourceManager::from_config(&config));
+        let node_capacity = NodeCapacity::from_config(&config.resources.admission_capacity);
         let resource_monitor = EvictionMonitor::new(config.resources.eviction.monitor.clone());
         let schedulers = config
             .providers
@@ -528,6 +575,7 @@ impl Runtime {
             metrics: RuntimeMetrics::default(),
             health: ProviderHealth::default(),
             resources,
+            node_capacity,
             _pressure_observation: None,
             resource_monitor,
             app_admission,
@@ -570,6 +618,21 @@ impl Runtime {
             runtime.retrieval_executors = retrieval_executors;
             runtime.ocr_executors = ocr_executors;
         }
+        runtime
+    }
+
+    /// Constructor for typed file-audio provider contract tests. Executor ids
+    /// must match configured Provider ids.
+    pub fn with_audio_executors(
+        config: RuntimeConfig,
+        providers: BTreeMap<String, DynProvider>,
+        credentials: AppCredentials,
+        executors: BTreeMap<String, DynAudioExecutor>,
+    ) -> Arc<Self> {
+        let mut runtime = Self::with_providers_and_credentials(config, providers, credentials);
+        Arc::get_mut(&mut runtime)
+            .expect("newly constructed Runtime has one owner")
+            .audio_executors = executors;
         runtime
     }
 
@@ -1042,7 +1105,28 @@ impl Runtime {
                 queues.insert(id.clone(), snapshot);
             }
         }
-        self.metrics.snapshot(queues)
+        let node_capacity = self.node_capacity.snapshot().await.unwrap_or_default();
+        self.metrics.snapshot(queues, node_capacity)
+    }
+
+    /// A point-in-time, best-effort scheduler observation for route ordering.
+    /// It is deliberately kept out of the durable Job decision: it can change
+    /// between planning and provider admission, while the chosen plan remains
+    /// the auditable record.
+    async fn provider_queue_estimates(&self) -> BTreeMap<String, ProviderQueueEstimate> {
+        let mut estimates = BTreeMap::new();
+        for (provider_id, scheduler) in &self.schedulers {
+            if let Ok(snapshot) = scheduler.snapshot().await {
+                estimates.insert(
+                    provider_id.clone(),
+                    ProviderQueueEstimate {
+                        estimated_wait_ms: snapshot.estimated_wait_ms,
+                        estimated_service_ms: snapshot.estimated_service_ms,
+                    },
+                );
+            }
+        }
+        estimates
     }
 
     /// Operator-facing accounting view. It intentionally exposes metadata and
@@ -1057,6 +1141,34 @@ impl Runtime {
             usage_ledger,
             active_reservations,
         })
+    }
+
+    /// Durable terminal-Job aggregates for the operator Console. This is a
+    /// separate lifetime from `metrics()`: process counters intentionally
+    /// reset at daemon start, while this projection survives restarts.
+    pub fn telemetry(&self, range: TelemetryRange) -> Result<TelemetryWindow, RuntimeError> {
+        let (window_ms, bucket_width_ms) = range.dimensions();
+        match &self.store {
+            Some(store) => Ok(store.telemetry_window(window_ms, bucket_width_ms)?),
+            None => {
+                let ends_at_ms = unix_time_ms();
+                let starts_at_ms = ends_at_ms.saturating_sub(window_ms);
+                Ok(TelemetryWindow {
+                    window_started_at_ms: starts_at_ms,
+                    window_ends_at_ms: ends_at_ms,
+                    bucket_width_ms,
+                    buckets: (0..(window_ms / bucket_width_ms))
+                        .map(|index| TelemetryBucket {
+                            started_at_ms: starts_at_ms + index * bucket_width_ms,
+                            succeeded: 0,
+                            failed: 0,
+                            cancelled: 0,
+                            expired: 0,
+                        })
+                        .collect(),
+                })
+            }
+        }
     }
 
     /// Safe, operator-visible provider inventory. Credentials are represented
@@ -1216,6 +1328,7 @@ impl Runtime {
         }
         let logical_model = request.model().to_owned();
         let constraints = request.constraints()?;
+        let is_event_detection = matches!(&request, AudioExecutionRequest::EventDetection(_));
         let (expected_data_plane, input_modalities) = match &request {
             AudioExecutionRequest::Transcription(_) => {
                 ("audio.transcription", BTreeSet::from([Modality::Audio]))
@@ -1224,6 +1337,9 @@ impl Runtime {
                 "audio.alignment",
                 BTreeSet::from([Modality::Audio, Modality::Text]),
             ),
+            AudioExecutionRequest::EventDetection(_) => {
+                ("audio.event_detection", BTreeSet::from([Modality::Audio]))
+            }
             AudioExecutionRequest::Speech(_) => ("audio.speech", BTreeSet::from([Modality::Text])),
             AudioExecutionRequest::VoiceClone(_) => (
                 "audio.voice_clone",
@@ -1249,6 +1365,7 @@ impl Runtime {
                         match expected_data_plane {
                             "audio.transcription" => "infer.audio.transcription@20260811.1",
                             "audio.alignment" => "infer.audio.alignment@20260811.1",
+                            "audio.event_detection" => "infer.audio.event-detection@20260813.1",
                             "audio.speech" => "infer.audio.speech@20260811.1",
                             "audio.voice_clone" => "infer.audio.voice-clone@20260811.1",
                             _ => unreachable!("validated audio data plane"),
@@ -1277,6 +1394,20 @@ impl Runtime {
                 _ = prepared.cancellation.cancelled() => Err(RuntimeError::Cancelled),
                 result = upstream => result.map_err(RuntimeError::Provider),
             },
+        };
+        let result = match result {
+            Ok(output) if is_event_detection => {
+                let validation = match &output {
+                    AudioExecutionOutput::Json(value) => {
+                        self.validate_event_detection_output(&prepared, value)
+                    }
+                    AudioExecutionOutput::Audio { .. } => Err(ProviderError::Protocol(
+                        "sound-event executor returned audio".into(),
+                    )),
+                };
+                validation.map(|()| output).map_err(RuntimeError::Provider)
+            }
+            other => other,
         };
         match result {
             Ok(mut output) => {
@@ -1456,7 +1587,8 @@ impl Runtime {
             .expect("validated profile");
         let unavailable_providers = self.health.unavailable_providers();
         let unavailable_deployments = self.resources.unavailable_deployments().await;
-        let plan = plan_candidates(
+        let queue_estimates = self.provider_queue_estimates().await;
+        let plan = plan_candidates_with_queue(
             &self.config,
             logical_model,
             intent,
@@ -1471,6 +1603,7 @@ impl Runtime {
                 unavailable_providers: &unavailable_providers,
                 unavailable_deployments: &unavailable_deployments,
             },
+            &queue_estimates,
         );
         let fallback = constraints.fallback.unwrap_or(Fallback::None);
         let mut targets = plan.candidates.clone();
@@ -1567,12 +1700,141 @@ impl Runtime {
             .ok_or_else(|| RuntimeError::ProviderUnavailable(id.to_owned()))
     }
 
+    fn validate_event_detection_output(
+        &self,
+        prepared: &PreparedRun,
+        value: &Value,
+    ) -> Result<(), ProviderError> {
+        let result: EventDetectionResult = serde_json::from_value(value.clone())?;
+        result
+            .validate()
+            .map_err(|error| ProviderError::Protocol(error.to_string()))?;
+        let deployment = self
+            .config
+            .deployments
+            .get(&prepared.deployment_id)
+            .ok_or_else(|| ProviderError::Protocol("selected Deployment disappeared".into()))?;
+        let build = self
+            .config
+            .model_builds
+            .get(&deployment.build)
+            .ok_or_else(|| ProviderError::Protocol("selected Model Build disappeared".into()))?;
+        let manifest = build.audio_event.as_ref().ok_or_else(|| {
+            ProviderError::Protocol("selected Build has no audio-event identity".into())
+        })?;
+        let matches = result.provenance.model
+            == build
+                .provenance
+                .source_revision
+                .as_deref()
+                .unwrap_or_default()
+            && result.provenance.model_archive_sha256 == manifest.model_archive_sha256
+            && result.provenance.artifact_set_sha256
+                == build
+                    .local_worker
+                    .as_ref()
+                    .map(|worker| worker.artifact_set_sha256.as_str())
+                    .unwrap_or_default()
+            && result.provenance.model_license_spdx
+                == build.license.expression.as_deref().unwrap_or_default()
+            && result.provenance.training_data_license_spdx == manifest.training_data_license_spdx
+            && result.provenance.runtime == manifest.runtime
+            && result.provenance.runtime_version == manifest.runtime_version
+            && result.provenance.decoder == manifest.decoder
+            && result.provenance.preprocessing_identity == manifest.preprocessing_identity
+            && result.ontology.id == manifest.ontology_id
+            && result.ontology.revision == manifest.ontology_revision
+            && result.ontology.class_id_namespace == manifest.class_id_namespace
+            && result.ontology.class_count == manifest.class_count
+            && result.ontology.artifact_sha256 == manifest.ontology_artifact_sha256
+            && result.ontology.license_spdx == manifest.ontology_license_spdx
+            && result.policy.revision == manifest.policy_revision
+            && result.policy.score_kind == manifest.score_kind
+            && (result.policy.event_score_threshold - manifest.event_score_threshold).abs()
+                <= f64::EPSILON
+            && result.policy.smoothing.method == manifest.smoothing_method
+            && result.policy.smoothing.window_frames == manifest.smoothing_window_frames
+            && result.policy.max_classes_per_window == manifest.max_classes_per_window
+            && result.policy.max_events == manifest.max_events
+            && result.policy.speech_class_set_revision == manifest.speech_class_set_revision
+            && (result.policy.speech_present_threshold - manifest.speech_present_threshold).abs()
+                <= f64::EPSILON
+            && (result.policy.speech_absent_threshold - manifest.speech_absent_threshold).abs()
+                <= f64::EPSILON
+            && result.policy.max_audio_seconds == manifest.max_audio_seconds
+            && (result.coverage.window_seconds - manifest.window_seconds).abs() <= f64::EPSILON
+            && (result.coverage.hop_seconds - manifest.hop_seconds).abs() <= f64::EPSILON;
+        if !matches {
+            return Err(ProviderError::Protocol(
+                "sound-event result identity does not match the selected Build".into(),
+            ));
+        }
+        Ok(())
+    }
+
     async fn reserve_resource(
         &self,
         prepared: &PreparedRun,
-    ) -> Result<Option<ModelReservation>, RuntimeError> {
+    ) -> Result<ExecutionResourceReservation, RuntimeError> {
+        let deployment = self
+            .config
+            .deployments
+            .get(&prepared.deployment_id)
+            .expect("prepared target must name a configured deployment");
+        let node_capacity = match self
+            .node_capacity
+            .reserve(
+                prepared.job_id.clone(),
+                &deployment.resource_estimate,
+                prepared.priority,
+                prepared.deadline,
+                prepared.cancellation.clone(),
+            )
+            .await
+        {
+            Ok(reservation) => reservation,
+            Err(NodeCapacityError::Cancelled) => {
+                self.mark(&prepared.job_id, JobState::Cancelled, None)
+                    .await?;
+                self.metrics.cancelled();
+                return Err(RuntimeError::Cancelled);
+            }
+            Err(NodeCapacityError::DeadlineExpired) => {
+                self.mark(
+                    &prepared.job_id,
+                    JobState::Expired,
+                    Some("request deadline expired during node-capacity admission".into()),
+                )
+                .await?;
+                self.metrics.expired();
+                return Err(RuntimeError::DeadlineExpired);
+            }
+            Err(NodeCapacityError::QueueFull) => {
+                self.mark(
+                    &prepared.job_id,
+                    JobState::Failed,
+                    Some("execution queue is full".into()),
+                )
+                .await?;
+                self.metrics.queue_rejected();
+                return Err(RuntimeError::QueueFull);
+            }
+            Err(error) => {
+                self.mark(
+                    &prepared.job_id,
+                    JobState::Failed,
+                    Some("node-wide local capacity is unavailable".into()),
+                )
+                .await?;
+                self.metrics.failed();
+                return Err(RuntimeError::NodeCapacity(error));
+            }
+        };
         match self.resources.reserve_model(&prepared.deployment_id) {
-            Ok(reservation) => Ok(reservation),
+            Ok(reservation) => Ok(ExecutionResourceReservation {
+                _node_capacity: node_capacity,
+                _model: reservation,
+            }),
             Err(error) => {
                 self.mark(
                     &prepared.job_id,
@@ -1870,7 +2132,7 @@ impl Runtime {
         prepared: PreparedRun,
         attempt_number: usize,
         permit: ScheduledPermit,
-        resource_reservation: Option<ModelReservation>,
+        resource_reservation: ExecutionResourceReservation,
         mut upstream: infer_provider::ProviderByteStream,
     ) -> RuntimeByteStream {
         let runtime = Arc::clone(self);

@@ -2,6 +2,7 @@
 //! reservations, and usage ledger entries.
 
 mod background;
+mod telemetry;
 
 use std::{
     collections::BTreeMap,
@@ -37,6 +38,8 @@ pub enum StoreError {
     InvalidReservationAmount,
     #[error("reservation token estimate exceeds SQLite integer range")]
     InvalidReservationTokens,
+    #[error("telemetry window must be positive, aligned, and bounded")]
+    InvalidTelemetryWindow,
     #[error("durable background Job `{0}` is missing")]
     MissingBackgroundJob(String),
     #[error("quota exceeded for {scope} {resource}")]
@@ -241,6 +244,7 @@ pub struct Store {
 }
 
 pub use background::{BackgroundJobPayload, BackgroundRecovery, RecoverableBackgroundJob};
+pub use telemetry::{TelemetryBucket, TelemetryWindow};
 
 impl Store {
     pub fn open(path: impl AsRef<Path>, config: ConfigSnapshot) -> Result<Self, StoreError> {
@@ -1215,7 +1219,7 @@ mod tests {
         ConfigSnapshot::from_serializable(&json!({"version": 1, "policy": "balanced"})).unwrap()
     }
 
-    fn job(state: JobState, outcome: AttemptOutcome) -> JobSnapshot {
+    pub(crate) fn job(state: JobState, outcome: AttemptOutcome) -> JobSnapshot {
         JobSnapshot {
             id: "resp_test".into(),
             app_id: "test-app".into(),

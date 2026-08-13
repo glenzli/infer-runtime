@@ -28,6 +28,10 @@ pub(crate) fn expected_capability_schema(identity: &str) -> Option<(&'static str
             "/infer/v1/capability-schemas/infer.audio.transcription/20260811.1/openapi.json",
             "53ee5993abbaa3ccc04a5b5f77f3457fbd2f29cccda0b33b0959b6b900c25e59",
         ),
+        "infer.audio.event-detection@20260813.1" => (
+            "/infer/v1/capability-schemas/infer.audio.event-detection/20260813.1/openapi.json",
+            "c7b6e74840bc92d92d582df58252f01f2e0dfed9178f8f7d4318349bdae42ada",
+        ),
         "infer.audio.alignment@20260811.1" => (
             "/infer/v1/capability-schemas/infer.audio.alignment/20260811.1/openapi.json",
             "76c7f4ab7d5e6333808aceec558822d9deceb2918bc478e326593d302dcb96e8",

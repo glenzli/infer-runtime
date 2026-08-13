@@ -93,6 +93,25 @@ endpoint = "http://127.0.0.1:11434"
 elevated_at_or_below_free_memory_percent = 15
 critical_at_or_below_free_memory_percent = 5
 
+# Optional shared local-node admission budget. Leave this section absent until
+# the machine and each participating Deployment have been measured. Runtime
+# never derives reservations from a model name, parameter count, or artifact
+# size. Once enabled, it is shared across Providers: a cloud Provider remains
+# independently parallel, while lightweight local deployments can run together
+# whenever their measured claims fit.
+#
+# [resources.admission_capacity]
+# cpu_slots = 8
+# unified_memory_mib = 24576
+# accelerator_slots = 2
+# max_waiting_jobs = 128
+# priority_aging_ms = 10000
+#
+# [deployments.ollama_qwen3_5_2b.resource_estimate]
+# cpu_slots = 1
+# unified_memory_mib = 4096
+# accelerator_slots = 1
+
 # M4 pressure policy starts in recommendation-only mode. It does not invoke
 # native load/unload. A resident model also needs a fresh, deployment-specific
 # local benchmark under [resources.reload_benchmarks] before it can become a
@@ -145,6 +164,21 @@ max_queue = 16
 priority_aging_ms = 10000
 
 [providers.mlx-audio-local.capability_profile]
+version = 1
+protocol = "audio_worker"
+
+# Optional owner-installed YAMNet runtime. Model files must first be published
+# into ArtifactStore under the exact typed Build manifest below.
+[providers.yamnet-local]
+kind = "audio_worker"
+command = ".infer-runtime/runtimes/yamnet/bin/python"
+args = ["workers/yamnet_audio_worker.py"]
+placement = "local"
+max_concurrency = 1
+max_queue = 16
+priority_aging_ms = 10000
+
+[providers.yamnet-local.capability_profile]
 version = 1
 protocol = "audio_worker"
 
@@ -440,6 +474,14 @@ required_features = ["word_timestamps"]
 default_capability_floor = "foundational"
 default_policy = "local-first"
 
+[intents."audio.detect_events"]
+data_plane = "audio.event_detection"
+input_modalities = ["audio"]
+output_modalities = ["json"]
+required_features = ["audioset_521", "multilabel", "temporal_windows", "speech_presence"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
 [intents."speech.synthesize"]
 data_plane = "audio.speech"
 input_modalities = ["text"]
@@ -688,6 +730,13 @@ family = "sensevoice"
 level = "foundational"
 status = "provisional"
 
+[model_profiles.yamnet_tfhub_v1]
+family = "yamnet"
+
+[model_profiles.yamnet_tfhub_v1.ratings."audio.detect_events"]
+level = "foundational"
+status = "provisional"
+
 [model_profiles.yunet_2026may]
 family = "yunet"
 
@@ -836,6 +885,61 @@ preprocessing_identity = "display_pixels_orientation_normalized_ppocrv6_v1"
 requested_execution_provider = "cpu"
 actual_execution_provider = "cpu"
 
+
+[model_builds.yamnet_tfhub_v1_tensorflow_2_20]
+profile = "yamnet_tfhub_v1"
+model_id = "google/yamnet/1"
+variant = "tfhub-savedmodel-v1-tensorflow-2.20"
+input_modalities = ["audio"]
+output_modalities = ["json"]
+features = ["audioset_521", "multilabel", "temporal_windows", "speech_presence"]
+
+[model_builds.yamnet_tfhub_v1_tensorflow_2_20.provenance]
+source_kind = "user_managed"
+upstream = "https://tfhub.dev/google/yamnet/1"
+source_revision = "google/yamnet/1"
+artifact_sha256 = "4730c9bde533285dc0b74b8b94c798273b40d91fc746b17f0c9281ac8764d6b8"
+
+[model_builds.yamnet_tfhub_v1_tensorflow_2_20.license]
+status = "declared"
+expression = "Apache-2.0"
+license_url = "https://github.com/tensorflow/models/tree/master/research/audioset/yamnet"
+reviewed_at = "2026-08-13"
+
+[model_builds.yamnet_tfhub_v1_tensorflow_2_20.local_worker]
+adapter = "yamnet_audio_events"
+artifact_set_sha256 = "4730c9bde533285dc0b74b8b94c798273b40d91fc746b17f0c9281ac8764d6b8"
+runtime = "python3.12;tensorflow-2.20.0"
+precision = "savedmodel-fp32"
+postprocessing_identity = "yamnet-audioset-event-policy-v1"
+preprocessing_identity = "ffmpeg_decode_mono_f32le_16khz_then_tfhub_yamnet_waveform_v1"
+
+[model_builds.yamnet_tfhub_v1_tensorflow_2_20.audio_event]
+model_archive_sha256 = "b80da2a1a56926fb0767205051a200dd7b3beaf3ea1ea126c42a53943996e5e0"
+runtime = "tensorflow-saved-model"
+runtime_version = "2.20.0"
+decoder = "ffmpeg"
+preprocessing_identity = "ffmpeg_decode_mono_f32le_16khz_then_tfhub_yamnet_waveform_v1"
+ontology_id = "audioset"
+ontology_revision = "yamnet-class-map@cdf24d193e19"
+class_id_namespace = "audioset_mid"
+class_count = 521
+ontology_artifact_sha256 = "cdf24d193e196d9e95912a2667051ae203e92a2ba09449218ccb40ef787c6df2"
+ontology_license_spdx = "CC-BY-SA-4.0"
+training_data_license_spdx = "CC-BY-4.0"
+policy_revision = "yamnet-audioset-event-policy-v1"
+score_kind = "raw_sigmoid"
+window_seconds = 0.96
+hop_seconds = 0.48
+event_score_threshold = 0.10
+smoothing_method = "centered_median_edge_padded"
+smoothing_window_frames = 3
+max_classes_per_window = 12
+max_events = 10000
+speech_class_set_revision = "yamnet-audioset-speech-family-indices-0-through-12-v1"
+speech_present_threshold = 0.30
+speech_absent_threshold = 0.05
+max_audio_seconds = 600
 
 [model_builds.qwen3_5_2b_mlx]
 profile = "qwen3_5_2b"
@@ -1398,6 +1502,13 @@ resource_class = "heavy"
 estimated_cost_usd = 0.0
 supported_execution_modes = ["unary", "server_stream"]
 
+[deployments.yamnet_audio_events_tfhub_v1]
+provider = "yamnet-local"
+build = "yamnet_tfhub_v1_tensorflow_2_20"
+resource_class = "light"
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary"]
+
 [deployments.onnx_yunet_2026may]
 provider = "onnx-local"
 build = "yunet_2026may_onnx"
@@ -1493,6 +1604,26 @@ prefer = ["local"]
 offline_required = true
 capability_floor = ["foundational", "capable"]
 latency = ["interactive", "balanced", "throughput"]
+fallback = ["none"]
+max_cost_usd = { min = 0.0, max = 0.0 }
+
+# Echo receives only the local evidence task; it cannot administer resources,
+# widen placement, use fallback, or incur provider cost.
+[apps.echo]
+credential = { source = "managed" }
+resource_admin = false
+allowed_intents = ["audio.detect_events"]
+max_pending_jobs = 16
+default_policy = "local-first"
+allowed_policies = ["local-first"]
+
+[apps.echo.request_overrides]
+priority = ["background"]
+placement = ["local_only"]
+prefer = ["local"]
+offline_required = true
+capability_floor = ["foundational", "capable"]
+latency = ["balanced", "throughput"]
 fallback = ["none"]
 max_cost_usd = { min = 0.0, max = 0.0 }
 

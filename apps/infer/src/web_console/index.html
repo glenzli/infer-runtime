@@ -130,7 +130,7 @@
             <article class="panel">
               <div class="panel-heading">
                 <div><div class="eyebrow">RECENT ACTIVITY</div><h3>任务活动</h3></div>
-                <span class="muted small">最近 2 分钟</span>
+                <span class="muted small">过去 24 小时（持久化）</span>
               </div>
               <div id="overview-chart" class="bar-chart empty-chart" aria-label="近期任务活动图">
                 <span>等待运行数据</span>
@@ -151,14 +151,14 @@
 
         <section class="view" data-view-panel="statistics">
           <div class="metric-grid wide">
-            <article class="metric-card"><span>平均队列等待</span><strong id="stat-wait">—</strong><small>已派发任务</small></article>
-            <article class="metric-card"><span>已派发</span><strong id="stat-dispatched">—</strong><small>进入 provider</small></article>
-            <article class="metric-card"><span>取消</span><strong id="stat-cancelled">—</strong><small>调用方或调度取消</small></article>
-            <article class="metric-card"><span>队列拒绝</span><strong id="stat-rejected">—</strong><small>背压保护</small></article>
+            <article class="metric-card"><span>平均队列等待</span><strong id="stat-wait">—</strong><small>本次 daemon 生命周期</small></article>
+            <article class="metric-card"><span>已派发</span><strong id="stat-dispatched">—</strong><small>本次 daemon 生命周期</small></article>
+            <article class="metric-card"><span>取消</span><strong id="stat-cancelled">—</strong><small>本次 daemon 生命周期</small></article>
+            <article class="metric-card"><span>队列拒绝</span><strong id="stat-rejected">—</strong><small>本次 daemon 生命周期</small></article>
           </div>
           <div class="content-grid half">
             <article class="panel">
-              <div class="panel-heading"><div><div class="eyebrow">THROUGHPUT</div><h3>完成与失败趋势</h3></div></div>
+              <div class="panel-heading"><div><div class="eyebrow">THROUGHPUT</div><h3>完成与失败趋势</h3></div><span class="muted small">过去 24 小时（持久化）</span></div>
               <div id="statistics-chart" class="bar-chart large empty-chart"><span>等待运行数据</span></div>
             </article>
             <article class="panel">

@@ -10,12 +10,11 @@ use infer_core::{
     SpeechStreamDescriptor, TranscriptRevision, TranscriptionSessionRequest,
 };
 use infer_provider::{DynAudioDuplexSession, ProviderError};
-use infer_resource::ModelReservation;
 use tokio::time::timeout_at;
 
 use crate::{
-    AttemptOutcome, AttemptTrigger, JobPreparation, PreparedRun, Runtime, RuntimeError,
-    ScheduledPermit,
+    AttemptOutcome, AttemptTrigger, ExecutionResourceReservation, JobPreparation, PreparedRun,
+    Runtime, RuntimeError, ScheduledPermit,
 };
 
 pub type RuntimeAudioByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, ProviderError>> + Send>>;
@@ -34,7 +33,7 @@ pub struct RuntimeTranscriptionSession {
     attempt_number: usize,
     provider: DynAudioDuplexSession,
     _permit: Option<ScheduledPermit>,
-    _resource_reservation: Option<ModelReservation>,
+    _resource_reservation: Option<ExecutionResourceReservation>,
 }
 
 /// Ensures dropping an HTTP response body is a control-plane cancellation,
@@ -279,7 +278,7 @@ impl Runtime {
             attempt_number,
             provider,
             _permit: Some(permit),
-            _resource_reservation: resource_reservation,
+            _resource_reservation: Some(resource_reservation),
         })
     }
 

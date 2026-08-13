@@ -189,11 +189,12 @@ POST /v1/responses/{response_id}/cancel
 ## 5. 接入本地音频能力
 
 音频与文本共享鉴权、Job、排队、取消和审计控制面，但不强行套入 Responses JSON。它按任务
-使用四个类型化 endpoint：
+使用类型化 endpoint：
 
 | Intent | Endpoint | 请求形态 | 结果 |
 | --- | --- | --- | --- |
 | `audio.transcribe` | `POST /v1/audio/transcriptions` | multipart | JSON 或 text |
+| `audio.detect_events` | `POST /v1/audio/event-detections` | multipart | AudioSet events + coverage/evidence/provenance JSON |
 | `audio.transcribe`（实验流） | `GET /v1/audio/transcriptions/stream` | WebSocket PCM + control JSON | revisioned partial/final JSON |
 | `audio.align` | `POST /v1/audio/alignments` | multipart | JSON timestamps |
 | `speech.synthesize` / `speech.design_voice` | `POST /v1/audio/speech` | JSON | 完整音频或 streamed PCM bytes |
@@ -233,6 +234,25 @@ curl "$INFER_BASE_URL/v1/audio/speech" \
 上传单文件上限当前为 25 MiB。Multipart 字段拼写、重复字段和 MIME/格式错误都会严格失败。
 语音生成响应的 `x-infer-job-id` 与 `x-infer-model` header 可用于诊断；不要把音频 payload
 写入通用日志。
+
+### 声音事件检测
+
+Rust Consumer 使用官方 `infer-runtime-client` 的
+`Client::detect_audio_events_file(path, content_type, metadata)`；该方法先通过 Infra Discovery
+选择 Core，再读取 Catalog、校验能力 OpenAPI digest，并只接受
+`infer.audio.event-detection@20260813.1`。不要从 Echo 自行调用 worker、传模型路径或复制
+YAMNet 解析逻辑。
+
+请求 metadata 必须保持 `infer.placement=local_only`、`infer.offline_required=true`、
+`infer.fallback=none`，Echo 还固定 `background`、零成本与 local-first。Runtime 返回的
+`events` 和 `speech_presence` 是两个独立证据字段：合法的空 `events=[]` 不自动表示无人声；
+只有 `coverage.status=full` 且 speech-family score 不高于响应内版本化阈值时，SDK 才接受
+`speech_presence.status=absent`。partial/none coverage 必须保留 `unknown`。
+
+每个事件使用 AudioSet MID `class_id`、展示 `label`、秒级闭开分析区间和 raw sigmoid score；
+Consumer 应同时保存 Job id、Capability identity、ontology/policy/provenance revision 作为证据，
+不要只保存 label。未知 response 字段可向前兼容，但现有强类型字段缺失、阈值矛盾或事件超出
+coverage 时必须拒绝。
 
 `speech.synthesize` 的 `voice` 是 Runtime 逻辑别名，不是 provider 原生 speaker 字符串。目录
 revision `infer.speech.voice-aliases@20260811.1` 当前发布

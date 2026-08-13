@@ -1,6 +1,9 @@
 //! Capability registry matching and policy-ordered candidate selection.
 
-use std::{cmp::Ordering, collections::BTreeSet};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+};
 
 use infer_core::{
     CandidateDecision, CandidateDecisionStatus, CandidateReasonCode, CapabilityLevel,
@@ -54,12 +57,43 @@ pub struct CandidatePlanningContext<'a> {
     pub unavailable_deployments: &'a BTreeSet<String>,
 }
 
+/// A bounded, best-effort scheduling observation captured immediately before
+/// routing. It is deliberately not persisted as Job provenance: queue state
+/// can change before admission, while the resulting ordered Candidate Plan is
+/// the durable decision record.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProviderQueueEstimate {
+    pub estimated_wait_ms: Option<u64>,
+    pub estimated_service_ms: Option<u64>,
+}
+
+#[cfg(test)]
 pub fn plan_candidates(
     config: &RuntimeConfig,
     intent_id: &str,
     intent: &IntentProfile,
     profile: &PolicyProfile,
     context: CandidatePlanningContext<'_>,
+) -> CandidatePlan {
+    plan_candidates_with_queue(
+        config,
+        intent_id,
+        intent,
+        profile,
+        context,
+        &BTreeMap::new(),
+    )
+}
+
+/// Equivalent static planning surface used by tests and offline tools, with a
+/// bounded live queue estimate available to the Runtime admission path.
+pub fn plan_candidates_with_queue(
+    config: &RuntimeConfig,
+    intent_id: &str,
+    intent: &IntentProfile,
+    profile: &PolicyProfile,
+    context: CandidatePlanningContext<'_>,
+    queue_estimates: &BTreeMap<String, ProviderQueueEstimate>,
 ) -> CandidatePlan {
     let CandidatePlanningContext {
         constraints,
@@ -256,6 +290,8 @@ pub fn plan_candidates(
                     &profile.order,
                     constraints.prefer,
                     capability_floor,
+                    constraints.deadline_ms,
+                    queue_estimates,
                 )
             })
     });
@@ -278,6 +314,8 @@ pub fn plan_candidates(
                     &profile.order,
                     constraints.prefer,
                     capability_floor,
+                    constraints.deadline_ms,
+                    queue_estimates,
                 )
             })
     });
@@ -387,6 +425,8 @@ fn compare_candidates(
     order: &[SortKey],
     preferred: Option<PlacementPreference>,
     capability_floor: CapabilityLevel,
+    deadline_ms: Option<u64>,
+    queue_estimates: &BTreeMap<String, ProviderQueueEstimate>,
 ) -> Ordering {
     for key in order {
         let comparison = match key {
@@ -406,13 +446,55 @@ fn compare_candidates(
             SortKey::CapabilityFit => capability_distance(left.5.level, capability_floor)
                 .cmp(&capability_distance(right.5.level, capability_floor))
                 .then_with(|| compare_score(right.5.score, left.5.score)),
-            SortKey::DeadlineFit | SortKey::QueueTime => Ordering::Equal,
+            SortKey::DeadlineFit => deadline_fit_rank(left, deadline_ms, queue_estimates)
+                .cmp(&deadline_fit_rank(right, deadline_ms, queue_estimates)),
+            SortKey::QueueTime => {
+                queue_wait_ms(left, queue_estimates).cmp(&queue_wait_ms(right, queue_estimates))
+            }
         };
         if comparison != Ordering::Equal {
             return comparison;
         }
     }
     left.0.cmp(right.0)
+}
+
+fn queue_wait_ms(
+    candidate: &CandidateRef<'_>,
+    queue_estimates: &BTreeMap<String, ProviderQueueEstimate>,
+) -> u64 {
+    queue_estimates
+        .get(&candidate.1.provider)
+        .and_then(|estimate| estimate.estimated_wait_ms)
+        .unwrap_or(u64::MAX)
+}
+
+/// Prefer a candidate with a measured queue delay that fits the caller's
+/// deadline. Unknown timing stays neutral rather than being treated as an
+/// optimistic zero; a known miss ranks behind unknown but does not alter any
+/// hard deadline/cancellation behavior at execution time.
+fn deadline_fit_rank(
+    candidate: &CandidateRef<'_>,
+    deadline_ms: Option<u64>,
+    queue_estimates: &BTreeMap<String, ProviderQueueEstimate>,
+) -> u8 {
+    let Some(deadline_ms) = deadline_ms else {
+        return 0;
+    };
+    let Some(estimate) = queue_estimates.get(&candidate.1.provider) else {
+        return 1;
+    };
+    let Some(wait_ms) = estimate.estimated_wait_ms else {
+        return 1;
+    };
+    let Some(service_ms) = estimate.estimated_service_ms else {
+        return 1;
+    };
+    if wait_ms.saturating_add(service_ms) <= deadline_ms {
+        0
+    } else {
+        2
+    }
 }
 
 fn capability_distance(level: CapabilityLevel, floor: CapabilityLevel) -> u8 {
@@ -759,6 +841,110 @@ mod tests {
             },
         );
         assert_eq!(strongest.candidates[0].deployment_id, "strong_cloud");
+    }
+
+    #[test]
+    fn measured_queue_time_reorders_equally_eligible_candidates() {
+        let mut config = config();
+        config
+            .model_profiles
+            .get_mut("small")
+            .unwrap()
+            .ratings
+            .get_mut("reasoning.solve")
+            .unwrap()
+            .level = CapabilityLevel::Expert;
+        let constraints = RequestConstraints::default();
+        let queue_estimates = BTreeMap::from([
+            (
+                "local".into(),
+                ProviderQueueEstimate {
+                    estimated_wait_ms: Some(20),
+                    estimated_service_ms: Some(20),
+                },
+            ),
+            (
+                "cloud".into(),
+                ProviderQueueEstimate {
+                    estimated_wait_ms: Some(500),
+                    estimated_service_ms: Some(100),
+                },
+            ),
+        ]);
+        let plan = plan_candidates_with_queue(
+            &config,
+            "reasoning.solve",
+            config.intent("reasoning.solve").unwrap(),
+            &PolicyProfile {
+                order: vec![SortKey::QueueTime],
+            },
+            CandidatePlanningContext {
+                constraints: &constraints,
+                execution_requirements: &ExecutionRequirements::default(),
+                reasoning_effort: None,
+                allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
+                allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: None,
+                unavailable_providers: &BTreeSet::new(),
+                unavailable_deployments: &BTreeSet::new(),
+            },
+            &queue_estimates,
+        );
+        assert_eq!(plan.candidates[0].deployment_id, "small_local");
+        assert_eq!(plan.candidates[1].deployment_id, "strong_cloud");
+    }
+
+    #[test]
+    fn deadline_fit_prefers_a_measured_candidate_that_can_start_in_time() {
+        let mut config = config();
+        config
+            .model_profiles
+            .get_mut("small")
+            .unwrap()
+            .ratings
+            .get_mut("reasoning.solve")
+            .unwrap()
+            .level = CapabilityLevel::Expert;
+        let constraints = RequestConstraints {
+            deadline_ms: Some(100),
+            ..RequestConstraints::default()
+        };
+        let queue_estimates = BTreeMap::from([
+            (
+                "local".into(),
+                ProviderQueueEstimate {
+                    estimated_wait_ms: Some(20),
+                    estimated_service_ms: Some(20),
+                },
+            ),
+            (
+                "cloud".into(),
+                ProviderQueueEstimate {
+                    estimated_wait_ms: Some(80),
+                    estimated_service_ms: Some(80),
+                },
+            ),
+        ]);
+        let plan = plan_candidates_with_queue(
+            &config,
+            "reasoning.solve",
+            config.intent("reasoning.solve").unwrap(),
+            &PolicyProfile {
+                order: vec![SortKey::DeadlineFit, SortKey::Capability],
+            },
+            CandidatePlanningContext {
+                constraints: &constraints,
+                execution_requirements: &ExecutionRequirements::default(),
+                reasoning_effort: None,
+                allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
+                allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: None,
+                unavailable_providers: &BTreeSet::new(),
+                unavailable_deployments: &BTreeSet::new(),
+            },
+            &queue_estimates,
+        );
+        assert_eq!(plan.candidates[0].deployment_id, "small_local");
     }
 
     #[test]

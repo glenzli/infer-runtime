@@ -1,8 +1,9 @@
-//! Persistent JSON-lines bridge to local MLX audio execution.
+//! Persistent JSON-lines bridge to typed local file-audio workers.
 
 mod streaming;
 
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
@@ -10,21 +11,24 @@ use std::{
 
 use async_trait::async_trait;
 use infer_core::{
-    AlignmentRequest, AudioExecutionRequest, AudioFile, SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1,
-    SpeechFormat, SpeechRequest, TranscriptionRequest, VoiceCloneRequest,
+    AlignmentRequest, AudioExecutionRequest, AudioFile, EventDetectionRequest,
+    EventDetectionResult, SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1, SpeechFormat, SpeechRequest,
+    TranscriptionRequest, VoiceCloneRequest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tempfile::TempDir;
 use tokio::{
     fs,
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{Child, ChildStdin, ChildStdout, Command},
     sync::Mutex,
 };
 use uuid::Uuid;
 
 use crate::ProviderError;
+
+const MAX_WORKER_RESPONSE_LINE_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug)]
 pub enum AudioExecutionOutput {
@@ -51,6 +55,7 @@ pub struct AudioWorkerExecutor {
     id: String,
     command: String,
     args: Vec<String>,
+    admitted_model_paths: Arc<BTreeMap<String, String>>,
     process: Arc<Mutex<Option<WorkerProcess>>>,
 }
 
@@ -60,6 +65,7 @@ impl Clone for AudioWorkerExecutor {
             id: self.id.clone(),
             command: self.command.clone(),
             args: self.args.clone(),
+            admitted_model_paths: Arc::clone(&self.admitted_model_paths),
             process: Arc::clone(&self.process),
         }
     }
@@ -124,6 +130,22 @@ impl AudioWorkerExecutor {
             id: id.into(),
             command,
             args,
+            admitted_model_paths: Arc::new(BTreeMap::new()),
+            process: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub fn with_admitted_model_paths(
+        id: impl Into<String>,
+        command: String,
+        args: Vec<String>,
+        admitted_model_paths: BTreeMap<String, String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            command,
+            args,
+            admitted_model_paths: Arc::new(admitted_model_paths),
             process: Arc::new(Mutex::new(None)),
         }
     }
@@ -134,29 +156,35 @@ impl AudioWorkerExecutor {
 
     async fn round_trip(&self, request: &WorkerRequest) -> Result<Value, ProviderError> {
         let mut guard = self.process.lock().await;
-        if guard.is_none() {
-            *guard = Some(self.spawn().await?);
-        }
-        let process = guard.as_mut().expect("worker was initialized");
-        if process.child.try_wait()?.is_some() {
-            *guard = Some(self.spawn().await?);
-        }
-        let process = guard.as_mut().expect("worker was restarted");
+        let mut process = match guard.take() {
+            Some(mut process) => {
+                if process.child.try_wait()?.is_none() {
+                    process
+                } else {
+                    self.spawn().await?
+                }
+            }
+            None => self.spawn().await?,
+        };
         let line = serde_json::to_vec(request)?;
-        if let Err(error) = process.stdin.write_all(&line).await {
-            *guard = None;
-            return Err(error.into());
-        }
+        process.stdin.write_all(&line).await?;
         process.stdin.write_all(b"\n").await?;
         process.stdin.flush().await?;
 
         loop {
             let mut response_line = String::new();
-            let bytes = process.stdout.read_line(&mut response_line).await?;
+            let bytes = (&mut process.stdout)
+                .take((MAX_WORKER_RESPONSE_LINE_BYTES + 1) as u64)
+                .read_line(&mut response_line)
+                .await?;
             if bytes == 0 {
-                *guard = None;
                 return Err(ProviderError::Protocol(
                     "audio worker exited without a response".into(),
+                ));
+            }
+            if bytes > MAX_WORKER_RESPONSE_LINE_BYTES || !response_line.ends_with('\n') {
+                return Err(ProviderError::Protocol(
+                    "audio worker response exceeds the bounded protocol frame".into(),
                 ));
             }
             let response: WorkerResponse = serde_json::from_str(&response_line)?;
@@ -166,6 +194,7 @@ impl AudioWorkerExecutor {
                 continue;
             }
             if response.ok {
+                *guard = Some(process);
                 return Ok(response.result.unwrap_or(Value::Null));
             }
             return Err(ProviderError::Protocol(
@@ -182,7 +211,7 @@ async fn spawn_worker(command: &str, args: &[String]) -> Result<WorkerProcess, P
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::null())
         .kill_on_drop(true)
         .spawn()?;
     let stdin = child
@@ -220,8 +249,27 @@ impl AudioExecutor for AudioWorkerExecutor {
                 "streaming speech must use execute_speech_stream".into(),
             ));
         }
+        let physical_model = if self.admitted_model_paths.is_empty() {
+            physical_model
+        } else {
+            self.admitted_model_paths
+                .get(physical_model)
+                .map(String::as_str)
+                .ok_or_else(|| {
+                    ProviderError::InvalidInput(
+                        "physical audio model is not admitted by the typed Build manifest".into(),
+                    )
+                })?
+        };
         let prepared = prepare_worker_request(physical_model, request).await?;
-        let result = self.round_trip(&prepared.request).await?;
+        let mut result = self.round_trip(&prepared.request).await?;
+        if prepared.request.operation == "detect_events" {
+            let typed: EventDetectionResult = serde_json::from_value(result)?;
+            typed
+                .validate()
+                .map_err(|error| ProviderError::Protocol(error.to_string()))?;
+            result = serde_json::to_value(typed)?;
+        }
         if let Some((path, format)) = prepared.audio_output {
             let bytes = fs::read(path).await?;
             Ok(AudioExecutionOutput::Audio {
@@ -247,6 +295,9 @@ async fn prepare_worker_request(
         AudioExecutionRequest::Alignment(request) => {
             prepare_alignment(request_id, physical_model, request, &temporary_files).await?
         }
+        AudioExecutionRequest::EventDetection(request) => {
+            prepare_event_detection(request_id, physical_model, request, &temporary_files).await?
+        }
         AudioExecutionRequest::Speech(request) => {
             prepare_speech(request_id, physical_model, request, &temporary_files)
         }
@@ -259,6 +310,19 @@ async fn prepare_worker_request(
         _temporary_files: temporary_files,
         audio_output,
     })
+}
+
+async fn prepare_event_detection(
+    request_id: String,
+    model: &str,
+    request: EventDetectionRequest,
+    temporary_files: &TempDir,
+) -> Result<(WorkerRequest, Option<(PathBuf, SpeechFormat)>), ProviderError> {
+    let audio_path = write_audio_file(temporary_files, "input", &request.file).await?;
+    Ok((
+        worker_request(request_id, "detect_events", model, Some(audio_path)),
+        None,
+    ))
 }
 
 async fn prepare_transcription(

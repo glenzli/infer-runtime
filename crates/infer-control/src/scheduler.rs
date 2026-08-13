@@ -16,6 +16,13 @@ pub struct QueueSnapshot {
     pub normal: usize,
     pub background: usize,
     pub active: usize,
+    pub max_concurrency: usize,
+    /// A best-effort start-delay estimate based on this Provider's recent
+    /// completed Attempts. `None` means a non-empty queue has no sufficient
+    /// local timing history yet; it must not be treated as zero.
+    pub estimated_wait_ms: Option<u64>,
+    /// Rolling mean service duration used for `estimated_wait_ms`.
+    pub estimated_service_ms: Option<u64>,
 }
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
@@ -36,12 +43,19 @@ pub enum SchedulerError {
 pub struct ScheduledPermit {
     permit: Option<OwnedSemaphorePermit>,
     command_tx: mpsc::UnboundedSender<Command>,
+    started_at: Instant,
 }
 
 impl Drop for ScheduledPermit {
     fn drop(&mut self) {
         self.permit.take();
-        let _ = self.command_tx.send(Command::Released);
+        let elapsed_ms = self
+            .started_at
+            .elapsed()
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX);
+        let _ = self.command_tx.send(Command::Released { elapsed_ms });
     }
 }
 
@@ -123,7 +137,9 @@ enum Command {
     Cancel {
         job_id: String,
     },
-    Released,
+    Released {
+        elapsed_ms: u64,
+    },
     Snapshot {
         reply_tx: oneshot::Sender<QueueSnapshot>,
     },
@@ -134,6 +150,7 @@ struct Queues {
     normal: VecDeque<Ticket>,
     background: VecDeque<Ticket>,
     active: usize,
+    service_samples_ms: VecDeque<u64>,
 }
 
 impl Queues {
@@ -184,12 +201,54 @@ impl Queues {
         }
     }
 
-    fn snapshot(&self) -> QueueSnapshot {
+    fn record_service_duration(&mut self, elapsed_ms: u64) {
+        // A task cancelled before it could reach a provider should not teach
+        // the estimator that this provider has zero execution latency.
+        if elapsed_ms == 0 {
+            return;
+        }
+        const MAX_SAMPLES: usize = 32;
+        self.service_samples_ms.push_back(elapsed_ms);
+        if self.service_samples_ms.len() > MAX_SAMPLES {
+            self.service_samples_ms.pop_front();
+        }
+    }
+
+    fn estimated_service_ms(&self) -> Option<u64> {
+        (!self.service_samples_ms.is_empty()).then(|| {
+            self.service_samples_ms.iter().sum::<u64>()
+                / u64::try_from(self.service_samples_ms.len()).expect("nonempty length fits u64")
+        })
+    }
+
+    fn snapshot(&self, max_concurrency: usize) -> QueueSnapshot {
+        let pending = self.pending();
+        let estimated_service_ms = self.estimated_service_ms();
+        let estimated_wait_ms = if self.active == 0 && pending == 0 {
+            Some(0)
+        } else {
+            estimated_service_ms.map(|service_ms| {
+                // Estimate the time before one newly admitted, lowest-rank
+                // ticket starts. A free Provider slot means zero wait; once
+                // all slots are occupied, each full completion wave opens at
+                // most `max_concurrency` positions ahead of it.
+                let completions_before_start = self
+                    .active
+                    .saturating_add(pending)
+                    .saturating_add(1)
+                    .saturating_sub(max_concurrency);
+                let waves = completions_before_start.div_ceil(max_concurrency);
+                service_ms.saturating_mul(u64::try_from(waves).unwrap_or(u64::MAX))
+            })
+        };
         QueueSnapshot {
             interactive: self.interactive.len(),
             normal: self.normal.len(),
             background: self.background.len(),
             active: self.active,
+            max_concurrency,
+            estimated_wait_ms,
+            estimated_service_ms,
         }
     }
 }
@@ -223,6 +282,7 @@ async fn run(
         normal: VecDeque::new(),
         background: VecDeque::new(),
         active: 0,
+        service_samples_ms: VecDeque::new(),
     };
     while let Some(command) = command_rx.recv().await {
         match command {
@@ -235,9 +295,13 @@ async fn run(
                     let _ = ticket.reply_tx.send(Err(SchedulerError::Cancelled));
                 }
             }
-            Command::Released => queues.active = queues.active.saturating_sub(1),
+            Command::Released { elapsed_ms } => {
+                queues.active = queues.active.saturating_sub(1);
+                queues.record_service_duration(elapsed_ms);
+            }
             Command::Snapshot { reply_tx } => {
-                let _ = reply_tx.send(queues.snapshot());
+                let _ =
+                    reply_tx.send(queues.snapshot(semaphore.available_permits() + queues.active));
             }
         }
         while let Ok(permit) = semaphore.clone().try_acquire_owned() {
@@ -249,6 +313,7 @@ async fn run(
             let scheduled = ScheduledPermit {
                 permit: Some(permit),
                 command_tx: command_tx.clone(),
+                started_at: Instant::now(),
             };
             if ticket.reply_tx.send(Ok(scheduled)).is_err() {
                 // `ScheduledPermit::drop` releases both the semaphore slot and
@@ -375,5 +440,72 @@ mod tests {
         assert_eq!(snapshot.interactive, 1);
         drop(background_permit);
         interactive.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn rolling_service_history_estimates_nonempty_queue_wait() {
+        let scheduler = ProviderScheduler::new(1, 4, Duration::from_secs(10));
+        let warm = scheduler
+            .acquire(
+                "warm".into(),
+                Priority::Normal,
+                None,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        drop(warm);
+        let idle = scheduler.snapshot().await.unwrap();
+        assert_eq!(idle.estimated_wait_ms, Some(0));
+        assert!(idle.estimated_service_ms.is_some());
+
+        let active = scheduler
+            .acquire(
+                "active".into(),
+                Priority::Normal,
+                None,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let waiting_scheduler = scheduler.clone();
+        let waiting = tokio::spawn(async move {
+            waiting_scheduler
+                .acquire(
+                    "waiting".into(),
+                    Priority::Normal,
+                    None,
+                    CancellationToken::new(),
+                )
+                .await
+        });
+        tokio::task::yield_now().await;
+        let queued = scheduler.snapshot().await.unwrap();
+        assert_eq!(queued.active, 1);
+        assert_eq!(queued.normal, 1);
+        assert!(queued.estimated_wait_ms.unwrap_or_default() > 0);
+        drop(active);
+        drop(waiting.await.unwrap().unwrap());
+    }
+
+    #[test]
+    fn queue_estimate_does_not_invent_wait_when_a_provider_slot_is_free() {
+        let mut queues = Queues {
+            interactive: VecDeque::new(),
+            normal: VecDeque::new(),
+            background: VecDeque::new(),
+            active: 1,
+            service_samples_ms: VecDeque::from([100]),
+        };
+        assert_eq!(queues.snapshot(2).estimated_wait_ms, Some(0));
+
+        queues.normal.push_back(Ticket {
+            job_id: "queued".into(),
+            priority: Priority::Normal,
+            enqueued_at: Instant::now(),
+            reply_tx: oneshot::channel().0,
+        });
+        assert_eq!(queues.snapshot(2).estimated_wait_ms, Some(100));
     }
 }

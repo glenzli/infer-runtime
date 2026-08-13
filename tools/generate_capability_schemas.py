@@ -48,6 +48,7 @@ CAPABILITIES: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
     ),
     "infer.audio.transcription": ("20260811.1", ("/v1/audio/transcriptions",)),
+    "infer.audio.event-detection": ("20260813.1", ("/v1/audio/event-detections",)),
     "infer.audio.alignment": ("20260811.1", ("/v1/audio/alignments",)),
     "infer.audio.speech": ("20260811.1", ("/v1/audio/speech",)),
     "infer.audio.voice-clone": ("20260811.1", ("/v1/audio/voice-clones",)),
