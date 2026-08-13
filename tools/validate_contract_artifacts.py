@@ -22,6 +22,11 @@ FIXTURES = {
     "job-list.json": "JobListPage",
     "job-snapshot.json": "JobSnapshot",
 }
+EVENT_FIXTURES = (
+    "event-present.json",
+    "empty-absent.json",
+    "partial-unknown.json",
+)
 
 
 def load(path: Path) -> dict[str, Any]:
@@ -75,6 +80,17 @@ def validate_openapi(document: dict[str, Any], path: Path) -> None:
             raise ValueError(f"{path}: invalid component schema {name}: {error}") from error
 
 
+def validate_event_evidence(document: dict[str, Any]) -> None:
+    speech = document["speech_presence"]
+    coverage = document["coverage"]
+    policy = document["policy"]
+    if speech["status"] == "absent" and (
+        coverage["status"] != "full"
+        or speech["max_score"] > policy["speech_absent_threshold"]
+    ):
+        raise ValueError("speech absence requires full low-score evidence")
+
+
 def validate_fixtures(source: dict[str, Any]) -> None:
     fixtures = ROOT / "contracts/consumer-core/20260813.1/fixtures"
     for filename, schema in FIXTURES.items():
@@ -103,6 +119,32 @@ def validate_fixtures(source: dict[str, Any]) -> None:
     }
     if not list(Draft202012Validator(request_schema).iter_errors(request)):
         raise ValueError("strict request schema accepted an unknown field")
+
+    event_fixtures = (
+        ROOT
+        / "contracts/capabilities/infer.audio.event-detection/20260813.1/fixtures"
+    )
+    event_schema = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "components": source["components"],
+        "$ref": "#/components/schemas/EventDetectionResponse",
+    }
+    validator = Draft202012Validator(event_schema)
+    for filename in EVENT_FIXTURES:
+        fixture = load(event_fixtures / filename)
+        validator.validate(fixture)
+        validate_event_evidence(fixture)
+
+    invalid_absence = load(event_fixtures / "partial-unknown.json")
+    invalid_absence["speech_presence"]["status"] = "absent"
+    # JSON Schema cannot express this evidence invariant; the typed Core/SDK
+    # validators enforce it, and this guard keeps the fixture intent explicit.
+    try:
+        validate_event_evidence(invalid_absence)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("partial coverage incorrectly allowed speech absence")
 
 
 def validate_locked_artifacts() -> None:

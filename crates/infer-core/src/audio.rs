@@ -1,10 +1,13 @@
-//! Stable contracts for bounded file transcription, forced alignment, and speech generation.
+//! Stable contracts for bounded file audio understanding and speech generation.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{ContractError, ExecutionMode, RequestConstraints, string_enum};
+use crate::{
+    ContractError, ExecutionMode, RequestConstraints, audio_event::EventDetectionRequest,
+    string_enum,
+};
 
 pub const MAX_AUDIO_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
 
@@ -213,6 +216,7 @@ impl VoiceCloneRequest {
 pub enum AudioExecutionRequest {
     Transcription(TranscriptionRequest),
     Alignment(AlignmentRequest),
+    EventDetection(EventDetectionRequest),
     Speech(SpeechRequest),
     VoiceClone(VoiceCloneRequest),
 }
@@ -222,6 +226,7 @@ impl AudioExecutionRequest {
         match self {
             Self::Transcription(request) => &request.model,
             Self::Alignment(request) => &request.model,
+            Self::EventDetection(request) => &request.model,
             Self::Speech(request) => &request.model,
             Self::VoiceClone(request) => &request.model,
         }
@@ -231,6 +236,7 @@ impl AudioExecutionRequest {
         match self {
             Self::Transcription(request) => request.constraints(),
             Self::Alignment(request) => request.constraints(),
+            Self::EventDetection(request) => request.constraints(),
             Self::Speech(request) => request.constraints(),
             Self::VoiceClone(request) => request.constraints(),
         }
@@ -240,13 +246,14 @@ impl AudioExecutionRequest {
         match self {
             Self::Transcription(request) => request.validate(),
             Self::Alignment(request) => request.validate(),
+            Self::EventDetection(request) => request.validate(),
             Self::Speech(request) => request.validate(),
             Self::VoiceClone(request) => request.validate(),
         }
     }
 }
 
-fn validate_model(model: &str) -> Result<(), ContractError> {
+pub(crate) fn validate_model(model: &str) -> Result<(), ContractError> {
     if model.trim().is_empty() {
         Err(ContractError::MissingModel)
     } else {

@@ -1,0 +1,50 @@
+{
+  "id": "job_empty_absent",
+  "model": "audio.detect_events",
+  "object": "audio.event_detection",
+  "events": [],
+  "speech_presence": { "status": "absent", "max_score": 0.02 },
+  "coverage": {
+    "status": "full",
+    "input_duration_seconds": 2.0,
+    "analyzed_start_seconds": 0.0,
+    "analyzed_end_seconds": 2.0,
+    "analyzed_seconds": 2.0,
+    "ratio": 1.0,
+    "window_count": 4,
+    "window_seconds": 0.96,
+    "hop_seconds": 0.48
+  },
+  "ontology": {
+    "id": "audioset",
+    "revision": "yamnet-class-map@cdf24d193e19",
+    "class_id_namespace": "audioset_mid",
+    "class_count": 521,
+    "artifact_sha256": "cdf24d193e196d9e95912a2667051ae203e92a2ba09449218ccb40ef787c6df2",
+    "license_spdx": "CC-BY-SA-4.0"
+  },
+  "policy": {
+    "revision": "yamnet-audioset-event-policy-v1",
+    "score_kind": "raw_sigmoid",
+    "event_score_threshold": 0.1,
+    "smoothing": { "method": "centered_median_edge_padded", "window_frames": 3 },
+    "max_classes_per_window": 12,
+    "max_events": 10000,
+    "speech_class_set_revision": "yamnet-audioset-speech-family-indices-0-through-12-v1",
+    "speech_present_threshold": 0.3,
+    "speech_absent_threshold": 0.05,
+    "max_audio_seconds": 600
+  },
+  "provenance": {
+    "model": "google/yamnet/1",
+    "model_archive_sha256": "b80da2a1a56926fb0767205051a200dd7b3beaf3ea1ea126c42a53943996e5e0",
+    "artifact_set_sha256": "4730c9bde533285dc0b74b8b94c798273b40d91fc746b17f0c9281ac8764d6b8",
+    "model_license_spdx": "Apache-2.0",
+    "training_data_license_spdx": "CC-BY-4.0",
+    "runtime": "tensorflow-saved-model",
+    "runtime_version": "2.20.0",
+    "decoder": "ffmpeg",
+    "decoder_version": "ffmpeg 8.1.2",
+    "preprocessing_identity": "ffmpeg_decode_mono_f32le_16khz_then_tfhub_yamnet_waveform_v1"
+  }
+}

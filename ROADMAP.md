@@ -162,6 +162,12 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
   Apps & Access managed Consumer 的一次性创建/轮换/撤销、外部 App environment source、
   owner-only 文件和无 key 本机 bootstrap；provider key 仍只由 daemon secret environment 注入）
 - 完整 metrics、traces/audit events；
+- 已完成：Console 完成/失败趋势由 SQLite terminal Job time buckets 提供，避免 daemon/Console
+  重启后历史清空；Provider 队列公开当前 slots、pending/active 与 bounded service/wait estimate；
+  policy 的 `queue_time` / `deadline_fit` 已使用该瞬时估计。
+- 已完成（默认不启用）：本机 node admission capacity 的 `cpu_slots`、`unified_memory_mib`、
+  `accelerator_slots` 配置与 per-Deployment measured claim。只有实际容量和 claim 都由 operator
+  测量填写时才参与跨 Provider admission，避免让未校准模型阻塞或绕过并行。
 - CLI：`queue`、`budget`、`usage`、`providers`、`explain`；（均已有对应控制 API/CLI 命令）
 - 官方 Rust `infer-runtime-client` 已建立；后续按真实 Consumer 需求补语言绑定，不复制 Discovery、
   鉴权、合同握手和错误解析；

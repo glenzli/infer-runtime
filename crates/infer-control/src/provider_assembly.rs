@@ -44,7 +44,10 @@ impl ProviderAssembly {
             .any(|provider| {
                 matches!(
                     provider.kind,
-                    ProviderKind::Onnx | ProviderKind::RetrievalWorker | ProviderKind::OcrWorker
+                    ProviderKind::Onnx
+                        | ProviderKind::AudioWorker
+                        | ProviderKind::RetrievalWorker
+                        | ProviderKind::OcrWorker
                 )
             })
             .then(|| ArtifactStore::from_config(&config.artifacts))
@@ -107,10 +110,35 @@ impl ProviderAssembly {
                         .insert(id.clone(), Arc::new(adapter) as DynProvider);
                 }
                 ProviderKind::AudioWorker => {
-                    let adapter = Arc::new(AudioWorkerExecutor::new(
+                    let store = artifact_store
+                        .as_ref()
+                        .expect("audio worker requires an artifact store");
+                    let mut admitted_model_paths = BTreeMap::new();
+                    for deployment in config
+                        .deployments
+                        .values()
+                        .filter(|deployment| deployment.provider == *id)
+                    {
+                        let build = &config.model_builds[&deployment.build];
+                        let Some(worker) = &build.local_worker else {
+                            continue;
+                        };
+                        debug_assert_eq!(worker.adapter, LocalWorkerAdapterKind::YamnetAudioEvents);
+                        let resolved = store.resolve_local_worker_build_identity(
+                            &deployment.build,
+                            &worker.adapter.to_string(),
+                            &worker.artifact_set_sha256,
+                        )?;
+                        admitted_model_paths.insert(
+                            build.model_id.clone(),
+                            resolved.runtime_root.to_string_lossy().into_owned(),
+                        );
+                    }
+                    let adapter = Arc::new(AudioWorkerExecutor::with_admitted_model_paths(
                         id,
                         provider.command.clone().expect("validated command"),
                         provider.args.clone(),
+                        admitted_model_paths,
                     ));
                     assembly
                         .audio_executors

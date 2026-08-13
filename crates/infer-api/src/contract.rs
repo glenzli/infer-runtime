@@ -307,6 +307,9 @@ macro_rules! capability_schema_digest {
     ("infer.audio.alignment") => {
         "76c7f4ab7d5e6333808aceec558822d9deceb2918bc478e326593d302dcb96e8"
     };
+    ("infer.audio.event-detection") => {
+        "c7b6e74840bc92d92d582df58252f01f2e0dfed9178f8f7d4318349bdae42ada"
+    };
     ("infer.audio.speech") => {
         "19d29d6799a6cee1a6d24a63f9a9aab73ab925dd2e79f7181fbfe922f6906c68"
     };
@@ -364,6 +367,12 @@ pub const CAPABILITIES: &[CapabilityEntry] = &[
         "20260811.1",
         "stable",
         [route!("POST", "/v1/audio/transcriptions", &["unary"]),]
+    ),
+    capability!(
+        "infer.audio.event-detection",
+        "20260813.1",
+        "stable",
+        [route!("POST", "/v1/audio/event-detections", &["unary"]),]
     ),
     capability!(
         "infer.audio.alignment",
@@ -495,6 +504,8 @@ pub fn required_capability_id(path: &str) -> Option<&'static str> {
         Some("infer.responses")
     } else if path == "/v1/audio/transcriptions" {
         Some("infer.audio.transcription")
+    } else if path == "/v1/audio/event-detections" {
+        Some("infer.audio.event-detection")
     } else if path == "/v1/audio/alignments" {
         Some("infer.audio.alignment")
     } else if path == "/v1/audio/speech" {

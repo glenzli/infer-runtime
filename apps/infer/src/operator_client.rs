@@ -39,6 +39,7 @@ pub(crate) struct ConsoleSnapshot {
     pub(crate) health: EndpointSnapshot,
     pub(crate) contract: EndpointSnapshot,
     pub(crate) metrics: EndpointSnapshot,
+    pub(crate) telemetry: EndpointSnapshot,
     pub(crate) jobs: EndpointSnapshot,
     pub(crate) providers: EndpointSnapshot,
     pub(crate) resources: EndpointSnapshot,
@@ -57,6 +58,7 @@ impl Default for ConsoleSnapshot {
             health: pending(),
             contract: pending(),
             metrics: pending(),
+            telemetry: pending(),
             jobs: pending(),
             providers: pending(),
             resources: pending(),
@@ -85,10 +87,11 @@ impl OperatorClient {
     }
 
     pub(crate) async fn snapshot(&self, generation: u64) -> ConsoleSnapshot {
-        let (health, contract, metrics, jobs, providers, resources, budget) = tokio::join!(
+        let (health, contract, metrics, telemetry, jobs, providers, resources, budget) = tokio::join!(
             self.get_json("/health", false),
             self.get_json("/infer/v1/contract", false),
             self.get_json("/infer/v1/metrics", true),
+            self.get_json("/infer/v1/telemetry?window=24h", true),
             self.get_json("/infer/v1/jobs?limit=50", true),
             self.get_json("/infer/v1/providers", true),
             self.get_json("/infer/v1/resources", true),
@@ -100,6 +103,7 @@ impl OperatorClient {
             health: EndpointSnapshot::from_result(health),
             contract: EndpointSnapshot::from_result(contract),
             metrics: EndpointSnapshot::from_result(metrics),
+            telemetry: EndpointSnapshot::from_result(telemetry),
             jobs: EndpointSnapshot::from_result(jobs),
             providers: EndpointSnapshot::from_result(providers),
             resources: EndpointSnapshot::from_result(resources),

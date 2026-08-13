@@ -309,6 +309,36 @@ provider 会重建纯 CPU Session 并披露稳定 fallback reason。禁止 CPU f
 不能记录一个虚假的 Core ML route。升级 ORT、修改 EP、precision 或模型导出都要作为新的
 验证组合，不得沿用旧证据。
 
+## YAMNet 声音事件 Build
+
+`audio.detect_events` 使用 typed `audio_worker`，但模型文件仍必须先进入公共 ArtifactStore；
+Provider 不接受配置或请求中的任意路径。Operator 从官方 TF Hub 获取精确
+`google/yamnet/1` archive 后，先用 `tools/install_yamnet.py` 校验 archive 大小、SHA-256、成员
+类型和四个逐文件 digest，解包到 owner-only staging。随后用
+`infer-artifact` 的 `publish_local_worker_build` example 发布 manifest；adapter 固定为
+`yamnet_audio_events`，artifact names 固定为：
+
+- `saved_model.pb`
+- `variables/variables.data-00000-of-00001`
+- `variables/variables.index`
+- `assets/yamnet_class_map.csv`
+
+四个 `ArtifactIdentityConfig` 必须记录 exact size/digest/source revision/license declaration；
+artifact-set SHA-256 是对排序后的 `relative-name NUL file-sha256 LF` 记录求摘要。Runtime 启动时
+通过 manifest、adapter 和 artifact-set digest 重新解析并逐文件验证，之后才把只读 Build root
+交给 YAMNet executor。serving 期间不联网下载。
+
+TensorFlow runtime 使用独立 owner-only venv；`tools/requirements-yamnet-runtime.txt` 只固定顶层
+`tensorflow==2.20.0`。当前本机 deployment receipt 记录 Python 3.12.13、TensorFlow 2.20.0、
+NumPy 2.5.2 和 ffmpeg 8.1.2；后续部署仍须重新记录实际 platform 与这些版本。模型/代码、
+AudioSet training data 与 ontology 当前分别记录 Apache-2.0、CC-BY-4.0、
+CC-BY-SA-4.0 的 operator declaration；没有归档 license text、摘要和审核日期前，Build 必须保持
+`license.status=declared`，不能标记 verified。
+
+worker stdin 上限 64 KiB，stdout 单帧上限 4 MiB，音频仍受 25 MiB upload 与 600 秒 decoded
+上限。取消、deadline、协议失败或超限会终止并重建 worker；stderr 不进入 daemon 日志，固定错误
+不会包含音频、临时路径、转写、请求 body 或 token。
+
 ## 本地模型显式装载与卸载
 
 Ollama 与 ONNX 的原生生命周期控制都是独立的 operator action，不属于普通路由、retry
