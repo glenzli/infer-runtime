@@ -11,7 +11,8 @@ reimplement:
 - loopback HTTP with proxies and redirects disabled;
 - generation-aware reconnect and machine-readable errors;
 - exact Capability Catalog intersection and immutable OpenAPI digest validation;
-- typed text, audio, vision, retrieval, OCR, capability-catalog, and Job clients.
+- typed text, audio, vision, retrieval, OCR, capability-catalog, Job, and
+  opt-in local RAW foundation clients.
 
 Applications still own their product data, persistence, stale-result decisions,
 and user-facing workflow. They request an Intent or an ACL-authorized named
@@ -28,10 +29,11 @@ The package can move to a registry release after all local Consumers complete
 the hard cut. No compatibility fallback to candidate contracts or a fixed port
 is included.
 
-The experimental RAW foundation route is not part of this first stable SDK
-surface. It must gain a dedicated typed SDK module before activation; products
-must not bypass that gate by reimplementing Core Discovery or generic handle
-transport.
+The experimental RAW foundation client is deliberately Unix-only. It creates
+an authenticated bounded lease, registers exactly two already-open descriptors
+over the owner-only `uds-scm-rights` binding, then executes or cancels the Job.
+It never accepts paths, moves pixels over HTTP, or exposes a generic handle
+transport. Windows remains blocked pending the frozen named-pipe/HANDLE binding.
 
 The package currently supports Unix owner/mode verification (macOS/Linux). A Windows release is
 blocked until Infra Discovery and credential ACL checks are implemented with the platform's native

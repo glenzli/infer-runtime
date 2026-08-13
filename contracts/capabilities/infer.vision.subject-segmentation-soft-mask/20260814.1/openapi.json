@@ -1,0 +1,319 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.vision.subject-segmentation-soft-mask",
+    "version": "20260814.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.vision.subject-segmentation-soft-mask@20260814.1",
+  "paths": {
+    "/infer/v1/vision/subject-segmentations/soft-mask": {
+      "post": {
+        "operationId": "createSubjectSegmentationSoftMask",
+        "x-infer-stability": "experimental",
+        "description": "Prompted local-only SAM 2.1 Gray8 sigmoid-probability mask. The native 256x256 raster maps linearly by pixel centres to orientation-normalized display pixels.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SubjectSegmentationSoftMaskCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/SubjectSegmentationForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bounded native-resolution Gray8 probability PNG",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubjectSegmentationSoftMaskResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "SubjectSegmentationSoftMaskCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.vision.subject-segmentation-soft-mask@20260814.1"
+        }
+      }
+    },
+    "schemas": {
+      "EncodedSoftSegmentationMask": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "content_type",
+          "encoding",
+          "data_base64",
+          "sha256",
+          "width",
+          "height"
+        ],
+        "properties": {
+          "content_type": {
+            "const": "image/png"
+          },
+          "encoding": {
+            "const": "gray8_sigmoid_probability_png"
+          },
+          "data_base64": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "maxLength": 22369624
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "width": {
+            "const": 256
+          },
+          "height": {
+            "const": 256
+          }
+        }
+      },
+      "ImageGeometry": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "width",
+          "height",
+          "orientation"
+        ],
+        "properties": {
+          "width": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "orientation": {
+            "const": "display_pixels_orientation_normalized"
+          }
+        }
+      },
+      "SegmentationMaskRasterExtent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "width",
+          "height",
+          "coordinate_mapping"
+        ],
+        "properties": {
+          "width": {
+            "const": 256
+          },
+          "height": {
+            "const": 256
+          },
+          "coordinate_mapping": {
+            "const": "linear_full_extent_pixel_centers_v1"
+          }
+        }
+      },
+      "SubjectSegmentationForm": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/VisionImageFormBase"
+          },
+          {
+            "type": "object",
+            "required": [
+              "image_orientation",
+              "prompt_coordinate_space",
+              "points"
+            ],
+            "properties": {
+              "model": {
+                "const": "vision.segment_subject"
+              },
+              "image_orientation": {
+                "const": "display_pixels_orientation_normalized"
+              },
+              "prompt_coordinate_space": {
+                "const": "normalized_0_1"
+              },
+              "points": {
+                "type": "string",
+                "description": "JSON array of 1 through 16 foreground/background normalized prompt points; a box consumes two prompt slots"
+              },
+              "box_prompt": {
+                "type": "string",
+                "description": "Optional JSON normalized bounding box fully contained in [0,1]"
+              }
+            }
+          }
+        ]
+      },
+      "SubjectSegmentationSoftMaskResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "object",
+          "created_at",
+          "status",
+          "source_revision",
+          "input_coordinate_extent",
+          "raster_extent",
+          "mask",
+          "score",
+          "prompt_count",
+          "provenance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "const": "vision.subject_segmentation_soft_mask"
+          },
+          "created_at": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "const": "completed"
+          },
+          "source_revision": {
+            "type": "string"
+          },
+          "input_coordinate_extent": {
+            "$ref": "#/components/schemas/ImageGeometry"
+          },
+          "raster_extent": {
+            "$ref": "#/components/schemas/SegmentationMaskRasterExtent"
+          },
+          "mask": {
+            "$ref": "#/components/schemas/EncodedSoftSegmentationMask"
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "prompt_count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/VisionProvenance"
+          }
+        }
+      },
+      "VisionImageFormBase": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": {
+          "^infer\\.": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "image",
+          "source_revision"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "image": {
+            "type": "string",
+            "format": "binary",
+            "description": "JPEG/PNG, 1 byte through 20 MiB; decoded images are bounded to 40 megapixels"
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON object whose values are strings; Runtime forces local_only, offline_required=true, fallback=none"
+          }
+        }
+      },
+      "VisionProvenance": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "job_id",
+          "provider",
+          "deployment",
+          "model_build",
+          "artifact_sha256",
+          "preprocessing_identity",
+          "postprocessing_identity",
+          "runtime",
+          "requested_execution_provider",
+          "actual_execution_provider",
+          "precision"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "model_build": {
+            "type": "string"
+          },
+          "artifact_sha256": {
+            "type": "string"
+          },
+          "preprocessing_identity": {
+            "type": "string"
+          },
+          "postprocessing_identity": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "requested_execution_provider": {
+            "type": "string"
+          },
+          "actual_execution_provider": {
+            "type": "string"
+          },
+          "execution_provider_fallback_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "precision": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

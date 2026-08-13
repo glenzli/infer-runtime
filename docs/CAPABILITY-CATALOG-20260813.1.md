@@ -45,6 +45,8 @@ Consumer 选择某个条目的精确 `id@schema_version` 后，在该能力请�
 | `infer.audio.transcription-stream` | `20260811.1` | `/v1/audio/transcriptions/stream` | experimental |
 | `infer.vision.face-detection` | `20260811.1` | `/infer/v1/vision/face-detections` | experimental |
 | `infer.vision.face-embedding` | `20260811.1` | `/infer/v1/vision/face-embeddings` | experimental |
+| `infer.vision.subject-segmentation` | `20260813.1` | `/infer/v1/vision/subject-segmentations` | experimental |
+| `infer.vision.subject-segmentation-soft-mask` | `20260814.1` | `/infer/v1/vision/subject-segmentations/soft-mask` | experimental |
 | `infer.vision.image-embedding` | `20260811.1` | `/infer/v1/vision/image-embeddings` | experimental |
 | `infer.vision.text-embedding` | `20260811.1` | `/infer/v1/vision/text-embeddings` | experimental |
 | `infer.vision.image-description` | `20260811.1` | `/infer/v1/vision/image-descriptions` | experimental |

@@ -444,6 +444,19 @@
         }
       }
     },
+    "/infer/v1/vision/subject-segmentations/soft-mask": {
+      "post": {
+        "operationId": "createSubjectSegmentationSoftMask",
+        "x-infer-stability": "experimental",
+        "description": "Prompted local-only SAM 2.1 Gray8 sigmoid-probability mask. The native 256x256 raster maps linearly by pixel centres to orientation-normalized display pixels.",
+        "parameters": [{ "$ref": "#/components/parameters/SubjectSegmentationSoftMaskCapability" }],
+        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/SubjectSegmentationForm" } } } },
+        "responses": {
+          "200": { "description": "Bounded native-resolution Gray8 probability PNG", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SubjectSegmentationSoftMaskResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
     "/infer/v1/vision/face-parsings": {
       "post": {
         "operationId": "createFaceParsing",
@@ -716,6 +729,10 @@
       "SubjectSegmentationCapability": {
         "name": "Infer-Capability-Contract", "in": "header", "required": true,
         "schema": { "const": "infer.vision.subject-segmentation@20260813.1" }
+      },
+      "SubjectSegmentationSoftMaskCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.vision.subject-segmentation-soft-mask@20260814.1" }
       },
       "FaceParsingCapability": {
         "name": "Infer-Capability-Contract", "in": "header", "required": true,
@@ -1471,6 +1488,35 @@
           "source_revision": { "type": "string" }, "image": { "$ref": "#/components/schemas/ImageGeometry" },
           "mask": { "$ref": "#/components/schemas/EncodedSegmentationMask" }, "score": { "type": "number", "minimum": 0, "maximum": 1 },
           "prompt_count": { "type": "integer", "minimum": 1, "maximum": 16 }, "provenance": { "$ref": "#/components/schemas/VisionProvenance" }
+        }
+      },
+      "EncodedSoftSegmentationMask": {
+        "type": "object", "additionalProperties": false,
+        "required": ["content_type", "encoding", "data_base64", "sha256", "width", "height"],
+        "properties": {
+          "content_type": { "const": "image/png" }, "encoding": { "const": "gray8_sigmoid_probability_png" },
+          "data_base64": { "type": "string", "contentEncoding": "base64", "maxLength": 22369624 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "width": { "const": 256 }, "height": { "const": 256 }
+        }
+      },
+      "SegmentationMaskRasterExtent": {
+        "type": "object", "additionalProperties": false,
+        "required": ["width", "height", "coordinate_mapping"],
+        "properties": {
+          "width": { "const": 256 }, "height": { "const": 256 },
+          "coordinate_mapping": { "const": "linear_full_extent_pixel_centers_v1" }
+        }
+      },
+      "SubjectSegmentationSoftMaskResponse": {
+        "type": "object", "additionalProperties": true,
+        "required": ["id", "object", "created_at", "status", "source_revision", "input_coordinate_extent", "raster_extent", "mask", "score", "prompt_count", "provenance"],
+        "properties": {
+          "id": { "type": "string" }, "object": { "const": "vision.subject_segmentation_soft_mask" }, "created_at": { "type": "integer", "minimum": 0 }, "status": { "const": "completed" },
+          "source_revision": { "type": "string" }, "input_coordinate_extent": { "$ref": "#/components/schemas/ImageGeometry" },
+          "raster_extent": { "$ref": "#/components/schemas/SegmentationMaskRasterExtent" }, "mask": { "$ref": "#/components/schemas/EncodedSoftSegmentationMask" },
+          "score": { "type": "number", "minimum": 0, "maximum": 1 }, "prompt_count": { "type": "integer", "minimum": 1, "maximum": 16 },
+          "provenance": { "$ref": "#/components/schemas/VisionProvenance" }
         }
       },
       "EncodedFaceLabelMap": {

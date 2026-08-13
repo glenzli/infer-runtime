@@ -10,9 +10,11 @@ use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use image::ImageFormat;
 use infer_core::{
-    BoundingBox, EncodedSegmentationMask, ImageGeometry, MAX_SEGMENTATION_MASK_BYTES,
-    MAX_VISION_IMAGE_PIXELS, NormalizedBoundingBox, SegmentationPromptPoint,
-    SubjectSegmentationRequest, VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS,
+    BoundingBox, EncodedSegmentationMask, EncodedSoftSegmentationMask, ImageGeometry,
+    MAX_SEGMENTATION_MASK_BYTES, MAX_VISION_IMAGE_PIXELS, NormalizedBoundingBox,
+    SUBJECT_SEGMENTATION_SOFT_MASK_HEIGHT, SUBJECT_SEGMENTATION_SOFT_MASK_WIDTH,
+    SegmentationPromptPoint, SubjectSegmentationRequest,
+    VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -52,6 +54,14 @@ pub struct SubjectSegmentationExecutionOutput {
     pub provenance: VisionExecutionProvenance,
 }
 
+#[derive(Debug)]
+pub struct SubjectSegmentationSoftMaskExecutionOutput {
+    pub input_coordinate_extent: ImageGeometry,
+    pub mask: EncodedSoftSegmentationMask,
+    pub score: f32,
+    pub provenance: VisionExecutionProvenance,
+}
+
 #[async_trait]
 pub trait SubjectSegmentationExecutor: Send + Sync {
     fn id(&self) -> &str;
@@ -61,6 +71,13 @@ pub trait SubjectSegmentationExecutor: Send + Sync {
         request: SubjectSegmentationRequest,
         cancellation: CancellationToken,
     ) -> Result<SubjectSegmentationExecutionOutput, ProviderError>;
+
+    async fn segment_subject_soft_mask(
+        &self,
+        physical_model: &str,
+        request: SubjectSegmentationRequest,
+        cancellation: CancellationToken,
+    ) -> Result<SubjectSegmentationSoftMaskExecutionOutput, ProviderError>;
 }
 
 pub type DynSubjectSegmentationExecutor = Arc<dyn SubjectSegmentationExecutor>;
@@ -187,6 +204,89 @@ impl SubjectSegmentationExecutor for CoremlSamExecutor {
         request: SubjectSegmentationRequest,
         cancellation: CancellationToken,
     ) -> Result<SubjectSegmentationExecutionOutput, ProviderError> {
+        let (provenance, dimensions, result, mask_bytes) = self
+            .run_segmentation(physical_model, request, cancellation, "segment_subject")
+            .await?;
+        let mask_image = image::load_from_memory_with_format(&mask_bytes, ImageFormat::Png)
+            .map_err(|_| ProviderError::Protocol("SAM worker returned an invalid PNG mask".into()))?
+            .to_luma8();
+        if mask_image.dimensions() != dimensions {
+            return Err(ProviderError::Protocol(
+                "SAM mask geometry does not match the submitted image".into(),
+            ));
+        }
+        let (foreground_pixels, bounding_box) = validate_binary_mask(&mask_image)?;
+        let mask_sha256 = format!("{:x}", Sha256::digest(&mask_bytes));
+        Ok(SubjectSegmentationExecutionOutput {
+            image: input_geometry(dimensions),
+            mask: EncodedSegmentationMask {
+                content_type: "image/png".into(),
+                encoding: "binary_u8_png".into(),
+                data_base64: STANDARD.encode(mask_bytes),
+                sha256: mask_sha256,
+                width: dimensions.0,
+                height: dimensions.1,
+                foreground_pixels,
+                bounding_box,
+            },
+            score: result.score,
+            provenance,
+        })
+    }
+
+    async fn segment_subject_soft_mask(
+        &self,
+        physical_model: &str,
+        request: SubjectSegmentationRequest,
+        cancellation: CancellationToken,
+    ) -> Result<SubjectSegmentationSoftMaskExecutionOutput, ProviderError> {
+        let (provenance, dimensions, result, mask_bytes) = self
+            .run_segmentation(
+                physical_model,
+                request,
+                cancellation,
+                "segment_subject_soft_mask",
+            )
+            .await?;
+        let mask_image = image::load_from_memory_with_format(&mask_bytes, ImageFormat::Png)
+            .map_err(|_| {
+                ProviderError::Protocol("SAM worker returned an invalid PNG soft mask".into())
+            })?
+            .to_luma8();
+        if mask_image.dimensions()
+            != (
+                SUBJECT_SEGMENTATION_SOFT_MASK_WIDTH,
+                SUBJECT_SEGMENTATION_SOFT_MASK_HEIGHT,
+            )
+        {
+            return Err(ProviderError::Protocol(
+                "SAM soft mask geometry must be the frozen 256x256 raster".into(),
+            ));
+        }
+        Ok(SubjectSegmentationSoftMaskExecutionOutput {
+            input_coordinate_extent: input_geometry(dimensions),
+            mask: EncodedSoftSegmentationMask {
+                content_type: "image/png".into(),
+                encoding: "gray8_sigmoid_probability_png".into(),
+                data_base64: STANDARD.encode(&mask_bytes),
+                sha256: format!("{:x}", Sha256::digest(&mask_bytes)),
+                width: SUBJECT_SEGMENTATION_SOFT_MASK_WIDTH,
+                height: SUBJECT_SEGMENTATION_SOFT_MASK_HEIGHT,
+            },
+            score: result.score,
+            provenance,
+        })
+    }
+}
+
+impl CoremlSamExecutor {
+    async fn run_segmentation(
+        &self,
+        physical_model: &str,
+        request: SubjectSegmentationRequest,
+        cancellation: CancellationToken,
+        operation: &'static str,
+    ) -> Result<(VisionExecutionProvenance, (u32, u32), WorkerResult, Vec<u8>), ProviderError> {
         let provenance = self
             .builds
             .get(physical_model)
@@ -216,7 +316,7 @@ impl SubjectSegmentationExecutor for CoremlSamExecutor {
             .round_trip(
                 &WorkerRequest {
                     request_id: Uuid::new_v4().simple().to_string(),
-                    operation: "segment_subject",
+                    operation,
                     model: provenance.model_path.clone(),
                     artifact_sha256: provenance.artifact_sha256.clone(),
                     image_path: image_path.to_string_lossy().into_owned(),
@@ -242,34 +342,8 @@ impl SubjectSegmentationExecutor for CoremlSamExecutor {
             ));
         }
         let mask_bytes = fs::read(&mask_path).await?;
-        let mask_image = image::load_from_memory_with_format(&mask_bytes, ImageFormat::Png)
-            .map_err(|_| ProviderError::Protocol("SAM worker returned an invalid PNG mask".into()))?
-            .to_luma8();
-        if mask_image.dimensions() != dimensions {
-            return Err(ProviderError::Protocol(
-                "SAM mask geometry does not match the submitted image".into(),
-            ));
-        }
-        let (foreground_pixels, bounding_box) = validate_binary_mask(&mask_image)?;
-        let mask_sha256 = format!("{:x}", Sha256::digest(&mask_bytes));
-        Ok(SubjectSegmentationExecutionOutput {
-            image: ImageGeometry {
-                width: dimensions.0,
-                height: dimensions.1,
-                orientation: VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS.into(),
-            },
-            mask: EncodedSegmentationMask {
-                content_type: "image/png".into(),
-                encoding: "binary_u8_png".into(),
-                data_base64: STANDARD.encode(mask_bytes),
-                sha256: mask_sha256,
-                width: dimensions.0,
-                height: dimensions.1,
-                foreground_pixels,
-                bounding_box,
-            },
-            score: result.score,
-            provenance: VisionExecutionProvenance {
+        Ok((
+            VisionExecutionProvenance {
                 model_build: provenance.model_build,
                 artifact_sha256: provenance.artifact_sha256,
                 preprocessing_identity: provenance.preprocessing_identity,
@@ -281,7 +355,18 @@ impl SubjectSegmentationExecutor for CoremlSamExecutor {
                 execution_provider_fallback_reason: None,
                 precision: provenance.precision,
             },
-        })
+            dimensions,
+            result,
+            mask_bytes,
+        ))
+    }
+}
+
+fn input_geometry(dimensions: (u32, u32)) -> ImageGeometry {
+    ImageGeometry {
+        width: dimensions.0,
+        height: dimensions.1,
+        orientation: VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS.into(),
     }
 }
 
@@ -422,6 +507,12 @@ mod tests {
         mask.put_pixel(0, 0, Luma([255]));
         mask.put_pixel(1, 0, Luma([127]));
         assert!(validate_binary_mask(&mask).is_err());
+    }
+
+    #[test]
+    fn soft_mask_contract_keeps_the_native_sam_extent() {
+        assert_eq!(SUBJECT_SEGMENTATION_SOFT_MASK_WIDTH, 256);
+        assert_eq!(SUBJECT_SEGMENTATION_SOFT_MASK_HEIGHT, 256);
     }
 
     #[tokio::test]
