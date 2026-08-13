@@ -64,6 +64,14 @@ CAPABILITIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "20260811.1",
         ("/infer/v1/vision/face-embeddings",),
     ),
+    "infer.vision.subject-segmentation": (
+        "20260813.1",
+        ("/infer/v1/vision/subject-segmentations",),
+    ),
+    "infer.vision.face-parsing": (
+        "20260813.1",
+        ("/infer/v1/vision/face-parsings",),
+    ),
     "infer.vision.image-embedding": (
         "20260811.1",
         ("/infer/v1/vision/image-embeddings",),

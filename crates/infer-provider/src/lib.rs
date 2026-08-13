@@ -3,6 +3,7 @@
 mod audio_stream;
 mod audio_worker;
 mod codex_app_server;
+mod coreml_sam;
 mod ocr_worker;
 mod ollama_vision;
 mod onnx;
@@ -28,6 +29,10 @@ pub use audio_worker::{
     AudioExecutionOutput, AudioExecutor, AudioWorkerExecutor, DynAudioExecutor,
 };
 pub use codex_app_server::CodexAppServerProvider;
+pub use coreml_sam::{
+    CoremlSamExecutor, DynSubjectSegmentationExecutor, SamBuildContract,
+    SubjectSegmentationExecutionOutput, SubjectSegmentationExecutor,
+};
 pub use ocr_worker::{
     DynOcrExecutor, OcrBuildContract, OcrExecutionOutput, OcrExecutor, OcrWorkerExecutor,
 };
@@ -37,11 +42,12 @@ pub use ollama_vision::{
     OllamaVisionProvenance,
 };
 pub use onnx::{
-    DynFaceDetectionExecutor, DynFaceEmbeddingExecutor, DynImageEmbeddingExecutor,
-    DynTextEmbeddingExecutor, FaceDetectionExecutionOutput, FaceDetectionExecutor,
-    FaceEmbeddingExecutionOutput, FaceEmbeddingExecutor, ImageEmbeddingExecutionOutput,
+    DynFaceDetectionExecutor, DynFaceEmbeddingExecutor, DynFaceParsingExecutor,
+    DynImageEmbeddingExecutor, DynTextEmbeddingExecutor, FaceDetectionExecutionOutput,
+    FaceDetectionExecutor, FaceEmbeddingExecutionOutput, FaceEmbeddingExecutor,
+    FaceParsingExecutionOutput, FaceParsingExecutor, ImageEmbeddingExecutionOutput,
     ImageEmbeddingExecutor, OnnxExecutionProvenance, OnnxProviderRuntime,
-    TextEmbeddingExecutionOutput, TextEmbeddingExecutor,
+    TextEmbeddingExecutionOutput, TextEmbeddingExecutor, VisionExecutionProvenance,
 };
 pub use probe::{
     ProviderProbeCheck, ProviderProbeReport, ProviderProbeStatus, probe_responses_provider,
@@ -50,7 +56,7 @@ pub use probe::{
 pub use runtime_dependency::{
     ProviderReadinessStatus, ProviderRuntimeReadiness, ResolvedProviderProcess,
     RuntimeDependencyCheck, preflight_provider_runtime, provider_requires_ffmpeg,
-    resolve_provider_process, verify_yamnet_worker,
+    resolve_provider_process, verify_coreml_sam_worker, verify_yamnet_worker,
 };
 pub use text_retrieval_worker::{
     DynRetrievalExecutor, RetrievalBuildContract, RetrievalEmbeddingExecutionOutput,

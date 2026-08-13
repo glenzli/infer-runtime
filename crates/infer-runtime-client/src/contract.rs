@@ -56,6 +56,14 @@ pub(crate) fn expected_capability_schema(identity: &str) -> Option<(&'static str
             "/infer/v1/capability-schemas/infer.vision.face-embedding/20260811.1/openapi.json",
             "e225a4e06bcadb7274074d3af5aec4d0b96e476f81cac1b4f5e10e33a7d02ccc",
         ),
+        "infer.vision.subject-segmentation@20260813.1" => (
+            "/infer/v1/capability-schemas/infer.vision.subject-segmentation/20260813.1/openapi.json",
+            "4df56eefaa7ced43ef3c823f933e9bea689bee23f60d3279c3d84f75414bdb1d",
+        ),
+        "infer.vision.face-parsing@20260813.1" => (
+            "/infer/v1/capability-schemas/infer.vision.face-parsing/20260813.1/openapi.json",
+            "663e549c77528811a2c78406ef87b34b6d0add5c0702eec042a49bf7c8968b39",
+        ),
         "infer.vision.image-embedding@20260811.1" => (
             "/infer/v1/capability-schemas/infer.vision.image-embedding/20260811.1/openapi.json",
             "1f30793c1c7866f1cd4239e35dcdb10842b609f021731882810d4de143df42e9",

@@ -322,7 +322,7 @@ partial，只有 final 可按终态保存。
 并明确返回 `transcription_mode=commit_redecode`、`stream_semantics=revisable`。它可以用于边听边
 修订验证，但长会话计算量会增长；Consumer 不应把 duplex transport 当成固定实时延迟保证。
 
-## 6. 试用实验性本地人脸检测与 SFace 向量
+## 6. 试用实验性本地人脸、主体蒙版与面部区域能力
 
 ONNX P0 提供刻意收窄、独立版本化的 experimental capability；外部接入时
 必须单独固定 daemon commit，并接受在 stable promotion 前可能调整 schema：
@@ -391,8 +391,18 @@ postprocess identity 的 `space`；`eligibility` 给出五点是否在图内、�
 默认日志或 durable spool；Consumer 若要保存 embedding，必须自行执行本地生物特征政策、
 retention 和删除语义。为对应 App 的 `allowed_intents` 显式加入 `vision.embed_face` 后才可调用。
 
-这两条 route 只表示 YuNet 检测与 SFace face embedding 可试用；它们不开放视觉 background、
-持久 artifact reference 或通用 ONNX tensor API。SigLIP 语义向量使用下面独立的数据合同。
+官方 SDK 另外提供两个相同安全边界的 typed 方法：
+
+- `segment_subject(...)` 对应 `vision.segment_subject` 与
+  `infer.vision.subject-segmentation@20260813.1`。输入为 1–16 个归一化前景/背景点击；可选 box
+  占两个 prompt slot。返回与输入同尺寸、仅含 0/255 的 PNG mask、摘要和完整 provenance。
+- `parse_face(...)` 对应 `vision.parse_face` 与 `infer.vision.face-parsing@20260813.1`。输入为
+  orientation-normalized display raster 上的 YuNet face box；Runtime 固定扩张 1.8 倍上下文，
+  返回全图尺寸的 19-class indexed PNG label map。结果标记为 `sensitive_biometric`。
+
+这些 route 只表示 YuNet/SFace、SAM 2.1 与 BiSeNet typed slice 可试用；它们不开放视觉
+background、cloud fallback、持久 artifact reference、任意模型路径或通用 tensor API。
+SigLIP 语义向量使用下面独立的数据合同。
 
 ## 7. 试用 SigLIP 2 图文语义向量
 

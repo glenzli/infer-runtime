@@ -7,6 +7,9 @@ use crate::{Client, Error, Result, transport::decode};
 
 pub const FACE_DETECTION_CAPABILITIES: &[&str] = &["infer.vision.face-detection@20260811.1"];
 pub const FACE_EMBEDDING_CAPABILITIES: &[&str] = &["infer.vision.face-embedding@20260811.1"];
+pub const SUBJECT_SEGMENTATION_CAPABILITIES: &[&str] =
+    &["infer.vision.subject-segmentation@20260813.1"];
+pub const FACE_PARSING_CAPABILITIES: &[&str] = &["infer.vision.face-parsing@20260813.1"];
 pub const IMAGE_EMBEDDING_CAPABILITIES: &[&str] = &["infer.vision.image-embedding@20260811.1"];
 pub const TEXT_EMBEDDING_CAPABILITIES: &[&str] = &["infer.vision.text-embedding@20260811.1"];
 pub const IMAGE_DESCRIPTION_CAPABILITIES: &[&str] = &["infer.vision.image-description@20260811.1"];
@@ -43,6 +46,28 @@ pub struct BoundingBox {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
+pub struct NormalizedBoundingBox {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SegmentationPromptLabel {
+    Foreground,
+    Background,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
+pub struct SegmentationPromptPoint {
+    pub x: f32,
+    pub y: f32,
+    pub label: SegmentationPromptLabel,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -109,6 +134,75 @@ pub struct FaceEmbeddingResponse {
     pub data_classification: String,
     pub embedding: SemanticEmbeddingVector,
     pub eligibility: FaceEmbeddingEligibility,
+    pub provenance: VisionProvenance,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct EncodedSegmentationMask {
+    pub content_type: String,
+    pub encoding: String,
+    pub data_base64: String,
+    pub sha256: String,
+    pub width: u32,
+    pub height: u32,
+    pub foreground_pixels: u64,
+    pub bounding_box: Option<BoundingBox>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct SubjectSegmentationResponse {
+    pub id: String,
+    pub object: String,
+    pub created_at: u64,
+    pub status: String,
+    pub source_revision: String,
+    pub image: ImageGeometry,
+    pub mask: EncodedSegmentationMask,
+    pub score: f32,
+    pub prompt_count: usize,
+    pub provenance: VisionProvenance,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct EncodedLabelMap {
+    pub content_type: String,
+    pub encoding: String,
+    pub data_base64: String,
+    pub sha256: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct FaceParsingOntology {
+    pub id: String,
+    pub revision: String,
+    pub background_value: u8,
+    pub class_count: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct FaceParsingRegion {
+    pub class_id: String,
+    pub label: String,
+    pub label_value: u8,
+    pub pixel_count: u64,
+    pub bounding_box: Option<BoundingBox>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct FaceParsingResponse {
+    pub id: String,
+    pub object: String,
+    pub created_at: u64,
+    pub status: String,
+    pub source_revision: String,
+    pub data_classification: String,
+    pub image: ImageGeometry,
+    pub face_box: BoundingBox,
+    pub label_map: EncodedLabelMap,
+    pub ontology: FaceParsingOntology,
+    pub regions: Vec<FaceParsingRegion>,
     pub provenance: VisionProvenance,
 }
 
@@ -273,6 +367,78 @@ impl Client {
                 (
                     "landmarks",
                     serde_json::to_string(&landmarks)
+                        .map_err(|error| Error::MalformedResponse(error.to_string()))?,
+                ),
+            ],
+            metadata,
+        )
+        .await
+    }
+
+    pub async fn segment_subject(
+        &self,
+        image: &Path,
+        content_type: &'static str,
+        source_revision: &str,
+        points: &[SegmentationPromptPoint],
+        box_prompt: Option<NormalizedBoundingBox>,
+        metadata: &BTreeMap<String, String>,
+    ) -> Result<SubjectSegmentationResponse> {
+        let mut fields = vec![
+            ("model", "vision.segment_subject".into()),
+            ("source_revision", source_revision.into()),
+            (
+                "image_orientation",
+                "display_pixels_orientation_normalized".into(),
+            ),
+            ("prompt_coordinate_space", "normalized_0_1".into()),
+            (
+                "points",
+                serde_json::to_string(points)
+                    .map_err(|error| Error::MalformedResponse(error.to_string()))?,
+            ),
+        ];
+        if let Some(box_prompt) = box_prompt {
+            fields.push((
+                "box_prompt",
+                serde_json::to_string(&box_prompt)
+                    .map_err(|error| Error::MalformedResponse(error.to_string()))?,
+            ));
+        }
+        self.vision_multipart(
+            SUBJECT_SEGMENTATION_CAPABILITIES,
+            "/infer/v1/vision/subject-segmentations",
+            image,
+            content_type,
+            fields,
+            metadata,
+        )
+        .await
+    }
+
+    pub async fn parse_face(
+        &self,
+        image: &Path,
+        content_type: &'static str,
+        source_revision: &str,
+        face_box: BoundingBox,
+        metadata: &BTreeMap<String, String>,
+    ) -> Result<FaceParsingResponse> {
+        self.vision_multipart(
+            FACE_PARSING_CAPABILITIES,
+            "/infer/v1/vision/face-parsings",
+            image,
+            content_type,
+            vec![
+                ("model", "vision.parse_face".into()),
+                ("source_revision", source_revision.into()),
+                (
+                    "image_orientation",
+                    "display_pixels_orientation_normalized".into(),
+                ),
+                (
+                    "face_box",
+                    serde_json::to_string(&face_box)
                         .map_err(|error| Error::MalformedResponse(error.to_string()))?,
                 ),
             ],

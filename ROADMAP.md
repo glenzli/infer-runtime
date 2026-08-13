@@ -379,7 +379,8 @@ wall 与 RSS 在 legacy 同量级，single-tile in-flight cancel 约 1.7ms。Sha
    平台验证和 code/weight/data license facts。
 
 P0 已按 D-106/D-107/D-108 的收窄决定关闭并实现；同步 SFace face embedding 是第二个
-experimental slice，SigLIP 2 image/text 共享 space 是第三个。重型 Resource Pool 已按真实
+experimental slice，SigLIP 2 image/text 共享 space 是第三个。SAM 2.1 prompted subject mask 与
+BiSeNet 19-class face parsing 已作为另外两条 local-only typed slice 接入。重型 Resource Pool 已按真实
 约 1.9 GiB residency 复审但没有扩张核心；视觉 durable、稳定协议 promotion 和 Windows
 tolerance 仍不得借用本次关闭结果提前进入生产承诺。
 
@@ -389,8 +390,9 @@ tolerance 仍不得借用本次关闭结果提前进入生产承诺。
    Execution Provider route/provenance、资源估算、取消和错误归类；先由 fake model/session
    覆盖合同，不以真实权重作为 CI 前置；
 2. **首个 Shadow 视觉 slice**：YuNet `vision.detect_faces` 已完成；
-3. **后续 ONNX slices**：SFace `vision.embed_face` 与 SigLIP
-   `semantic.embed_image` + `semantic.embed_text` 已分别按 Build/space/privacy 门槛完成；
+3. **后续本地视觉 slices**：SFace `vision.embed_face`、SigLIP
+   `semantic.embed_image` + `semantic.embed_text`、SAM 2.1 `vision.segment_subject` 与 BiSeNet
+   `vision.parse_face` 已分别按 Build/space/privacy 门槛形成 typed vertical slice；
    DINO 或受控 vocabulary classification/tagging 仍须重新验证；
 4. **QwenVL 结构化理解**：`vision.describe_image` 返回有界短描述与关键词 proposal，
    `vision.classify_closed_set` 只在 Consumer 提供的闭集内返回 `matched|none|uncertain`；
@@ -420,13 +422,17 @@ SLO 和至少一个真实应用集成。不能只新增 Intent 枚举或共享 S
 - Shadow 只在类型化协议、Build/preprocess identity 和 D-108 payload 合同稳定后接入，并验证
   source/Recipe revision、stale-result 丢弃、viewport/background priority 映射。
 
-### P0 当前完成证据（更新于 2026-08-10）
+### P0 当前完成证据（更新于 2026-08-13）
 
 - 内容寻址 artifact store、原子 publish、manifest drift/digest/size 校验已完成；
 - ONNX Runtime 1.27.0 动态加载、Session Registry、统一 native load/unload/inventory 已完成；
 - YuNet 2026May CPU inference、官方示例人像 boxes/五点、完整 HTTP/鉴权/Job/Attempt 链路已通过；
 - SFace CPU Session load/inventory/unload、官方五点相似对齐、128 维 L2 归一化与完整
   HTTP/鉴权/ACL/Job/Attempt 链路已通过；向量只出现在同步响应，不进入 Job metadata；
+- Apple Core ML SAM 2.1 Small 九文件 artifact-set 已逐文件验证并发布；合成无敏感图的真实
+  Core ML cold smoke 返回同尺寸二值 PNG mask。point/box prompt、取消和 worker frame 均有界；
+- BiSeNet ResNet18 opset 20 Build 固定 512 RGB/ImageNet preprocessing、19-class ontology、
+  1.8 倍 face context 与 full-image indexed PNG restore；typed adapter 与边界单测已通过；
 - SigLIP 2 exact checkpoint/export/image graph/text graph/tokenizer 已形成内容寻址 Builds；
   `semantic.embed_image`/`semantic.embed_text` 返回同一 768d L2 space，中文文本与 Shadow managed
   credential 的真实 HTTP/ACL/Job/Attempt E2E 已通过；图片、查询与向量不进入 Job metadata；

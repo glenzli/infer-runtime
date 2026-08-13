@@ -213,7 +213,8 @@
 - **已覆盖基线**：D-008 已固定 Intent/Model/Build/Deployment/Provider/Node 身份链，D-009 已固定“控制统一、数据分型”，M2-M4 已拥有 Job/Attempt、取消、reservation、audit 和 lifecycle owner。
 - **推荐方向**：ONNX Runtime 作为新的本地 Provider/执行族接入；公共 owner 管理 Session Registry、artifact verification、原生 load/unload、Execution Provider route 和错误归类，模型专属 adapter 独占 preprocessing/tensor/postprocessing。普通 App 只使用类型化视觉协议，不接触万能 tensor-map、物理 backend 或模型路径。
 - **跨平台边界**：Apple Vision 不作为共同模型语义来源；受 Build 合同约束的 Core ML、WinML 或其他 ONNX Runtime Execution Provider 只是可验证的候选执行后端，实际 route/precision/fallback 必须进入 Attempt provenance。
-- **决定**：首个切片选择 `vision.detect_faces` / `vision.face_detection`。第二个独立切片接受原图、source revision 与 YuNet 命名五点，通过 SFace `vision.embed_face` / `vision.face_embedding` 返回归一化 128 维向量、eligibility evidence、精确 space 与完整 provenance。第三个切片使用独立 `semantic.embed_image` / `semantic.embed_text` 数据平面，把 SigLIP image/text encoder 绑定到同一个版本化 768d space。第四个切片以 `vision.describe_image` 与 `vision.classify_closed_set` 两条独立 typed schema 封装 QwenVL，不泄漏 Ollama chat wire。
+- **决定**：首个切片选择 `vision.detect_faces` / `vision.face_detection`。第二个独立切片接受原图、source revision 与 YuNet 命名五点，通过 SFace `vision.embed_face` / `vision.face_embedding` 返回归一化 128 维向量、eligibility evidence、精确 space 与完整 provenance。第三个切片使用独立 `semantic.embed_image` / `semantic.embed_text` 数据平面，把 SigLIP image/text encoder 绑定到同一个版本化 768d space。第四个切片以 `vision.describe_image` 与 `vision.classify_closed_set` 两条独立 typed schema 封装 QwenVL，不泄漏 Ollama chat wire。第五个切片把 Apple Core ML SAM 2.1 Small 限定为 point/box prompted `vision.segment_subject` 二值蒙版；第六个切片把 BiSeNet ResNet18 限定为 Consumer 选定 face box 的 `vision.parse_face` 19-class label map。二者都不升级为概念分割、自动选主体或万能 tensor surface。
+- **SAM Core ML 生命周期**：source `.mlpackage` 保持内容寻址不可变；宿主专用 `.mlmodelc` 是独立可重建 cache，缺失或 host/toolchain identity 漂移时 Provider 在 readiness 阶段 fail closed。当前验证 Build 固定 `CPU_AND_GPU`；`ALL` 在本机触发异常慢的 ANE specialization，不得作为“自动选择最佳后端”的默认值。
 - **Build 门槛**：exact artifact/export digest、opset、tensor contract、完整预处理、embedding space、tokenizer/vocabulary、允许的 Execution Provider/precision/fallback，以及 code/weight/data license facts 必须共同进入版本化 Build identity。
 - **ADR**：[ADR-0011](adr/0011-heterogeneous-local-runtimes-and-typed-vision.md)
 
@@ -229,7 +230,7 @@
 ### D-108：视觉 payload、SensitiveBiometric 与 durable ownership
 
 - **状态**：Accepted for synchronous face and semantic embeddings；reference/durable background 仍 Proposed
-- **安全下限**：视觉默认 `local_only`，不得隐式 cloud fallback；face embedding 标为 `SensitiveBiometric`；像素、crop 和 embedding 不进入通用 Job metadata、默认日志或普通 audit details。
+- **安全下限**：视觉默认 `local_only`，不得隐式 cloud fallback；face embedding 与 face parsing 标为 `SensitiveBiometric`；像素、crop、mask、label map 和 embedding 不进入通用 Job metadata、默认日志或普通 audit details。
 - **决定**：同步视觉只接受 20 MiB 内 JPEG/PNG；服务器强制 local-only/offline/no-fallback，像素、查询文本和 embedding 不进入通用 metadata/log/audit/durable store；`source_revision`/`query_revision` 必填并回显，Consumer 负责 stale-result 发布仲裁。SFace 另要求 detector 坐标系中的命名五点，由 Runtime 对齐。SigLIP image encoder 只接受 Consumer 已做 orientation normalization 的 display-sized raster；不接受 RAW、任意路径或 URL。
 - **durability 边界**：ADR-0010 只覆盖 local Responses 文本。视觉 background 在定义独立 payload 类型/owner、加密或引用租约、重启幂等、结果仲裁和删除语义前不得复用该能力。
 - **ADR**：[ADR-0011](adr/0011-heterogeneous-local-runtimes-and-typed-vision.md)

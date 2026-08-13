@@ -8,19 +8,123 @@ use std::{collections::BTreeSet, future::Future, sync::Arc, time::Duration};
 
 use infer_core::{
     AttemptOutcome, AttemptTrigger, ExecutionMode, ExecutionRequirements, FaceDetectionRequest,
-    FaceDetectionResponse, FaceEmbeddingRequest, FaceEmbeddingResponse, ImageEmbeddingRequest,
-    ImageEmbeddingResponse, JobState, Modality, SENSITIVE_BIOMETRIC_CLASSIFICATION,
+    FaceDetectionResponse, FaceEmbeddingRequest, FaceEmbeddingResponse, FaceParsingRequest,
+    FaceParsingResponse, ImageEmbeddingRequest, ImageEmbeddingResponse, JobState, Modality,
+    SENSITIVE_BIOMETRIC_CLASSIFICATION, SubjectSegmentationRequest, SubjectSegmentationResponse,
     TextEmbeddingRequest, TextEmbeddingResponse, VisionProvenance, VisionTokenizerProvenance,
 };
 use infer_provider::{
-    DynFaceDetectionExecutor, DynFaceEmbeddingExecutor, DynImageEmbeddingExecutor,
-    DynTextEmbeddingExecutor, OnnxExecutionProvenance, ProviderError,
+    DynFaceDetectionExecutor, DynFaceEmbeddingExecutor, DynFaceParsingExecutor,
+    DynImageEmbeddingExecutor, DynSubjectSegmentationExecutor, DynTextEmbeddingExecutor,
+    ProviderError, VisionExecutionProvenance,
 };
 use tokio::time::{sleep_until, timeout};
 
 use super::{JobPreparation, PreparedRun, Runtime, RuntimeError, attempt_policy, unix_time_ms};
 
 impl Runtime {
+    pub async fn execute_subject_segmentation(
+        self: &Arc<Self>,
+        app_id: &str,
+        request: SubjectSegmentationRequest,
+    ) -> Result<SubjectSegmentationResponse, RuntimeError> {
+        request.validate()?;
+        let logical_model = request.model.clone();
+        let source_revision = request.source_revision.clone();
+        let prompt_count = request.points.len() + usize::from(request.box_prompt.is_some()) * 2;
+        let constraints = request.constraints()?;
+        let prepared = self
+            .prepare_vision_job(
+                app_id,
+                &logical_model,
+                constraints,
+                "vision.subject_segmentation",
+            )
+            .await?;
+        let _resource_reservation = self.reserve_resource(&prepared).await?;
+        let _permit = self.acquire(&prepared).await?;
+        let attempt_number = self.start_vision_attempt(&prepared).await?;
+        let executor = self.subject_segmentation_executor(&prepared.provider_id)?;
+        let upstream = executor.segment_subject(
+            &prepared.physical_model,
+            request,
+            prepared.cancellation.clone(),
+        );
+        let output = match self.await_vision(&prepared, upstream).await {
+            Ok(output) => {
+                self.complete_vision_success(&prepared, attempt_number)
+                    .await?;
+                output
+            }
+            Err(error) => {
+                return Err(self
+                    .complete_vision_error(&prepared, attempt_number, error)
+                    .await?);
+            }
+        };
+        Ok(SubjectSegmentationResponse {
+            id: prepared.job_id.clone(),
+            object: "vision.subject_segmentation".into(),
+            created_at: (unix_time_ms() / 1_000).try_into().unwrap_or_default(),
+            status: "completed".into(),
+            source_revision,
+            image: output.image,
+            mask: output.mask,
+            score: output.score,
+            prompt_count,
+            provenance: vision_provenance(&prepared, output.provenance),
+        })
+    }
+
+    pub async fn execute_face_parsing(
+        self: &Arc<Self>,
+        app_id: &str,
+        request: FaceParsingRequest,
+    ) -> Result<FaceParsingResponse, RuntimeError> {
+        request.validate()?;
+        let logical_model = request.model.clone();
+        let source_revision = request.source_revision.clone();
+        let constraints = request.constraints()?;
+        let prepared = self
+            .prepare_vision_job(app_id, &logical_model, constraints, "vision.face_parsing")
+            .await?;
+        let _resource_reservation = self.reserve_resource(&prepared).await?;
+        let _permit = self.acquire(&prepared).await?;
+        let attempt_number = self.start_vision_attempt(&prepared).await?;
+        let executor = self.face_parsing_executor(&prepared.provider_id)?;
+        let upstream = executor.parse_face(
+            &prepared.physical_model,
+            request,
+            prepared.cancellation.clone(),
+        );
+        let output = match self.await_vision(&prepared, upstream).await {
+            Ok(output) => {
+                self.complete_vision_success(&prepared, attempt_number)
+                    .await?;
+                output
+            }
+            Err(error) => {
+                return Err(self
+                    .complete_vision_error(&prepared, attempt_number, error)
+                    .await?);
+            }
+        };
+        Ok(FaceParsingResponse {
+            id: prepared.job_id.clone(),
+            object: "vision.face_parsing".into(),
+            created_at: (unix_time_ms() / 1_000).try_into().unwrap_or_default(),
+            status: "completed".into(),
+            source_revision,
+            data_classification: SENSITIVE_BIOMETRIC_CLASSIFICATION.into(),
+            image: output.image,
+            face_box: output.face_box,
+            label_map: output.label_map,
+            ontology: output.ontology,
+            regions: output.regions,
+            provenance: vision_provenance(&prepared, output.provenance),
+        })
+    }
+
     pub async fn execute_face_detection(
         self: &Arc<Self>,
         app_id: &str,
@@ -243,6 +347,10 @@ impl Runtime {
                     match expected_data_plane {
                         "vision.face_detection" => "infer.vision.face-detection@20260811.1",
                         "vision.face_embedding" => "infer.vision.face-embedding@20260811.1",
+                        "vision.subject_segmentation" => {
+                            "infer.vision.subject-segmentation@20260813.1"
+                        }
+                        "vision.face_parsing" => "infer.vision.face-parsing@20260813.1",
                         "vision.image_embedding" => "infer.vision.image-embedding@20260811.1",
                         "vision.text_embedding" => "infer.vision.text-embedding@20260811.1",
                         _ => unreachable!("validated vision data plane"),
@@ -401,6 +509,23 @@ impl Runtime {
             .ok_or_else(|| RuntimeError::ProviderUnavailable(id.to_owned()))
     }
 
+    fn face_parsing_executor(&self, id: &str) -> Result<DynFaceParsingExecutor, RuntimeError> {
+        self.face_parsing_executors
+            .get(id)
+            .cloned()
+            .ok_or_else(|| RuntimeError::ProviderUnavailable(id.to_owned()))
+    }
+
+    fn subject_segmentation_executor(
+        &self,
+        id: &str,
+    ) -> Result<DynSubjectSegmentationExecutor, RuntimeError> {
+        self.subject_segmentation_executors
+            .get(id)
+            .cloned()
+            .ok_or_else(|| RuntimeError::ProviderUnavailable(id.to_owned()))
+    }
+
     fn image_embedding_executor(
         &self,
         id: &str,
@@ -421,7 +546,7 @@ impl Runtime {
 
 fn vision_provenance(
     prepared: &PreparedRun,
-    provenance: OnnxExecutionProvenance,
+    provenance: VisionExecutionProvenance,
 ) -> VisionProvenance {
     VisionProvenance {
         job_id: prepared.job_id.clone(),

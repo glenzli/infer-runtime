@@ -1,0 +1,351 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.vision.face-parsing",
+    "version": "20260813.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.vision.face-parsing@20260813.1",
+  "paths": {
+    "/infer/v1/vision/face-parsings": {
+      "post": {
+        "operationId": "createFaceParsing",
+        "x-infer-stability": "experimental",
+        "description": "Local-only 19-class face-region parsing for one Consumer-selected face box.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/FaceParsingCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/FaceParsingForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Indexed PNG label map and stable BiSeNet region evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FaceParsingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "FaceParsingCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.vision.face-parsing@20260813.1"
+        }
+      }
+    },
+    "schemas": {
+      "EncodedFaceLabelMap": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "content_type",
+          "encoding",
+          "data_base64",
+          "sha256",
+          "width",
+          "height"
+        ],
+        "properties": {
+          "content_type": {
+            "const": "image/png"
+          },
+          "encoding": {
+            "const": "indexed_u8_png"
+          },
+          "data_base64": {
+            "type": "string",
+            "contentEncoding": "base64",
+            "maxLength": 22369624
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "FaceParsingForm": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/VisionImageFormBase"
+          },
+          {
+            "type": "object",
+            "required": [
+              "image_orientation",
+              "face_box"
+            ],
+            "properties": {
+              "model": {
+                "const": "vision.parse_face"
+              },
+              "image_orientation": {
+                "const": "display_pixels_orientation_normalized"
+              },
+              "face_box": {
+                "type": "string",
+                "description": "JSON bounding box in orientation-normalized display pixel coordinates"
+              }
+            }
+          }
+        ]
+      },
+      "FaceParsingResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "object",
+          "created_at",
+          "status",
+          "source_revision",
+          "data_classification",
+          "image",
+          "face_box",
+          "label_map",
+          "ontology",
+          "regions",
+          "provenance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "object": {
+            "const": "vision.face_parsing"
+          },
+          "created_at": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "status": {
+            "const": "completed"
+          },
+          "source_revision": {
+            "type": "string"
+          },
+          "data_classification": {
+            "const": "sensitive_biometric"
+          },
+          "image": {
+            "$ref": "#/components/schemas/ImageGeometry"
+          },
+          "face_box": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "label_map": {
+            "$ref": "#/components/schemas/EncodedFaceLabelMap"
+          },
+          "ontology": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "revision",
+              "background_value",
+              "class_count"
+            ],
+            "properties": {
+              "id": {
+                "const": "celebamask_hq_19"
+              },
+              "revision": {
+                "const": "yakhyo_face_parsing_8a4729d_20260813"
+              },
+              "background_value": {
+                "const": 0
+              },
+              "class_count": {
+                "const": 19
+              }
+            }
+          },
+          "regions": {
+            "type": "array",
+            "maxItems": 19,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "class_id",
+                "label",
+                "label_value",
+                "pixel_count",
+                "bounding_box"
+              ],
+              "properties": {
+                "class_id": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "label_value": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 18
+                },
+                "pixel_count": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "bounding_box": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/VisionProvenance"
+          }
+        }
+      },
+      "ImageGeometry": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "width",
+          "height",
+          "orientation"
+        ],
+        "properties": {
+          "width": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "orientation": {
+            "const": "display_pixels_orientation_normalized"
+          }
+        }
+      },
+      "VisionImageFormBase": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": {
+          "^infer\\.": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "image",
+          "source_revision"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "image": {
+            "type": "string",
+            "format": "binary",
+            "description": "JPEG/PNG, 1 byte through 20 MiB; decoded images are bounded to 40 megapixels"
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON object whose values are strings; Runtime forces local_only, offline_required=true, fallback=none"
+          }
+        }
+      },
+      "VisionProvenance": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "job_id",
+          "provider",
+          "deployment",
+          "model_build",
+          "artifact_sha256",
+          "preprocessing_identity",
+          "postprocessing_identity",
+          "runtime",
+          "requested_execution_provider",
+          "actual_execution_provider",
+          "precision"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "model_build": {
+            "type": "string"
+          },
+          "artifact_sha256": {
+            "type": "string"
+          },
+          "preprocessing_identity": {
+            "type": "string"
+          },
+          "postprocessing_identity": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "string"
+          },
+          "requested_execution_provider": {
+            "type": "string"
+          },
+          "actual_execution_provider": {
+            "type": "string"
+          },
+          "execution_provider_fallback_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "precision": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

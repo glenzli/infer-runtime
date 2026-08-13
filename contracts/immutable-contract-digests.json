@@ -17,8 +17,10 @@
     "contracts/capabilities/infer.vision.classification-review/20260811.1/openapi.json": "c191467016d770f86c0e8df132127293543a2edef8d336dea358a8256bc6157b",
     "contracts/capabilities/infer.vision.face-detection/20260811.1/openapi.json": "3f5c9be22302de8c243c3133704282fa21e6d74e12990c0d1f32deb086986d33",
     "contracts/capabilities/infer.vision.face-embedding/20260811.1/openapi.json": "e225a4e06bcadb7274074d3af5aec4d0b96e476f81cac1b4f5e10e33a7d02ccc",
+    "contracts/capabilities/infer.vision.face-parsing/20260813.1/openapi.json": "663e549c77528811a2c78406ef87b34b6d0add5c0702eec042a49bf7c8968b39",
     "contracts/capabilities/infer.vision.image-description/20260811.1/openapi.json": "e655e711e8101ed5f3c11c52fff1eb5fee1ebebb5f51cdd265d0a983d8aa5793",
     "contracts/capabilities/infer.vision.image-embedding/20260811.1/openapi.json": "1f30793c1c7866f1cd4239e35dcdb10842b609f021731882810d4de143df42e9",
+    "contracts/capabilities/infer.vision.subject-segmentation/20260813.1/openapi.json": "4df56eefaa7ced43ef3c823f933e9bea689bee23f60d3279c3d84f75414bdb1d",
     "contracts/capabilities/infer.vision.text-embedding/20260811.1/openapi.json": "b1bc536f7ded5f1397c739c2b1a282d460ff4b59923fb4f6fd3c564a8627be71",
     "contracts/consumer-core/20260813.1/openapi.json": "08dcb1cc800b3eb5a8f63d45e8767404a40e8d36d7be391f5e7dd73c085f5801"
   }

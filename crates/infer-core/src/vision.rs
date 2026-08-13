@@ -16,6 +16,150 @@ pub const VISION_ORIENTATION_INPUT_PIXELS_NO_EXIF_TRANSFORM: &str =
 pub const VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS: &str =
     "display_pixels_orientation_normalized";
 pub const MAX_VISION_TEXT_BYTES: usize = 4 * 1024;
+pub const MAX_SEGMENTATION_PROMPTS: usize = 16;
+pub const MAX_SEGMENTATION_MASK_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_FACE_PARSING_PIXELS: u64 = 16_000_000;
+pub const SEGMENTATION_PROMPT_COORDINATE_SPACE: &str = "normalized_0_1";
+pub const FACE_PARSING_ONTOLOGY_ID: &str = "celebamask_hq_19";
+pub const FACE_PARSING_ONTOLOGY_REVISION: &str = "yakhyo_face_parsing_8a4729d_20260813";
+
+#[derive(Clone)]
+pub struct SubjectSegmentationRequest {
+    pub model: String,
+    pub image: VisionImage,
+    pub source_revision: String,
+    pub image_orientation: String,
+    pub prompt_coordinate_space: String,
+    pub points: Vec<SegmentationPromptPoint>,
+    pub box_prompt: Option<NormalizedBoundingBox>,
+    pub metadata: BTreeMap<String, String>,
+}
+
+impl SubjectSegmentationRequest {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        validate_local_vision_request(
+            &self.model,
+            &self.image,
+            &self.source_revision,
+            &self.metadata,
+            "subject segmentation",
+        )?;
+        if self.image_orientation != VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS {
+            return Err(ContractError::InvalidVision(format!(
+                "subject segmentation requires image_orientation={VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS}"
+            )));
+        }
+        if self.prompt_coordinate_space != SEGMENTATION_PROMPT_COORDINATE_SPACE {
+            return Err(ContractError::InvalidVision(format!(
+                "subject segmentation requires prompt_coordinate_space={SEGMENTATION_PROMPT_COORDINATE_SPACE}"
+            )));
+        }
+        let prompt_slots = self.points.len() + usize::from(self.box_prompt.is_some()) * 2;
+        if prompt_slots == 0 || prompt_slots > MAX_SEGMENTATION_PROMPTS {
+            return Err(ContractError::InvalidVision(format!(
+                "subject segmentation requires between 1 and {MAX_SEGMENTATION_PROMPTS} prompt slots"
+            )));
+        }
+        if self.points.iter().any(|point| {
+            !point.x.is_finite()
+                || !point.y.is_finite()
+                || !(0.0..=1.0).contains(&point.x)
+                || !(0.0..=1.0).contains(&point.y)
+        }) {
+            return Err(ContractError::InvalidVision(
+                "subject segmentation points must use finite normalized coordinates".into(),
+            ));
+        }
+        if self.box_prompt.is_some_and(|bounds| !bounds.is_valid()) {
+            return Err(ContractError::InvalidVision(
+                "subject segmentation box must be a positive normalized rectangle within the image"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn constraints(&self) -> Result<RequestConstraints, ContractError> {
+        RequestConstraints::from_metadata(&self.metadata)
+    }
+}
+
+#[derive(Clone)]
+pub struct FaceParsingRequest {
+    pub model: String,
+    pub image: VisionImage,
+    pub source_revision: String,
+    pub image_orientation: String,
+    /// YuNet detection-space face bounds in the submitted display raster.
+    pub face_box: BoundingBox,
+    pub metadata: BTreeMap<String, String>,
+}
+
+impl FaceParsingRequest {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        validate_local_vision_request(
+            &self.model,
+            &self.image,
+            &self.source_revision,
+            &self.metadata,
+            "face parsing",
+        )?;
+        if self.image_orientation != VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS {
+            return Err(ContractError::InvalidVision(format!(
+                "face parsing requires image_orientation={VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS}"
+            )));
+        }
+        if !self.face_box.is_finite_positive() {
+            return Err(ContractError::InvalidVision(
+                "face parsing requires a finite positive face_box".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn constraints(&self) -> Result<RequestConstraints, ContractError> {
+        RequestConstraints::from_metadata(&self.metadata)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SegmentationPromptLabel {
+    Background,
+    Foreground,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct SegmentationPromptPoint {
+    pub x: f32,
+    pub y: f32,
+    pub label: SegmentationPromptLabel,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct NormalizedBoundingBox {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl NormalizedBoundingBox {
+    fn is_valid(self) -> bool {
+        self.x.is_finite()
+            && self.y.is_finite()
+            && self.width.is_finite()
+            && self.height.is_finite()
+            && self.x >= 0.0
+            && self.y >= 0.0
+            && self.width > 0.0
+            && self.height > 0.0
+            && self.x + self.width <= 1.0
+            && self.y + self.height <= 1.0
+    }
+}
 
 #[derive(Clone)]
 pub struct FaceDetectionRequest {
@@ -263,6 +407,75 @@ pub struct TextEmbeddingResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SubjectSegmentationResponse {
+    pub id: String,
+    pub object: String,
+    pub created_at: u64,
+    pub status: String,
+    pub source_revision: String,
+    pub image: ImageGeometry,
+    pub mask: EncodedSegmentationMask,
+    pub score: f32,
+    pub prompt_count: usize,
+    pub provenance: VisionProvenance,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FaceParsingResponse {
+    pub id: String,
+    pub object: String,
+    pub created_at: u64,
+    pub status: String,
+    pub source_revision: String,
+    pub data_classification: String,
+    pub image: ImageGeometry,
+    pub face_box: BoundingBox,
+    pub label_map: EncodedLabelMap,
+    pub ontology: FaceParsingOntology,
+    pub regions: Vec<FaceParsingRegion>,
+    pub provenance: VisionProvenance,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EncodedSegmentationMask {
+    pub content_type: String,
+    pub encoding: String,
+    pub data_base64: String,
+    pub sha256: String,
+    pub width: u32,
+    pub height: u32,
+    pub foreground_pixels: u64,
+    pub bounding_box: Option<BoundingBox>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct EncodedLabelMap {
+    pub content_type: String,
+    pub encoding: String,
+    pub data_base64: String,
+    pub sha256: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FaceParsingOntology {
+    pub id: String,
+    pub revision: String,
+    pub background_value: u8,
+    pub class_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FaceParsingRegion {
+    pub class_id: String,
+    pub label: String,
+    pub label_value: u8,
+    pub pixel_count: u64,
+    pub bounding_box: Option<BoundingBox>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SemanticEmbeddingVector {
     pub values: Vec<f32>,
     pub dimensions: usize,
@@ -312,6 +525,19 @@ pub struct BoundingBox {
     pub y: f32,
     pub width: f32,
     pub height: f32,
+}
+
+impl BoundingBox {
+    pub fn is_finite_positive(&self) -> bool {
+        self.x.is_finite()
+            && self.y.is_finite()
+            && self.width.is_finite()
+            && self.height.is_finite()
+            && self.x >= 0.0
+            && self.y >= 0.0
+            && self.width > 0.0
+            && self.height > 0.0
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -493,5 +719,78 @@ mod tests {
             ..valid
         };
         assert!(cloud.validate().is_err());
+    }
+
+    #[test]
+    fn subject_segmentation_prompts_are_bounded_normalized_and_local_only() {
+        let valid = SubjectSegmentationRequest {
+            model: "vision.segment_subject".into(),
+            image: VisionImage {
+                content_type: "image/png".into(),
+                bytes: vec![1],
+            },
+            source_revision: "shadow:photo-1/artifact:display-v1".into(),
+            image_orientation: VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS.into(),
+            prompt_coordinate_space: SEGMENTATION_PROMPT_COORDINATE_SPACE.into(),
+            points: vec![SegmentationPromptPoint {
+                x: 0.5,
+                y: 0.5,
+                label: SegmentationPromptLabel::Foreground,
+            }],
+            box_prompt: None,
+            metadata: local_metadata(),
+        };
+        valid.validate().unwrap();
+
+        let outside = SubjectSegmentationRequest {
+            points: vec![SegmentationPromptPoint {
+                x: 1.01,
+                y: 0.5,
+                label: SegmentationPromptLabel::Background,
+            }],
+            ..valid.clone()
+        };
+        assert!(outside.validate().is_err());
+
+        let overflowing_slots = SubjectSegmentationRequest {
+            points: vec![valid.points[0]; MAX_SEGMENTATION_PROMPTS - 1],
+            box_prompt: Some(NormalizedBoundingBox {
+                x: 0.1,
+                y: 0.1,
+                width: 0.8,
+                height: 0.8,
+            }),
+            ..valid
+        };
+        assert!(overflowing_slots.validate().is_err());
+    }
+
+    #[test]
+    fn face_parsing_requires_a_positive_finite_display_pixel_box() {
+        let valid = FaceParsingRequest {
+            model: "vision.parse_face".into(),
+            image: VisionImage {
+                content_type: "image/jpeg".into(),
+                bytes: vec![1],
+            },
+            source_revision: "shadow:photo-2/artifact:display-v1".into(),
+            image_orientation: VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS.into(),
+            face_box: BoundingBox {
+                x: 10.0,
+                y: 20.0,
+                width: 100.0,
+                height: 120.0,
+            },
+            metadata: local_metadata(),
+        };
+        valid.validate().unwrap();
+        let invalid = FaceParsingRequest {
+            face_box: BoundingBox {
+                width: 0.0,
+                ..valid.face_box.clone()
+            },
+            ..valid
+        };
+        assert!(invalid.validate().is_err());
     }
 }
