@@ -1,0 +1,416 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.audio.event-detection",
+    "version": "20260813.2",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.audio.event-detection@20260813.2",
+  "paths": {
+    "/v1/audio/event-detections": {
+      "post": {
+        "operationId": "createAudioEventDetection",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/EventDetectionCapability"
+          }
+        ],
+        "description": "Detect overlapping, time-bounded AudioSet events in file audio. Execution is fixed to local-only, offline, with no fallback. Speech presence is independent model evidence and is never inferred from transcript availability.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/EventDetectionForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Versioned multi-label event detections, coverage, speech evidence, ontology, policy, and model provenance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventDetectionResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "EventDetectionCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.audio.event-detection@20260813.2"
+        }
+      }
+    },
+    "schemas": {
+      "AudioAnalysisCoverage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "input_duration_seconds",
+          "analyzed_start_seconds",
+          "analyzed_end_seconds",
+          "analyzed_seconds",
+          "ratio",
+          "window_count",
+          "window_seconds",
+          "hop_seconds"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "full",
+              "partial",
+              "none"
+            ]
+          },
+          "input_duration_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "analyzed_start_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "analyzed_end_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "analyzed_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "ratio": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "window_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "window_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "hop_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        }
+      },
+      "DetectedSoundEvent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "class_id",
+          "label",
+          "start_seconds",
+          "end_seconds",
+          "score"
+        ],
+        "properties": {
+          "class_id": {
+            "type": "string",
+            "pattern": "^/(m|t)/",
+            "description": "Stable class id from the pinned AudioSet class map, never a model output index"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "start_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "end_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        }
+      },
+      "EventDetectionForm": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": {
+          "^infer\\.": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "file"
+        ],
+        "properties": {
+          "model": {
+            "const": "audio.detect_events"
+          },
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "description": "File audio, at most 25 MiB"
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON object whose values are strings; placement/offline/fallback are fixed to local_only/true/none"
+          }
+        }
+      },
+      "EventDetectionResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "model",
+          "object",
+          "events",
+          "speech_presence",
+          "coverage",
+          "ontology",
+          "policy",
+          "provenance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Runtime Job identity"
+          },
+          "model": {
+            "const": "audio.detect_events"
+          },
+          "object": {
+            "const": "audio.event_detection"
+          },
+          "events": {
+            "type": "array",
+            "maxItems": 10000,
+            "items": {
+              "$ref": "#/components/schemas/DetectedSoundEvent"
+            }
+          },
+          "speech_presence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "max_score"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "present",
+                  "absent",
+                  "unknown"
+                ],
+                "description": "absent requires full coverage and low model evidence; it is never inferred from missing transcript"
+              },
+              "max_score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
+          },
+          "coverage": {
+            "$ref": "#/components/schemas/AudioAnalysisCoverage"
+          },
+          "ontology": {
+            "$ref": "#/components/schemas/SoundEventOntology"
+          },
+          "policy": {
+            "$ref": "#/components/schemas/SoundEventDetectionPolicy"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/SoundEventProvenance"
+          }
+        }
+      },
+      "SoundEventDetectionPolicy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "revision",
+          "score_kind",
+          "event_score_threshold",
+          "smoothing",
+          "max_classes_per_window",
+          "max_events",
+          "speech_class_set_revision",
+          "speech_present_threshold",
+          "speech_absent_threshold",
+          "max_audio_seconds"
+        ],
+        "properties": {
+          "revision": {
+            "type": "string",
+            "minLength": 1
+          },
+          "score_kind": {
+            "const": "raw_sigmoid"
+          },
+          "event_score_threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "smoothing": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "method",
+              "window_frames"
+            ],
+            "properties": {
+              "method": {
+                "type": "string",
+                "minLength": 1
+              },
+              "window_frames": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "max_classes_per_window": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_events": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "speech_class_set_revision": {
+            "type": "string",
+            "minLength": 1
+          },
+          "speech_present_threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "speech_absent_threshold": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "max_audio_seconds": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "SoundEventOntology": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "revision",
+          "class_id_namespace",
+          "class_count",
+          "artifact_sha256",
+          "license_spdx"
+        ],
+        "properties": {
+          "id": {
+            "const": "audioset"
+          },
+          "revision": {
+            "type": "string",
+            "minLength": 1
+          },
+          "class_id_namespace": {
+            "const": "audioset_mid"
+          },
+          "class_count": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "artifact_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "license_spdx": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "SoundEventProvenance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model",
+          "model_archive_sha256",
+          "artifact_set_sha256",
+          "model_license_spdx",
+          "training_data_license_spdx",
+          "runtime",
+          "runtime_version",
+          "decoder",
+          "decoder_version",
+          "preprocessing_identity"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1
+          },
+          "model_archive_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "artifact_set_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "Digest of the exact sorted ArtifactStore file set used for execution"
+          },
+          "model_license_spdx": {
+            "type": "string",
+            "minLength": 1
+          },
+          "training_data_license_spdx": {
+            "type": "string",
+            "minLength": 1
+          },
+          "runtime": {
+            "type": "string",
+            "minLength": 1
+          },
+          "runtime_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "decoder": {
+            "type": "string",
+            "minLength": 1
+          },
+          "decoder_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "preprocessing_identity": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

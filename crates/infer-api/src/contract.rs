@@ -308,7 +308,7 @@ macro_rules! capability_schema_digest {
         "76c7f4ab7d5e6333808aceec558822d9deceb2918bc478e326593d302dcb96e8"
     };
     ("infer.audio.event-detection") => {
-        "c7b6e74840bc92d92d582df58252f01f2e0dfed9178f8f7d4318349bdae42ada"
+        "a7179c88c03a768299835bd84c4c6f8d68e47f3c51a96ed4fe01387cf6fb8613"
     };
     ("infer.audio.speech") => {
         "19d29d6799a6cee1a6d24a63f9a9aab73ab925dd2e79f7181fbfe922f6906c68"
@@ -370,7 +370,7 @@ pub const CAPABILITIES: &[CapabilityEntry] = &[
     ),
     capability!(
         "infer.audio.event-detection",
-        "20260813.1",
+        "20260813.2",
         "stable",
         [route!("POST", "/v1/audio/event-detections", &["unary"]),]
     ),

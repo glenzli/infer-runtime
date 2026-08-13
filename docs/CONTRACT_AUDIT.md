@@ -38,7 +38,7 @@ adapter 留在 `infer-provider::onnx`，类型化视觉 wire 留在独立 API mo
 | C-009 | Catalog schema URL、Job optional provenance、named route 与真实 wire 不一致 | 生成器/Consumer 严格校验会错误拒绝合法响应 | 修正机器 schema，并由 Rust fixture/枚举测试锁定 |
 | C-010 | 文档要求忽略未知响应字段，但部分 response schema closed | additive 响应字段会被生成客户端视为 breaking | response object 开放 additive 字段；request object 继续 strict |
 | C-011 | 本机预发布 daemon 曾以 `20260812.1` 发布较早的 Core/Catalog 草案，最终 source 已包含不同 bytes 与更完整字段 | 同一不可变身份对应两套 wire，Consumer 无法安全校验 digest | 最终合同改用 `20260813.1`；不覆盖、重标或继续支持预发布草案，切换时必须更新 Discovery generation |
-| C-012 | 声音事件的空事件列表、无人声和未完整分析容易被合并成同一“空”语义 | Echo 会把缺失证据误当否定证据 | 独立 `infer.audio.event-detection@20260813.1` 强制返回 events、speech_presence、coverage、ontology、policy、provenance；只有 full coverage + 低于版本化阈值才能声明 absent |
+| C-012 | 声音事件的空事件列表、无人声和未完整分析容易被合并成同一“空”语义 | Echo 会把缺失证据误当否定证据 | 独立 `infer.audio.event-detection@20260813.2` 强制返回 events、speech_presence、coverage、ontology、policy、provenance；只有 full coverage + 低于版本化阈值才能声明 absent |
 
 ## 已有设计覆盖与本轮新增
 

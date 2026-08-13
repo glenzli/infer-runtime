@@ -71,7 +71,7 @@ async fn real_yamnet_http_acceptance_records_echo_job_provenance() {
                 .header(contract::CONSUMER_CORE_HEADER, contract::CORE_CONTRACT)
                 .header(
                     contract::CAPABILITY_CONTRACT_HEADER,
-                    "infer.audio.event-detection@20260813.1",
+                    "infer.audio.event-detection@20260813.2",
                 )
                 .header(
                     header::CONTENT_TYPE,
@@ -93,7 +93,7 @@ async fn real_yamnet_http_acceptance_records_echo_job_provenance() {
     assert!(event["events"].as_array().unwrap().iter().all(|event| {
         event["class_id"]
             .as_str()
-            .is_some_and(|class_id| class_id.starts_with("/m/"))
+            .is_some_and(|class_id| class_id.starts_with("/m/") || class_id.starts_with("/t/"))
             && event["start_seconds"].as_f64().is_some()
             && event["end_seconds"].as_f64().is_some()
             && event["score"].as_f64().is_some()

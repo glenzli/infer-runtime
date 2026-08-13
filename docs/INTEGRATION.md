@@ -240,7 +240,7 @@ curl "$INFER_BASE_URL/v1/audio/speech" \
 Rust Consumer 使用官方 `infer-runtime-client` 的
 `Client::detect_audio_events_file(path, content_type, metadata)`；该方法先通过 Infra Discovery
 选择 Core，再读取 Catalog、校验能力 OpenAPI digest，并只接受
-`infer.audio.event-detection@20260813.1`。不要从 Echo 自行调用 worker、传模型路径或复制
+`infer.audio.event-detection@20260813.2`。不要从 Echo 自行调用 worker、传模型路径或复制
 YAMNet 解析逻辑。
 
 请求 metadata 必须保持 `infer.placement=local_only`、`infer.offline_required=true`、

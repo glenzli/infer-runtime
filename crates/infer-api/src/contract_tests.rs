@@ -394,7 +394,7 @@ async fn audio_event_route_rejects_any_attempt_to_widen_local_offline_execution(
         .oneshot(
             capability(
                 authenticated(Request::builder()),
-                "infer.audio.event-detection@20260813.1",
+                "infer.audio.event-detection@20260813.2",
             )
             .method("POST")
             .uri("/v1/audio/event-detections")

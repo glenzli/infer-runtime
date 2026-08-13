@@ -13,7 +13,7 @@ use crate::{
 };
 
 pub const TRANSCRIPTION_CAPABILITIES: &[&str] = &["infer.audio.transcription@20260811.1"];
-pub const EVENT_DETECTION_CAPABILITIES: &[&str] = &["infer.audio.event-detection@20260813.1"];
+pub const EVENT_DETECTION_CAPABILITIES: &[&str] = &["infer.audio.event-detection@20260813.2"];
 pub const ALIGNMENT_CAPABILITIES: &[&str] = &["infer.audio.alignment@20260811.1"];
 pub const SPEECH_CAPABILITIES: &[&str] = &["infer.audio.speech@20260811.1"];
 
@@ -286,7 +286,7 @@ impl AudioEventDetectionResponse {
             ));
         }
         for event in &self.events {
-            if !event.class_id.starts_with("/m/")
+            if !(event.class_id.starts_with("/m/") || event.class_id.starts_with("/t/"))
                 || event.label.is_empty()
                 || event.start_seconds < self.coverage.analyzed_start_seconds
                 || event.end_seconds <= event.start_seconds
@@ -519,13 +519,13 @@ mod tests {
     #[test]
     fn dated_audio_event_fixtures_are_typed_and_absence_is_fail_closed() {
         let present: AudioEventDetectionResponse = serde_json::from_str(include_str!(
-            "../../../contracts/capabilities/infer.audio.event-detection/20260813.1/fixtures/event-present.json"
+            "../../../contracts/capabilities/infer.audio.event-detection/20260813.2/fixtures/event-present.json"
         ))
         .unwrap();
         present.validate().unwrap();
 
         let mut partial: AudioEventDetectionResponse = serde_json::from_str(include_str!(
-            "../../../contracts/capabilities/infer.audio.event-detection/20260813.1/fixtures/partial-unknown.json"
+            "../../../contracts/capabilities/infer.audio.event-detection/20260813.2/fixtures/partial-unknown.json"
         ))
         .unwrap();
         partial.validate().unwrap();

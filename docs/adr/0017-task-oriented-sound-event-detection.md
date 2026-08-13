@@ -49,7 +49,7 @@ App ACL、Job/Attempt、25 MiB 临时 payload 和 fail-closed placement 边界�
    runtime、ontology 和 policy identity 精确比对，漂移时 Attempt 失败。成功仍使用统一 admission、
    queue、Job/Attempt/provenance；音频只存在于请求与 executor 临时目录，Job/日志不保存 payload。
 8. Consumer Core `infer-runtime.consumer-core@20260813.1` 保持冻结；新增数据面发布为独立、不可变
-   Capability `infer.audio.event-detection@20260813.1`，并通过同日期 generation-scoped Catalog
+   Capability `infer.audio.event-detection@20260813.2`，并通过同日期 generation-scoped Catalog
    增量登记。官方 SDK 只在发现、拉取并校验该精确能力 schema 后发送音频。
 9. worker 请求与响应帧有硬上限；调用 future 取消、deadline 或协议失败会丢弃并终止该次
    persistent worker（包括其 ffmpeg 子进程），下次请求只会使用新进程。stderr 不继承到 daemon，
