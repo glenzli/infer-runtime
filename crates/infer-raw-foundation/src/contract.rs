@@ -5,7 +5,9 @@ use crate::RawFoundationError;
 pub const RAW_FOUNDATION_INTENT: &str = "raw.materialize_foundation";
 pub const RAW_FOUNDATION_ENDPOINT: &str = "/infer/v1/raw/foundations";
 pub const RAW_FOUNDATION_LEASE_ENDPOINT: &str = "/infer/v1/raw/foundations/leases";
-pub const RAW_FOUNDATION_CONTRACT: &str = "infer.raw.foundation@20260811.1";
+/// Public capability identity. Keep this byte-for-byte aligned with the
+/// published Catalog, API capability header, and official Consumer client.
+pub const RAW_FOUNDATION_CONTRACT: &str = "infer.raw-foundation@20260811.1";
 pub const RAW_FOUNDATION_STAGING_SCHEMA: &str = "infer.raw-foundation-staging@20260811.1";
 const SOURCE_PIXEL_CONTRACT_SHA256: &str =
     "e1998069001c14d01251cc3d6e2bc2aa66b807f3f17d246e7ee7270528302f7f";
@@ -245,6 +247,6 @@ mod tests {
     #[test]
     fn endpoint_and_contract_id_are_frozen_independently_of_activation() {
         assert_eq!(RAW_FOUNDATION_ENDPOINT, "/infer/v1/raw/foundations");
-        assert_eq!(RAW_FOUNDATION_CONTRACT, "infer.raw.foundation@20260811.1");
+        assert_eq!(RAW_FOUNDATION_CONTRACT, "infer.raw-foundation@20260811.1");
     }
 }
