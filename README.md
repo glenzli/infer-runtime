@@ -1,5 +1,7 @@
 # infer-runtime
 
+[中文](README.md) · [English](README.en.md)
+
 > A local-first AI inference control plane for heterogeneous intelligence resources.
 
 `infer-runtime` 让应用只表达 Intent、能力下限、推理投入、延迟、位置、隐私和回退约束，由 Runtime 负责选择
