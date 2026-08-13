@@ -2,7 +2,10 @@
 //! reservations, and usage ledger entries.
 
 mod background;
+mod model_usage;
 mod telemetry;
+
+pub use model_usage::{DailyModelUsage, DailyModelUsageModel, ExecutionOrigin};
 
 use std::{
     collections::BTreeMap,
@@ -21,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 6;
+const SCHEMA_VERSION: i64 = 8;
 const RATE_WINDOW_MS: i64 = 60_000;
 
 #[derive(Debug, Error)]
@@ -139,6 +142,10 @@ pub struct UsageLedgerEntry {
     pub app_id: String,
     pub provider: String,
     pub deployment: String,
+    /// Immutable execution family derived by Runtime at settlement time. It
+    /// is absent for rows written before source-aware accounting existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_origin: Option<ExecutionOrigin>,
     pub outcome: String,
     pub amount_usd: f64,
     /// True when the provider did not return usage or this deployment has no
@@ -646,47 +653,7 @@ impl Store {
         }
         let mut connection = self.connection()?;
         let transaction = connection.transaction()?;
-        let reservation = transaction
-            .query_row(
-                "SELECT state FROM reservations WHERE job_id = ?1 AND attempt_number = ?2",
-                params![entry.job_id, entry.attempt_number as i64],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        if reservation.as_deref() == Some("reserved") {
-            transaction.execute(
-                "UPDATE reservations SET state = 'settled', settled_amount_usd = ?3, settled_at_ms = ?4
-                 WHERE job_id = ?1 AND attempt_number = ?2",
-                params![
-                    entry.job_id,
-                    entry.attempt_number as i64,
-                    entry.amount_usd,
-                    now_ms(),
-                ],
-            )?;
-            transaction.execute(
-                "INSERT INTO usage_ledger (
-                    job_id, attempt_number, app_id, provider, deployment, outcome,
-                    amount_usd, estimated, input_tokens, output_tokens, total_tokens,
-                    entry_json, recorded_at_ms
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-                params![
-                    entry.job_id,
-                    entry.attempt_number as i64,
-                    entry.app_id,
-                    entry.provider,
-                    entry.deployment,
-                    entry.outcome,
-                    entry.amount_usd,
-                    entry.estimated as i64,
-                    entry.input_tokens.map(|value| value as i64),
-                    entry.output_tokens.map(|value| value as i64),
-                    entry.total_tokens.map(|value| value as i64),
-                    serde_json::to_string(&entry)?,
-                    now_ms(),
-                ],
-            )?;
-        }
+        settle_in_transaction(&transaction, entry)?;
         transaction.commit()?;
         Ok(())
     }
@@ -779,6 +746,7 @@ impl Store {
                     app_id: app_id.clone(),
                     provider: provider.clone(),
                     deployment: deployment.clone(),
+                    execution_origin: None,
                     outcome: "interrupted".into(),
                     amount_usd: *amount_usd,
                     estimated: true,
@@ -995,6 +963,7 @@ impl Store {
                 number INTEGER NOT NULL,
                 provider TEXT NOT NULL,
                 deployment TEXT NOT NULL,
+                execution_origin TEXT,
                 outcome TEXT NOT NULL,
                 trigger TEXT NOT NULL,
                 error_kind TEXT,
@@ -1031,6 +1000,8 @@ impl Store {
                 output_tokens INTEGER,
                 total_tokens INTEGER,
                 entry_json TEXT NOT NULL,
+                model_id TEXT,
+                usage_day TEXT,
                 recorded_at_ms INTEGER NOT NULL,
                 UNIQUE (job_id, attempt_number)
              );
@@ -1096,11 +1067,36 @@ impl Store {
                 }
             }
         }
+        let usage_ledger_columns = transaction
+            .prepare("PRAGMA table_info(usage_ledger)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        if !usage_ledger_columns
+            .iter()
+            .any(|column| column == "model_id")
+        {
+            transaction.execute_batch("ALTER TABLE usage_ledger ADD COLUMN model_id TEXT")?;
+        }
+        if !usage_ledger_columns
+            .iter()
+            .any(|column| column == "usage_day")
+        {
+            transaction.execute_batch("ALTER TABLE usage_ledger ADD COLUMN usage_day TEXT")?;
+        }
+        if !usage_ledger_columns
+            .iter()
+            .any(|column| column == "execution_origin")
+        {
+            transaction
+                .execute_batch("ALTER TABLE usage_ledger ADD COLUMN execution_origin TEXT")?;
+        }
         transaction.execute_batch(
             "CREATE INDEX IF NOT EXISTS jobs_app_created_id
                  ON jobs(app_id, created_at_ms DESC, id DESC);
              CREATE INDEX IF NOT EXISTS jobs_app_state_priority_created_id
-                 ON jobs(app_id, state, priority, created_at_ms DESC, id DESC);",
+                 ON jobs(app_id, state, priority, created_at_ms DESC, id DESC);
+             CREATE INDEX IF NOT EXISTS usage_ledger_usage_day_model_origin
+                 ON usage_ledger(usage_day, execution_origin, model_id);",
         )?;
         transaction.execute(
             "INSERT OR IGNORE INTO schema_migrations(version) VALUES (?1)",
@@ -1132,6 +1128,8 @@ fn settle_in_transaction(
     transaction: &Transaction<'_>,
     entry: UsageLedgerEntry,
 ) -> Result<(), StoreError> {
+    let recorded_at_ms = now_ms();
+    let model_id = model_id_for_job(transaction, &entry.job_id)?;
     let changed = transaction.execute(
         "UPDATE reservations SET state = 'settled', settled_amount_usd = ?3, settled_at_ms = ?4
          WHERE job_id = ?1 AND attempt_number = ?2 AND state = 'reserved'",
@@ -1139,7 +1137,7 @@ fn settle_in_transaction(
             entry.job_id,
             entry.attempt_number as i64,
             entry.amount_usd,
-            now_ms(),
+            recorded_at_ms,
         ],
     )?;
     // An admission rejection has no reservation and therefore must never
@@ -1150,16 +1148,20 @@ fn settle_in_transaction(
     }
     transaction.execute(
         "INSERT INTO usage_ledger (
-            job_id, attempt_number, app_id, provider, deployment, outcome,
+            job_id, attempt_number, app_id, provider, deployment, execution_origin, outcome,
             amount_usd, estimated, input_tokens, output_tokens, total_tokens,
-            entry_json, recorded_at_ms
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            entry_json, model_id, usage_day, recorded_at_ms
+        ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+            date(?15 / 1000, 'unixepoch', 'localtime'), ?15
+        )",
         params![
             entry.job_id,
             entry.attempt_number as i64,
             entry.app_id,
             entry.provider,
             entry.deployment,
+            entry.execution_origin.map(ExecutionOrigin::as_str),
             entry.outcome,
             entry.amount_usd,
             entry.estimated as i64,
@@ -1167,10 +1169,28 @@ fn settle_in_transaction(
             entry.output_tokens.map(|value| value as i64),
             entry.total_tokens.map(|value| value as i64),
             serde_json::to_string(&entry)?,
-            now_ms(),
+            model_id,
+            recorded_at_ms,
         ],
     )?;
     Ok(())
+}
+
+fn model_id_for_job(
+    transaction: &Transaction<'_>,
+    job_id: &str,
+) -> Result<Option<String>, StoreError> {
+    let snapshot = transaction
+        .query_row(
+            "SELECT snapshot_json FROM jobs WHERE id = ?1",
+            params![job_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    Ok(snapshot
+        .as_deref()
+        .and_then(|value| serde_json::from_str::<JobSnapshot>(value).ok())
+        .and_then(|snapshot| model_usage::public_model_id(&snapshot)))
 }
 
 fn record_audit_event_in_transaction(
@@ -1314,6 +1334,7 @@ mod tests {
                 app_id: "test-app".into(),
                 provider: "cloud".into(),
                 deployment: "deepseek_flash".into(),
+                execution_origin: None,
                 outcome: "succeeded".into(),
                 amount_usd: 0.03,
                 estimated: false,
@@ -1353,6 +1374,7 @@ mod tests {
                 app_id: "test-app".into(),
                 provider: "cloud".into(),
                 deployment: "deepseek_flash".into(),
+                execution_origin: None,
                 outcome: "succeeded".into(),
                 amount_usd: 0.03,
                 estimated: false,
@@ -1596,7 +1618,7 @@ mod tests {
         assert_eq!(
             connection
                 .query_row(
-                    "SELECT COUNT(*) FROM schema_migrations WHERE version = 6",
+                    "SELECT COUNT(*) FROM schema_migrations WHERE version = 8",
                     [],
                     |row| row.get::<_, i64>(0),
                 )
@@ -1835,6 +1857,7 @@ mod tests {
                 app_id: "test-app".into(),
                 provider: "cloud".into(),
                 deployment: "deepseek_flash".into(),
+                execution_origin: None,
                 outcome: "succeeded".into(),
                 amount_usd: 0.0,
                 estimated: true,

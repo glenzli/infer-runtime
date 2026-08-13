@@ -123,7 +123,11 @@ async fn observer_snapshot_is_versioned_bounded_and_redacted() {
             "headline metric {headline_id} must exist in metrics"
         );
     }
-    assert!(snapshot["extensions"].get("infer-runtime").is_some());
+    let daily_usage = &snapshot["extensions"]["infer-runtime"]["usage_daily"];
+    assert_eq!(daily_usage["schema"], "infer-runtime.usage.daily");
+    assert_eq!(daily_usage["schema_version"], "20260813.2");
+    assert_eq!(daily_usage["calendar"], "host_local");
+    assert_eq!(daily_usage["days"], serde_json::json!([]));
 
     let serialized = serde_json::to_string(&snapshot).unwrap();
     for forbidden_key in [
