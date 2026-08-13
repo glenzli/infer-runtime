@@ -125,7 +125,7 @@ async fn observer_snapshot_is_versioned_bounded_and_redacted() {
     }
     let daily_usage = &snapshot["extensions"]["infer-runtime"]["usage_daily"];
     assert_eq!(daily_usage["schema"], "infer-runtime.usage.daily");
-    assert_eq!(daily_usage["schema_version"], "20260813.2");
+    assert_eq!(daily_usage["schema_version"], "20260813.3");
     assert_eq!(daily_usage["calendar"], "host_local");
     assert_eq!(daily_usage["days"], serde_json::json!([]));
 

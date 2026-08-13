@@ -3014,7 +3014,7 @@ mod tests {
         let observer = runtime.observer_snapshot().await.unwrap();
         let usage_daily = &observer.extensions["infer-runtime"]["usage_daily"];
         assert_eq!(usage_daily["schema"], "infer-runtime.usage.daily");
-        assert_eq!(usage_daily["schema_version"], "20260813.2");
+        assert_eq!(usage_daily["schema_version"], "20260813.3");
         assert_eq!(usage_daily["calendar"], "host_local");
         let days = usage_daily["days"].as_array().unwrap();
         assert_eq!(days.len(), 1);

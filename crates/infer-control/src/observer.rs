@@ -363,7 +363,7 @@ impl Runtime {
                 },
                 "usage_daily": {
                     "schema": "infer-runtime.usage.daily",
-                    "schema_version": "20260813.2",
+                    "schema_version": "20260813.3",
                     "calendar": "host_local",
                     "days": daily_model_usage.into_iter().collect::<Vec<_>>()
                 }
