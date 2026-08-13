@@ -37,6 +37,7 @@ fn observer_router() -> axum::Router {
 async fn ordinary_consumer_cannot_read_or_mutate_operator_resources() {
     for (method, path) in [
         ("GET", "/infer/v1/metrics"),
+        ("GET", "/infer/v1/telemetry"),
         ("GET", "/infer/v1/providers"),
         ("GET", "/infer/v1/resources"),
         ("GET", "/infer/v1/budget"),
@@ -155,6 +156,7 @@ async fn observer_snapshot_is_versioned_bounded_and_redacted() {
 async fn observer_credential_is_rejected_from_every_existing_surface_class() {
     for (method, path, body) in [
         ("GET", "/infer/v1/metrics", ""),
+        ("GET", "/infer/v1/telemetry", ""),
         ("GET", "/infer/v1/providers", ""),
         ("GET", "/infer/v1/resources", ""),
         ("GET", "/infer/v1/budget", ""),
