@@ -335,6 +335,10 @@ AudioSet training data 与 ontology 当前分别记录 Apache-2.0、CC-BY-4.0、
 CC-BY-SA-4.0 的 operator declaration；没有归档 license text、摘要和审核日期前，Build 必须保持
 `license.status=declared`，不能标记 verified。
 
+Console 可能由 launchd 等守护进程启动，不能依赖交互 shell 的 `PATH`。本机
+`providers.yamnet-local.args` 因此必须用 `--ffmpeg` 显式传入已审计的 decoder 绝对路径；
+worker 仍会把实际 decoder 版本写入 provenance，不向请求开放任意可执行路径。
+
 worker stdin 上限 64 KiB，stdout 单帧上限 4 MiB，音频仍受 25 MiB upload 与 600 秒 decoded
 上限。取消、deadline、协议失败或超限会终止并重建 worker；stderr 不进入 daemon 日志，固定错误
 不会包含音频、临时路径、转写、请求 body 或 token。
