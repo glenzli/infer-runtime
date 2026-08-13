@@ -82,7 +82,28 @@ Schema: `infer-runtime.status.snapshot`
   ],
   "issues": [],
   "extensions": {
-    "infer-runtime": {}
+    "infer-runtime": {
+      "usage_daily": {
+        "schema": "infer-runtime.usage.daily",
+        "schema_version": "20260813.2",
+        "calendar": "host_local",
+        "days": [
+          {
+            "date": "2026-08-13",
+            "models": [
+              {
+                "id": "qwen3.5:4b",
+                "execution_origin": "other",
+                "input_tokens": 15000,
+                "output_tokens": 17000,
+                "total_tokens": 32000,
+                "cost_usd": 0.0
+              }
+            ]
+          }
+        ]
+      }
+    }
   },
   "links": {
     "console_url": "http://127.0.0.1:8790/"
@@ -119,6 +140,33 @@ never included in Infra Discovery.
 
 The snapshot never exposes Job IDs, payloads, request metadata, raw provider
 errors, credentials, filesystem paths, or the full accounting ledger.
+
+### Daily model usage extension
+
+`extensions.infer-runtime.usage_daily` is an additive, same-user infrastructure
+projection for Infra Sentinel. It is not a billing API and it never carries
+Consumer, Provider, Deployment, Job, request, response, or ledger-entry
+identity.
+
+- `calendar: "host_local"` means that `date` is the Runtime host's local
+  calendar date at settlement time. A day exists only when the current local
+  day has settled ledger entries with a safely publishable model identity.
+- `days` contains zero or one complete, day-to-date aggregate. Sentinel owns
+  historical retention and must upsert `date + models[].id`; it must not add
+  repeated snapshots together.
+- A model row contains only provider-reported input/output/total token sums and
+  the Runtime's settled USD sum. Rows without reported token usage contribute
+  zero tokens but may still contribute cost.
+- `execution_origin` is a closed Runtime-derived identity: `"codex"` only
+  when the selected Provider kind was `codex_app_server` at Attempt settlement;
+  `"other"` for every other configured Provider kind. It is not inferred from
+  a Provider ID or model label. A downstream observer that already receives
+  Codex's authoritative client accounting must exclude only `"codex"` rows.
+- `models[].id` is the effective physical model identity used for execution. If
+  that value is an absolute local path, Runtime publishes the managed Build ID
+  instead. Ledger rows created before `execution_origin` was persisted are
+  omitted from this projection, even if a safe model identity can be recovered:
+  Runtime chooses an undercount over unsafe cross-collector double counting.
 
 ## Error response
 

@@ -71,6 +71,10 @@ impl Runtime {
             Some(store) => store.accounting_summary()?,
             None => infer_store::AccountingSummary::default(),
         };
+        let daily_model_usage = match &self.store {
+            Some(store) => store.current_local_day_model_usage()?,
+            None => None,
+        };
 
         let active_attempts = metrics_snapshot
             .provider_queues
@@ -356,6 +360,12 @@ impl Runtime {
                     "reserved_usd": accounting.reserved_usd,
                     "global_usd_limit": global_usd_limit,
                     "active_reservations": accounting.active_reservations
+                },
+                "usage_daily": {
+                    "schema": "infer-runtime.usage.daily",
+                    "schema_version": "20260813.2",
+                    "calendar": "host_local",
+                    "days": daily_model_usage.into_iter().collect::<Vec<_>>()
                 }
             }),
         );
