@@ -28,6 +28,7 @@ use axum::{
     routing::{get, post},
 };
 use infer_auth::AppCredentials;
+use infer_provider::{ProviderRuntimeReadiness, preflight_provider_runtime};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::{
@@ -69,6 +70,7 @@ struct WebState {
     access: AccessManager,
     config_write_lock: Arc<Mutex<()>>,
     pending_access_restart: Arc<RwLock<BTreeSet<String>>>,
+    provider_readiness: Arc<RwLock<Vec<ProviderRuntimeReadiness>>>,
     access_admin: bool,
     runtime_url: String,
     csrf: String,
@@ -84,6 +86,7 @@ struct DaemonStatus {
     uptime_seconds: Option<u64>,
     config_valid: bool,
     config_message: String,
+    provider_readiness: Vec<ProviderRuntimeReadiness>,
     config_path: String,
     runtime_url: String,
 }
@@ -110,6 +113,10 @@ pub(crate) async fn run(options: WebConsoleOptions) -> anyhow::Result<()> {
     }
 
     let config_file = RuntimeConfigFile::new(options.config.clone());
+    let initial_provider_readiness = config_file
+        .load()
+        .map(|config| preflight_provider_runtime(&config))
+        .unwrap_or_default();
     let access_admin = local_resource_admin(&config_file, &options.api_key);
     let client = OperatorClient::new(options.runtime_url.clone(), options.api_key)?;
     let access = AccessManager::new(config_file.clone());
@@ -122,6 +129,7 @@ pub(crate) async fn run(options: WebConsoleOptions) -> anyhow::Result<()> {
         access,
         config_write_lock: Arc::new(Mutex::new(())),
         pending_access_restart: Arc::new(RwLock::new(BTreeSet::new())),
+        provider_readiness: Arc::new(RwLock::new(initial_provider_readiness)),
         access_admin,
         runtime_url: options.runtime_url,
         csrf: Uuid::new_v4().to_string(),
@@ -270,6 +278,7 @@ async fn save_config(
         .write_validated(&update.source)
         .await
         .map_err(|error| api_failure(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    *state.provider_readiness.write().await = preflight_provider_runtime(&parsed);
     if previous.is_some_and(|previous| {
         serde_json::to_value(previous.apps).ok() != serde_json::to_value(parsed.apps).ok()
     }) {
@@ -417,6 +426,7 @@ async fn status_snapshot(state: &WebState) -> DaemonStatus {
         Ok(()) => (true, "Configuration is valid".to_owned()),
         Err(error) => (false, error.to_string()),
     };
+    let provider_readiness = state.provider_readiness.read().await.clone();
     DaemonStatus {
         reachable,
         ownership,
@@ -424,6 +434,7 @@ async fn status_snapshot(state: &WebState) -> DaemonStatus {
         uptime_seconds,
         config_valid,
         config_message,
+        provider_readiness,
         config_path: state.config_file.path().display().to_string(),
         runtime_url: state.runtime_url.clone(),
     }
@@ -630,6 +641,10 @@ mod tests {
         let client =
             OperatorClient::new("http://127.0.0.1:9".into(), "test-runtime-token".into()).unwrap();
         let (supervisor, _receiver) = DaemonSupervisor::new(None, config.clone());
+        let provider_readiness = config_file
+            .load()
+            .map(|config| preflight_provider_runtime(&config))
+            .unwrap_or_default();
         WebState {
             client,
             supervisor: Arc::new(Mutex::new(supervisor)),
@@ -638,6 +653,7 @@ mod tests {
             config_file,
             config_write_lock: Arc::new(Mutex::new(())),
             pending_access_restart: Arc::new(RwLock::new(BTreeSet::new())),
+            provider_readiness: Arc::new(RwLock::new(provider_readiness)),
             access_admin: true,
             runtime_url: "http://127.0.0.1:9".into(),
             csrf: "test-console-session".into(),
@@ -697,6 +713,9 @@ mod tests {
         assert!(APP_JS.contains("function deploymentMatchesModelFilters"));
         assert!(APP_JS.contains("deployment.ratings"));
         assert!(APP_JS.contains("model-filter-count"));
+        assert!(APP_JS.contains("provider_readiness"));
+        assert!(APP_JS.contains("Provider 待修复"));
+        assert!(APP_JS.contains("searched_paths"));
     }
 
     #[tokio::test]

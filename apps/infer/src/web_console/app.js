@@ -86,6 +86,7 @@ function renderDaemon() {
   const daemon = state.snapshot?.daemon || {};
   const online = Boolean(daemon.reachable);
   const ownership = daemon.ownership || "none";
+  const unavailableDependencies = (daemon.provider_readiness || []).filter(readiness => readiness.status === "unavailable");
   setStatusDot("sidebar-status-dot", online ? "online" : "offline");
   setStatusDot("pulse-core", online ? "online" : "offline");
   document.getElementById("sidebar-runtime-state").textContent = online ? "运行正常" : "服务离线";
@@ -104,7 +105,9 @@ function renderDaemon() {
       ? "inferd 由当前 Web Console 管理。任务、Provider 和资源状态会持续刷新。"
       : "已安全连接到一个外部 inferd；控制台不会停止或重启它。"
     : daemon.config_valid
-      ? "配置已通过校验，可以从这里启动一个由控制台管理的 inferd。"
+      ? unavailableDependencies.length
+        ? `配置有效，但 ${unavailableDependencies.length} 个 Provider 缺少本机运行依赖；inferd 仍可启动，相关路由会保持不可用。`
+        : "配置已通过校验，可以从这里启动一个由控制台管理的 inferd。"
       : "当前配置未通过校验，请先在配置页修正后再启动。";
 
   document.querySelectorAll('[data-action="daemon-start"]').forEach(button => { button.disabled = online || !daemon.config_valid; });
@@ -206,8 +209,9 @@ function renderProviders() {
   target.innerHTML = providers.map(provider => {
     const queue = queues[provider.id] || {};
     const pending = number(queue.pending_interactive) + number(queue.pending_normal) + number(queue.pending_background);
-    const health = provider.circuit_open ? "熔断" : provider.configured ? "可用" : "未配置";
-    const healthClass = provider.circuit_open ? "error" : provider.configured ? "healthy" : "neutral";
+    const unavailable = provider.readiness?.status === "unavailable";
+    const health = unavailable ? "依赖缺失" : provider.circuit_open ? "熔断" : provider.configured ? "可用" : "未配置";
+    const healthClass = unavailable || provider.circuit_open ? "error" : provider.configured ? "healthy" : "neutral";
     const modes = provider.execution_modes?.join(" / ") || "unary";
     return `<div class="stack-row"><div><strong>${escapeHtml(provider.id)}</strong><small>${escapeHtml(provider.kind)} · ${escapeHtml(provider.placement)} · ${escapeHtml(modes)} · ${number(queue.active)} active / ${pending} pending</small></div><span class="status-chip ${healthClass}">${health}</span></div>`;
   }).join("");
@@ -326,7 +330,8 @@ function providerCard(provider, resource, deployments, totalDeployments, filters
   const lifecycleModels = resource?.model_lifecycle || [];
   const lifecycleByDeployment = new Map(lifecycleModels.map(model => [model.deployment, model]));
   const available = resource?.available_deployments?.length || 0;
-  const providerState = provider.circuit_open ? "熔断" : resource?.state || (provider.configured ? "configured" : "unconfigured");
+  const readinessUnavailable = provider.readiness?.status === "unavailable";
+  const providerState = readinessUnavailable ? "unavailable" : provider.circuit_open ? "熔断" : resource?.state || (provider.configured ? "configured" : "unconfigured");
   const rows = deployments.length ? deployments.map(deployment => {
     const lifecycle = lifecycleByDeployment.get(deployment.id);
     const modelIdentity = deployment.model || lifecycle?.model_id || "—";
@@ -337,7 +342,7 @@ function providerCard(provider, resource, deployments, totalDeployments, filters
     const details = [compactModelIdentity(modelIdentity), deployment.model_profile, supply, coverage]
       .filter(Boolean)
       .join(" · ");
-    const state = lifecycle?.state || (provider.circuit_open || !provider.configured ? "unavailable" : "admitted");
+    const state = lifecycle?.state || (readinessUnavailable || provider.circuit_open || !provider.configured ? "unavailable" : "admitted");
     const canLoad = lifecycle && !["ready", "loading"].includes(lifecycle.state);
     const canUnload = lifecycle && ["ready", "draining"].includes(lifecycle.state) && number(lifecycle.active_reservations) === 0;
     const lifecycleDetail = lifecycle
@@ -350,7 +355,8 @@ function providerCard(provider, resource, deployments, totalDeployments, filters
   const catalog = provider.kind === "codex_app_server" ? `<button class="mini-button" data-provider-models="${escapeAttribute(provider.id)}">动态 Inventory</button>` : "";
   const access = provider.access_class && provider.access_class !== "standard" ? ` · ${provider.access_class}` : "";
   const filtered = deployments.length !== totalDeployments ? `${deployments.length}/${totalDeployments} matched` : `${totalDeployments} admitted`;
-  const availability = `${filtered}${lifecycleModels.length ? ` · ${available} available` : ""}`;
+  const dependencySummary = readinessUnavailable ? ` · ${provider.readiness.summary || "本机运行依赖不可用"}` : "";
+  const availability = `${filtered}${lifecycleModels.length ? ` · ${available} available` : ""}${dependencySummary}`;
   const modes = provider.execution_modes?.join(" / ") || "unary";
   const tools = catalog || probe ? `<div class="provider-tools">${catalog}${probe}</div>` : "";
   return `<article class="panel provider-card"><div class="provider-card-header"><div><strong>${escapeHtml(provider.id)}</strong><small>${escapeHtml(provider.kind || "unknown")} · ${escapeHtml(provider.placement || "—")}${escapeHtml(access)} · ${escapeHtml(modes)} · ${escapeHtml(availability)}</small></div><span class="status-chip ${statusClass(providerState)}">${escapeHtml(providerState)}</span>${tools}</div>${rows}</article>`;
@@ -488,9 +494,15 @@ async function loadConfig(force = false) {
 
 function renderConfigValidation() {
   const daemon = state.snapshot?.daemon || {};
+  const unavailable = (daemon.provider_readiness || []).filter(readiness => readiness.status === "unavailable");
   setStatusDot("config-dot", daemon.config_valid ? "online" : "offline");
-  setText("config-state", daemon.config_valid ? "配置有效" : "配置无效");
-  setText("config-message", daemon.config_message || "等待校验结果");
+  setText("config-state", daemon.config_valid ? (unavailable.length ? "配置有效，Provider 待修复" : "配置有效") : "配置无效");
+  const dependencyMessage = unavailable.map(readiness => {
+    const failed = (readiness.checks || []).find(check => check.status === "unavailable");
+    const searched = failed?.searched_paths?.length ? `；已检查 ${failed.searched_paths.join(", ")}` : "";
+    return `${readiness.provider}: ${readiness.summary}${searched}`;
+  }).join("；");
+  setText("config-message", dependencyMessage || daemon.config_message || "等待校验结果");
   if (daemon.config_path) setText("config-path", daemon.config_path);
 }
 

@@ -335,9 +335,20 @@ AudioSet training data 与 ontology 当前分别记录 Apache-2.0、CC-BY-4.0、
 CC-BY-SA-4.0 的 operator declaration；没有归档 license text、摘要和审核日期前，Build 必须保持
 `license.status=declared`，不能标记 verified。
 
-Console 可能由 launchd 等守护进程启动，不能依赖交互 shell 的 `PATH`。本机
-`providers.yamnet-local.args` 因此必须用 `--ffmpeg` 显式传入已审计的 decoder 绝对路径；
-worker 仍会把实际 decoder 版本写入 provenance，不向请求开放任意可执行路径。
+Console 可能由 launchd 等守护进程启动，不能只依赖交互 shell 的 `PATH`。YAMNet Provider
+通过 `providers.yamnet-local.runtime_dependencies.ffmpeg = "ffmpeg"` 声明 decoder；Runtime
+在启动/配置保存时只搜索继承 `PATH` 中的绝对目录，以及 `/opt/homebrew/bin`、
+`/usr/local/bin` 和系统 binary 目录。Decoder 固定为 canonical 绝对 target；Python worker 则
+保留 venv 的绝对入口路径（否则会脱离虚拟环境），同时在 readiness 中记录其 canonical target
+供审计。Operator 仍可配置一个绝对路径以固定部署。解析与 `ffmpeg -version`、
+Python/TensorFlow、exact artifact Build 的
+无音频自检只在 startup/readiness 阶段发生，不在每次请求重新发现。
+
+缺少 command、ffmpeg、TensorFlow 或 admitted artifact 时，daemon 的其他 Provider 仍可启动，
+但该 Provider 会从 Candidate Plan 中 fail closed 排除。Console 的配置页与 Provider 卡片显示
+缺失项、已检查目录和修复提示；普通 Consumer 仍只收到稳定的 no-candidate/unavailable 语义，
+不会看到本机路径或 worker 诊断。worker 仍会把实际 decoder 版本写入 provenance，不向请求
+开放任意可执行路径。
 
 worker stdin 上限 64 KiB，stdout 单帧上限 4 MiB，音频仍受 25 MiB upload 与 600 秒 decoded
 上限。取消、deadline、协议失败或超限会终止并重建 worker；stderr 不进入 daemon 日志，固定错误

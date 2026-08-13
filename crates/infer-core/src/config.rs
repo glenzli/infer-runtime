@@ -545,6 +545,11 @@ pub struct ProviderConfig {
     pub command: Option<String>,
     #[serde(default)]
     pub args: Vec<String>,
+    /// Typed host executables required by this Provider. These are resolved
+    /// once at startup to canonical absolute paths; they are not rediscovered
+    /// for every request.
+    #[serde(default)]
+    pub runtime_dependencies: ProviderRuntimeDependencies,
     /// When true, this provider is absent from routing until its configured
     /// environment variable contains a non-empty credential.
     #[serde(default)]
@@ -562,6 +567,15 @@ pub struct ProviderConfig {
     /// and lifecycle management have a different protocol and failure policy.
     #[serde(default)]
     pub local_inventory: Option<LocalInventoryConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderRuntimeDependencies {
+    /// Optional operator override for the FFmpeg executable. A bare
+    /// `ffmpeg` uses trusted PATH/Homebrew discovery; an explicit path is
+    /// canonicalized and audited as the resolved executable.
+    pub ffmpeg: Option<String>,
 }
 
 string_enum!(ProviderKind {
@@ -1460,6 +1474,23 @@ impl RuntimeConfig {
                 return Err(configuration(format!(
                     "provider {id} concurrency, queue, and aging limits must be positive"
                 )));
+            }
+            if let Some(ffmpeg) = &provider.runtime_dependencies.ffmpeg {
+                if provider.kind != ProviderKind::AudioWorker {
+                    return Err(configuration(format!(
+                        "provider {id} may declare the ffmpeg runtime dependency only for an audio_worker"
+                    )));
+                }
+                if ffmpeg.trim().is_empty() || ffmpeg.contains('\0') {
+                    return Err(configuration(format!(
+                        "provider {id} runtime_dependencies.ffmpeg must name one executable"
+                    )));
+                }
+                if provider.args.iter().any(|argument| argument == "--ffmpeg") {
+                    return Err(configuration(format!(
+                        "provider {id} must declare ffmpeg through runtime_dependencies instead of args"
+                    )));
+                }
             }
             if provider.requires_api_key
                 && provider.api_key_env.as_deref().is_none_or(str::is_empty)
@@ -2480,6 +2511,31 @@ mod tests {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
         RuntimeConfig::load(path).expect("example registry must remain valid");
+    }
+
+    #[test]
+    fn ffmpeg_is_a_typed_audio_worker_dependency() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let mut config = RuntimeConfig::load(&path).unwrap();
+        let yamnet = config.providers.get_mut("yamnet-local").unwrap();
+        assert_eq!(
+            yamnet.runtime_dependencies.ffmpeg.as_deref(),
+            Some("ffmpeg")
+        );
+        yamnet
+            .args
+            .extend(["--ffmpeg".into(), "/tmp/ffmpeg".into()]);
+        assert!(config.validate().is_err());
+
+        let mut config = RuntimeConfig::load(path).unwrap();
+        config
+            .providers
+            .get_mut("ollama-local")
+            .unwrap()
+            .runtime_dependencies
+            .ffmpeg = Some("ffmpeg".into());
+        assert!(config.validate().is_err());
     }
 
     #[test]

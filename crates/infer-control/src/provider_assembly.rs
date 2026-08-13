@@ -13,8 +13,9 @@ use infer_provider::{
     DynAudioStreamExecutor, DynFaceDetectionExecutor, DynFaceEmbeddingExecutor,
     DynImageEmbeddingExecutor, DynImageUnderstandingExecutor, DynOcrExecutor, DynProvider,
     DynRetrievalExecutor, DynTextEmbeddingExecutor, OcrBuildContract, OcrWorkerExecutor,
-    OllamaVisionExecutor, OnnxProviderRuntime, ResponsesProvider, RetrievalBuildContract,
-    RetrievalWorkerExecutor,
+    OllamaVisionExecutor, OnnxProviderRuntime, ProviderRuntimeReadiness, ResponsesProvider,
+    RetrievalBuildContract, RetrievalWorkerExecutor, provider_requires_ffmpeg,
+    resolve_provider_process, verify_yamnet_worker,
 };
 use infer_resource::{DynNativeModelController, NativeControllerMap};
 
@@ -34,6 +35,7 @@ pub(super) struct ProviderAssembly {
     pub ocr_executors: BTreeMap<String, DynOcrExecutor>,
     pub native_controllers: NativeControllerMap,
     pub schedulers: BTreeMap<String, ProviderScheduler>,
+    pub readiness: BTreeMap<String, ProviderRuntimeReadiness>,
 }
 
 impl ProviderAssembly {
@@ -53,7 +55,7 @@ impl ProviderAssembly {
             .then(|| ArtifactStore::from_config(&config.artifacts))
             .transpose()?;
         let mut assembly = Self::empty();
-        for (id, provider) in &config.providers {
+        'providers: for (id, provider) in &config.providers {
             assembly.schedulers.insert(
                 id.clone(),
                 ProviderScheduler::new(
@@ -62,6 +64,14 @@ impl ProviderAssembly {
                     Duration::from_millis(provider.priority_aging_ms),
                 ),
             );
+            let process =
+                resolve_provider_process(id, provider, provider_requires_ffmpeg(config, id));
+            assembly
+                .readiness
+                .insert(id.clone(), process.readiness.clone());
+            if !process.readiness.is_ready() {
+                continue;
+            }
             match provider.kind {
                 ProviderKind::Responses => {
                     let api_key = provider
@@ -101,8 +111,8 @@ impl ProviderAssembly {
                         .collect();
                     let adapter = CodexAppServerProvider::new(
                         id,
-                        provider.command.clone().expect("validated command"),
-                        provider.args.clone(),
+                        process.command.clone().expect("resolved command"),
+                        process.args.clone(),
                         admitted_models,
                     );
                     assembly
@@ -124,20 +134,57 @@ impl ProviderAssembly {
                             continue;
                         };
                         debug_assert_eq!(worker.adapter, LocalWorkerAdapterKind::YamnetAudioEvents);
-                        let resolved = store.resolve_local_worker_build_identity(
+                        let resolved = match store.resolve_local_worker_build_identity(
                             &deployment.build,
                             &worker.adapter.to_string(),
                             &worker.artifact_set_sha256,
-                        )?;
+                        ) {
+                            Ok(resolved) => resolved,
+                            Err(_) => {
+                                assembly.readiness.get_mut(id).expect("readiness exists").mark_unavailable(
+                                    "artifact_store",
+                                    "admitted audio worker artifact is unavailable or failed integrity verification",
+                                );
+                                continue 'providers;
+                            }
+                        };
                         admitted_model_paths.insert(
                             build.model_id.clone(),
                             resolved.runtime_root.to_string_lossy().into_owned(),
                         );
                     }
+                    if provider_requires_ffmpeg(config, id) {
+                        for model_path in admitted_model_paths.values() {
+                            match verify_yamnet_worker(
+                                process.command.as_deref().expect("resolved command"),
+                                &process.args,
+                                model_path,
+                            ) {
+                                Ok(check) => assembly
+                                    .readiness
+                                    .get_mut(id)
+                                    .expect("readiness exists")
+                                    .checks
+                                    .push(check),
+                                Err(check) => {
+                                    let readiness =
+                                        assembly.readiness.get_mut(id).expect("readiness exists");
+                                    readiness.status =
+                                        infer_provider::ProviderReadinessStatus::Unavailable;
+                                    readiness.summary = check
+                                        .message
+                                        .clone()
+                                        .unwrap_or_else(|| "YAMNet worker is unavailable".into());
+                                    readiness.checks.push(*check);
+                                    continue 'providers;
+                                }
+                            }
+                        }
+                    }
                     let adapter = Arc::new(AudioWorkerExecutor::with_admitted_model_paths(
                         id,
-                        provider.command.clone().expect("validated command"),
-                        provider.args.clone(),
+                        process.command.clone().expect("resolved command"),
+                        process.args.clone(),
                         admitted_model_paths,
                     ));
                     assembly
@@ -202,8 +249,8 @@ impl ProviderAssembly {
                     }
                     let adapter = RetrievalWorkerExecutor::new(
                         id,
-                        provider.command.clone().expect("validated command"),
-                        provider.args.clone(),
+                        process.command.clone().expect("resolved command"),
+                        process.args.clone(),
                         builds,
                     );
                     assembly
@@ -269,8 +316,8 @@ impl ProviderAssembly {
                     }
                     let adapter = OcrWorkerExecutor::new(
                         id,
-                        provider.command.clone().expect("validated command"),
-                        provider.args.clone(),
+                        process.command.clone().expect("resolved command"),
+                        process.args.clone(),
                         builds,
                     );
                     assembly.ocr_executors.insert(id.clone(), Arc::new(adapter));
@@ -338,6 +385,7 @@ impl ProviderAssembly {
             ocr_executors: BTreeMap::new(),
             native_controllers: BTreeMap::new(),
             schedulers: BTreeMap::new(),
+            readiness: BTreeMap::new(),
         }
     }
 }

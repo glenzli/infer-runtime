@@ -1168,6 +1168,7 @@ dependencies = [
  "infer-artifact",
  "infer-auth",
  "infer-core",
+ "infer-provider",
  "ratatui",
  "reqwest",
  "serde",
