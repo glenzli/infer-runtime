@@ -9,13 +9,14 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use infer_artifact::ArtifactStore;
 use infer_core::{LocalInventoryKind, LocalWorkerAdapterKind, ProviderKind, RuntimeConfig};
 use infer_provider::{
-    AudioWorkerExecutor, CodexAppServerProvider, DynAudioDuplexExecutor, DynAudioExecutor,
-    DynAudioStreamExecutor, DynFaceDetectionExecutor, DynFaceEmbeddingExecutor,
-    DynImageEmbeddingExecutor, DynImageUnderstandingExecutor, DynOcrExecutor, DynProvider,
-    DynRetrievalExecutor, DynTextEmbeddingExecutor, OcrBuildContract, OcrWorkerExecutor,
-    OllamaVisionExecutor, OnnxProviderRuntime, ProviderRuntimeReadiness, ResponsesProvider,
-    RetrievalBuildContract, RetrievalWorkerExecutor, provider_requires_ffmpeg,
-    resolve_provider_process, verify_yamnet_worker,
+    AudioWorkerExecutor, CodexAppServerProvider, CoremlSamExecutor, DynAudioDuplexExecutor,
+    DynAudioExecutor, DynAudioStreamExecutor, DynFaceDetectionExecutor, DynFaceEmbeddingExecutor,
+    DynFaceParsingExecutor, DynImageEmbeddingExecutor, DynImageUnderstandingExecutor,
+    DynOcrExecutor, DynProvider, DynRetrievalExecutor, DynSubjectSegmentationExecutor,
+    DynTextEmbeddingExecutor, OcrBuildContract, OcrWorkerExecutor, OllamaVisionExecutor,
+    OnnxProviderRuntime, ProviderRuntimeReadiness, ResponsesProvider, RetrievalBuildContract,
+    RetrievalWorkerExecutor, SamBuildContract, provider_requires_ffmpeg, resolve_provider_process,
+    verify_coreml_sam_worker, verify_yamnet_worker,
 };
 use infer_resource::{DynNativeModelController, NativeControllerMap};
 
@@ -28,6 +29,8 @@ pub(super) struct ProviderAssembly {
     pub audio_duplex_executors: BTreeMap<String, DynAudioDuplexExecutor>,
     pub face_detection_executors: BTreeMap<String, DynFaceDetectionExecutor>,
     pub face_embedding_executors: BTreeMap<String, DynFaceEmbeddingExecutor>,
+    pub face_parsing_executors: BTreeMap<String, DynFaceParsingExecutor>,
+    pub subject_segmentation_executors: BTreeMap<String, DynSubjectSegmentationExecutor>,
     pub image_embedding_executors: BTreeMap<String, DynImageEmbeddingExecutor>,
     pub text_embedding_executors: BTreeMap<String, DynTextEmbeddingExecutor>,
     pub image_understanding_executors: BTreeMap<String, DynImageUnderstandingExecutor>,
@@ -50,6 +53,7 @@ impl ProviderAssembly {
                         | ProviderKind::AudioWorker
                         | ProviderKind::RetrievalWorker
                         | ProviderKind::OcrWorker
+                        | ProviderKind::CoremlWorker
                 )
             })
             .then(|| ArtifactStore::from_config(&config.artifacts))
@@ -322,6 +326,112 @@ impl ProviderAssembly {
                     );
                     assembly.ocr_executors.insert(id.clone(), Arc::new(adapter));
                 }
+                ProviderKind::CoremlWorker => {
+                    let store = artifact_store
+                        .as_ref()
+                        .expect("CoreML worker requires an artifact store");
+                    let mut worker_args = process.args.clone();
+                    worker_args.push("--compiled-cache-root".into());
+                    worker_args.push(
+                        config
+                            .runtimes
+                            .coreml_sam
+                            .compiled_cache_root
+                            .clone()
+                            .expect("validated CoreML SAM cache root"),
+                    );
+                    worker_args.push("--compute-units".into());
+                    worker_args.push(config.runtimes.coreml_sam.compute_units.as_str().into());
+                    let mut builds = BTreeMap::new();
+                    for deployment in config
+                        .deployments
+                        .values()
+                        .filter(|deployment| deployment.provider == *id)
+                    {
+                        let build = &config.model_builds[&deployment.build];
+                        let worker = build.local_worker.as_ref().expect("validated worker Build");
+                        debug_assert_eq!(worker.adapter, LocalWorkerAdapterKind::Sam21Coreml);
+                        let resolved = match store.resolve_local_worker_build_identity(
+                            &deployment.build,
+                            &worker.adapter.to_string(),
+                            &worker.artifact_set_sha256,
+                        ) {
+                            Ok(resolved) => resolved,
+                            Err(_) => {
+                                assembly
+                                    .readiness
+                                    .get_mut(id)
+                                    .expect("readiness exists")
+                                    .mark_unavailable(
+                                        "artifact_store",
+                                        "admitted SAM artifact is unavailable or failed integrity verification",
+                                    );
+                                continue 'providers;
+                            }
+                        };
+                        match verify_coreml_sam_worker(
+                            process.command.as_deref().expect("resolved command"),
+                            &worker_args,
+                            &resolved.runtime_root.to_string_lossy(),
+                            &worker.artifact_set_sha256,
+                        ) {
+                            Ok(check) => assembly
+                                .readiness
+                                .get_mut(id)
+                                .expect("readiness exists")
+                                .checks
+                                .push(check),
+                            Err(check) => {
+                                let readiness =
+                                    assembly.readiness.get_mut(id).expect("readiness exists");
+                                readiness.status =
+                                    infer_provider::ProviderReadinessStatus::Unavailable;
+                                readiness.summary = check
+                                    .message
+                                    .clone()
+                                    .unwrap_or_else(|| "SAM worker is unavailable".into());
+                                readiness.checks.push(*check);
+                                continue 'providers;
+                            }
+                        }
+                        builds.insert(
+                            build.model_id.clone(),
+                            SamBuildContract {
+                                model_path: resolved.runtime_root.to_string_lossy().into_owned(),
+                                model_build: deployment.build.clone(),
+                                artifact_sha256: build
+                                    .provenance
+                                    .artifact_sha256
+                                    .clone()
+                                    .expect("validated aggregate digest"),
+                                preprocessing_identity: worker
+                                    .preprocessing_identity
+                                    .clone()
+                                    .expect("validated preprocessing"),
+                                postprocessing_identity: worker.postprocessing_identity.clone(),
+                                runtime: worker.runtime.clone(),
+                                precision: worker.precision.clone(),
+                                requested_execution_provider: worker
+                                    .requested_execution_provider
+                                    .clone()
+                                    .expect("validated requested EP"),
+                                actual_execution_provider: worker
+                                    .actual_execution_provider
+                                    .clone()
+                                    .expect("validated actual EP"),
+                            },
+                        );
+                    }
+                    let adapter = CoremlSamExecutor::new(
+                        id,
+                        process.command.clone().expect("resolved command"),
+                        worker_args,
+                        builds,
+                    );
+                    assembly
+                        .subject_segmentation_executors
+                        .insert(id.clone(), Arc::new(adapter));
+                }
                 ProviderKind::Onnx => {
                     let builds = config
                         .deployments
@@ -351,6 +461,9 @@ impl ProviderAssembly {
                     assembly
                         .face_embedding_executors
                         .insert(id.clone(), Arc::clone(&adapter) as DynFaceEmbeddingExecutor);
+                    assembly
+                        .face_parsing_executors
+                        .insert(id.clone(), Arc::clone(&adapter) as DynFaceParsingExecutor);
                     assembly.image_embedding_executors.insert(
                         id.clone(),
                         Arc::clone(&adapter) as DynImageEmbeddingExecutor,
@@ -378,6 +491,8 @@ impl ProviderAssembly {
             audio_duplex_executors: BTreeMap::new(),
             face_detection_executors: BTreeMap::new(),
             face_embedding_executors: BTreeMap::new(),
+            face_parsing_executors: BTreeMap::new(),
+            subject_segmentation_executors: BTreeMap::new(),
             image_embedding_executors: BTreeMap::new(),
             text_embedding_executors: BTreeMap::new(),
             image_understanding_executors: BTreeMap::new(),

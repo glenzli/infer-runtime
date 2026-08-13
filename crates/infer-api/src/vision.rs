@@ -9,11 +9,96 @@ use axum::{
     http::{HeaderMap, Response, StatusCode},
 };
 use infer_core::{
-    FaceDetectionRequest, FaceEmbeddingRequest, FivePointLandmarks, ImageEmbeddingRequest,
-    MAX_VISION_IMAGE_BYTES, TextEmbeddingRequest, VisionImage,
+    BoundingBox, FaceDetectionRequest, FaceEmbeddingRequest, FaceParsingRequest,
+    FivePointLandmarks, ImageEmbeddingRequest, MAX_VISION_IMAGE_BYTES, NormalizedBoundingBox,
+    SegmentationPromptPoint, SubjectSegmentationRequest, TextEmbeddingRequest, VisionImage,
 };
 
 use crate::{ApiError, ApiState, authenticate, response, strict_json};
+
+pub(super) async fn create_subject_segmentation(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    multipart: Multipart,
+) -> Result<Response<axum::body::Body>, ApiError> {
+    let app_id = authenticate(&state, &headers)?;
+    let mut form = VisionMultipart::parse(
+        multipart,
+        &[
+            "model",
+            "source_revision",
+            "image_orientation",
+            "prompt_coordinate_space",
+            "points",
+            "box_prompt",
+        ],
+    )
+    .await?;
+    let points =
+        serde_json::from_str::<Vec<SegmentationPromptPoint>>(&form.required_text("points")?)
+            .map_err(|_| ApiError::bad_request("invalid points JSON"))?;
+    let box_prompt = form
+        .optional_text("box_prompt")
+        .map(|value| {
+            serde_json::from_str::<NormalizedBoundingBox>(value)
+                .map_err(|_| ApiError::bad_request("invalid box_prompt JSON"))
+        })
+        .transpose()?;
+    let request = SubjectSegmentationRequest {
+        model: form.required_text("model")?,
+        image: form
+            .image
+            .take()
+            .ok_or_else(|| ApiError::bad_request("missing image file"))?,
+        source_revision: form.required_text("source_revision")?,
+        image_orientation: form.required_text("image_orientation")?,
+        prompt_coordinate_space: form.required_text("prompt_coordinate_space")?,
+        points,
+        box_prompt,
+        metadata: fail_closed_metadata(form.metadata, "subject segmentation")?,
+    };
+    let result = state
+        .runtime
+        .execute_subject_segmentation(&app_id, request)
+        .await?;
+    response(
+        StatusCode::OK,
+        "application/json",
+        serde_json::to_vec(&result).expect("subject segmentation response is serializable"),
+    )
+}
+
+pub(super) async fn create_face_parsing(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    multipart: Multipart,
+) -> Result<Response<axum::body::Body>, ApiError> {
+    let app_id = authenticate(&state, &headers)?;
+    let mut form = VisionMultipart::parse(
+        multipart,
+        &["model", "source_revision", "image_orientation", "face_box"],
+    )
+    .await?;
+    let face_box = serde_json::from_str::<BoundingBox>(&form.required_text("face_box")?)
+        .map_err(|_| ApiError::bad_request("invalid face_box JSON"))?;
+    let request = FaceParsingRequest {
+        model: form.required_text("model")?,
+        image: form
+            .image
+            .take()
+            .ok_or_else(|| ApiError::bad_request("missing image file"))?,
+        source_revision: form.required_text("source_revision")?,
+        image_orientation: form.required_text("image_orientation")?,
+        face_box,
+        metadata: fail_closed_metadata(form.metadata, "face parsing")?,
+    };
+    let result = state.runtime.execute_face_parsing(&app_id, request).await?;
+    response(
+        StatusCode::OK,
+        "application/json",
+        serde_json::to_vec(&result).expect("face parsing response is serializable"),
+    )
+}
 
 pub(super) async fn create_face_detection(
     State(state): State<ApiState>,
@@ -237,6 +322,10 @@ impl VisionMultipart {
             .filter(|value| !value.trim().is_empty())
             .cloned()
             .ok_or_else(|| ApiError::bad_request(format!("missing multipart field `{name}`")))
+    }
+
+    fn optional_text(&self, name: &'static str) -> Option<&str> {
+        self.text.get(name).map(String::as_str)
     }
 }
 

@@ -96,6 +96,8 @@ pub struct ArtifactStoreConfig {
 pub struct NativeRuntimesConfig {
     #[serde(default)]
     pub onnx: OnnxRuntimeConfig,
+    #[serde(default)]
+    pub coreml_sam: CoremlSamRuntimeConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, serde::Serialize)]
@@ -111,6 +113,16 @@ pub struct OnnxRuntimeConfig {
     /// is explicit. Actual routing is always disclosed in result provenance.
     #[serde(default)]
     pub allow_cpu_fallback: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CoremlSamRuntimeConfig {
+    /// Host-local, rebuildable Core ML compilation cache. It is deliberately
+    /// separate from the immutable content-addressed source artifact store.
+    pub compiled_cache_root: Option<String>,
+    #[serde(default)]
+    pub compute_units: CoremlSamComputeUnits,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
@@ -584,6 +596,7 @@ string_enum!(ProviderKind {
     AudioWorker => "audio_worker",
     RetrievalWorker => "retrieval_worker",
     OcrWorker => "ocr_worker",
+    CoremlWorker => "coreml_worker",
     Onnx => "onnx",
     RawFoundation => "raw_foundation"
 });
@@ -596,6 +609,7 @@ impl std::fmt::Display for ProviderKind {
             Self::AudioWorker => "audio_worker",
             Self::RetrievalWorker => "retrieval_worker",
             Self::OcrWorker => "ocr_worker",
+            Self::CoremlWorker => "coreml_worker",
             Self::Onnx => "onnx",
             Self::RawFoundation => "raw_foundation",
         })
@@ -905,7 +919,8 @@ string_enum!(LocalWorkerAdapterKind {
     Qwen3Embedding => "qwen3_embedding",
     Qwen3Reranker => "qwen3_reranker",
     PpOcrv6 => "pp_ocrv6",
-    YamnetAudioEvents => "yamnet_audio_events"
+    YamnetAudioEvents => "yamnet_audio_events",
+    Sam21Coreml => "sam21_coreml"
 });
 
 impl std::fmt::Display for LocalWorkerAdapterKind {
@@ -915,6 +930,7 @@ impl std::fmt::Display for LocalWorkerAdapterKind {
             Self::Qwen3Reranker => "qwen3_reranker",
             Self::PpOcrv6 => "pp_ocrv6",
             Self::YamnetAudioEvents => "yamnet_audio_events",
+            Self::Sam21Coreml => "sam21_coreml",
         })
     }
 }
@@ -972,10 +988,34 @@ pub struct EmbeddingSpaceConfig {
 string_enum!(OnnxAdapterKind {
     YunetFaceDetection => "yunet_face_detection",
     SfaceEmbedding => "sface_embedding",
+    BisenetFaceParsing => "bisenet_face_parsing",
     SiglipImageEmbedding => "siglip_image_embedding",
     SiglipTextEmbedding => "siglip_text_embedding"
 });
 string_enum!(OnnxExecutionProvider { Coreml => "coreml", Cpu => "cpu" });
+string_enum!(CoremlSamComputeUnits {
+    All => "coreml_all",
+    CpuAndGpu => "coreml_cpu_and_gpu",
+    CpuOnly => "coreml_cpu_only",
+    CpuAndNe => "coreml_cpu_and_ne"
+});
+
+impl Default for CoremlSamComputeUnits {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+impl CoremlSamComputeUnits {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "coreml_all",
+            Self::CpuAndGpu => "coreml_cpu_and_gpu",
+            Self::CpuOnly => "coreml_cpu_only",
+            Self::CpuAndNe => "coreml_cpu_and_ne",
+        }
+    }
+}
 
 /// A runnable model build attached to one provider endpoint.
 #[derive(Debug, Clone, Deserialize, serde::Serialize)]
@@ -1401,6 +1441,7 @@ impl RuntimeConfig {
                 ProviderKind::AudioWorker
                 | ProviderKind::RetrievalWorker
                 | ProviderKind::OcrWorker
+                | ProviderKind::CoremlWorker
                     if provider.command.as_deref().is_none_or(str::is_empty) =>
                 {
                     return Err(configuration(format!(
@@ -1422,6 +1463,7 @@ impl RuntimeConfig {
                 ProviderKind::AudioWorker => ProviderProtocol::AudioWorker,
                 ProviderKind::RetrievalWorker => ProviderProtocol::RetrievalWorker,
                 ProviderKind::OcrWorker => ProviderProtocol::OcrWorker,
+                ProviderKind::CoremlWorker => ProviderProtocol::CoremlWorker,
                 ProviderKind::Onnx => ProviderProtocol::Onnx,
                 // The specialized RawFoundationControl owns graph execution;
                 // this provider contributes only scheduling/admission and
@@ -1451,6 +1493,7 @@ impl RuntimeConfig {
                 ProviderProtocol::AudioWorker
                     | ProviderProtocol::RetrievalWorker
                     | ProviderProtocol::OcrWorker
+                    | ProviderProtocol::CoremlWorker
                     | ProviderProtocol::Onnx
             ) && !provider.capability_profile.capabilities.is_empty()
             {
@@ -1583,6 +1626,41 @@ impl RuntimeConfig {
                 ));
             }
         }
+        let has_coreml_sam = self
+            .providers
+            .values()
+            .any(|provider| provider.kind == ProviderKind::CoremlWorker);
+        if has_coreml_sam
+            && self
+                .runtimes
+                .coreml_sam
+                .compiled_cache_root
+                .as_deref()
+                .is_none_or(|path| path.trim().is_empty())
+        {
+            return Err(configuration(
+                "CoreML SAM providers require runtimes.coreml_sam.compiled_cache_root",
+            ));
+        }
+        if has_coreml_sam {
+            let expected = self.runtimes.coreml_sam.compute_units.as_str();
+            for (id, build) in &self.model_builds {
+                let Some(worker) = build
+                    .local_worker
+                    .as_ref()
+                    .filter(|worker| worker.adapter == LocalWorkerAdapterKind::Sam21Coreml)
+                else {
+                    continue;
+                };
+                if worker.requested_execution_provider.as_deref() != Some(expected)
+                    || worker.actual_execution_provider.as_deref() != Some(expected)
+                {
+                    return Err(configuration(format!(
+                        "CoreML SAM build {id} execution provider must match runtimes.coreml_sam.compute_units={expected}"
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1599,6 +1677,8 @@ impl RuntimeConfig {
                         | "audio.voice_clone"
                         | "vision.face_detection"
                         | "vision.face_embedding"
+                        | "vision.subject_segmentation"
+                        | "vision.face_parsing"
                         | "vision.image_embedding"
                         | "vision.text_embedding"
                         | "vision.image_description"
@@ -1751,6 +1831,7 @@ impl RuntimeConfig {
                 let valid_preprocessing = match onnx.adapter {
                     OnnxAdapterKind::YunetFaceDetection
                     | OnnxAdapterKind::SfaceEmbedding
+                    | OnnxAdapterKind::BisenetFaceParsing
                     | OnnxAdapterKind::SiglipImageEmbedding => {
                         onnx.preprocessing
                             .as_ref()
@@ -1792,7 +1873,9 @@ impl RuntimeConfig {
                                 && space.distance_metric == "cosine"
                         })
                     }
-                    OnnxAdapterKind::YunetFaceDetection => onnx.embedding_space.is_none(),
+                    OnnxAdapterKind::YunetFaceDetection | OnnxAdapterKind::BisenetFaceParsing => {
+                        onnx.embedding_space.is_none()
+                    }
                 };
                 let valid_auxiliary_artifacts =
                     onnx.auxiliary_artifacts.iter().all(|(name, artifact)| {
@@ -1887,7 +1970,9 @@ impl RuntimeConfig {
             }
             let worker_provider = matches!(
                 provider.kind,
-                ProviderKind::RetrievalWorker | ProviderKind::OcrWorker
+                ProviderKind::RetrievalWorker
+                    | ProviderKind::OcrWorker
+                    | ProviderKind::CoremlWorker
             ) || (provider.kind == ProviderKind::AudioWorker
                 && build.local_worker.is_some());
             if worker_provider && build.local_worker.is_none() {
@@ -1913,6 +1998,10 @@ impl RuntimeConfig {
                         | (
                             ProviderKind::AudioWorker,
                             LocalWorkerAdapterKind::YamnetAudioEvents
+                        )
+                        | (
+                            ProviderKind::CoremlWorker,
+                            LocalWorkerAdapterKind::Sam21Coreml
                         )
                 );
                 if !adapter_matches {
@@ -2304,6 +2393,7 @@ fn provider_serves_data_plane(provider: &ProviderConfig, data_plane: &str) -> bo
         ProviderKind::AudioWorker => data_plane.starts_with("audio."),
         ProviderKind::RetrievalWorker => matches!(data_plane, "text.embedding" | "text.rerank"),
         ProviderKind::OcrWorker => data_plane == "document.ocr",
+        ProviderKind::CoremlWorker => data_plane == "vision.subject_segmentation",
         ProviderKind::Onnx => data_plane.starts_with("vision."),
         // Raw foundation execution is a typed ONNX graph contract with a
         // dedicated controller and API, not a generic tensor surface.
@@ -2427,6 +2517,28 @@ fn validate_build_supply_chain(id: &str, build: &ModelBuildConfig) -> Result<(),
                     )));
                 }
             }
+            LocalWorkerAdapterKind::Sam21Coreml => {
+                if worker
+                    .preprocessing_identity
+                    .as_deref()
+                    .is_none_or(str::is_empty)
+                    || worker
+                        .requested_execution_provider
+                        .as_deref()
+                        .is_none_or(str::is_empty)
+                    || worker
+                        .actual_execution_provider
+                        .as_deref()
+                        .is_none_or(str::is_empty)
+                    || worker.embedding_space.is_some()
+                    || worker.tokenizer_identity.is_some()
+                    || worker.instruction_revision.is_some()
+                {
+                    return Err(configuration(format!(
+                        "SAM 2.1 CoreML build {id} needs preprocessing and execution-provider identity"
+                    )));
+                }
+            }
         }
     }
     if matches!(
@@ -2514,6 +2626,82 @@ mod tests {
     }
 
     #[test]
+    fn segmentation_builds_keep_typed_local_execution_boundaries() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let config = RuntimeConfig::load(path).unwrap();
+        assert_eq!(
+            config.providers["coreml-sam-local"].kind,
+            super::ProviderKind::CoremlWorker
+        );
+        assert_eq!(
+            config.model_builds["sam21_small_coreml_fp16"]
+                .local_worker
+                .as_ref()
+                .unwrap()
+                .adapter,
+            super::LocalWorkerAdapterKind::Sam21Coreml
+        );
+        assert_eq!(
+            config.model_builds["bisenet_resnet18_face_parsing_onnx_cpu_v1"]
+                .onnx
+                .as_ref()
+                .unwrap()
+                .adapter,
+            super::OnnxAdapterKind::BisenetFaceParsing
+        );
+        assert_eq!(
+            config.model_builds["bisenet_resnet18_face_parsing_onnx_cpu_v1"]
+                .onnx
+                .as_ref()
+                .unwrap()
+                .allowed_execution_providers,
+            vec![super::OnnxExecutionProvider::Cpu]
+        );
+        let app = &config.apps["example-shadow-vision-consumer"];
+        assert!(!app.resource_admin);
+        assert_eq!(
+            app.allowed_intents,
+            Some(
+                ["vision.segment_subject", "vision.parse_face"]
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect()
+            )
+        );
+        assert_eq!(
+            app.request_overrides.placement.as_slice(),
+            &[crate::PlacementScope::LocalOnly]
+        );
+        assert!(app.request_overrides.offline_required);
+        assert_eq!(
+            app.request_overrides.fallback.as_slice(),
+            &[crate::Fallback::None]
+        );
+    }
+
+    #[test]
+    fn checked_in_onnx_builds_are_cpu_only_until_coreml_admission_is_benchmarked() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let config = RuntimeConfig::load(path).unwrap();
+        assert_eq!(
+            config.runtimes.onnx.preferred_execution_providers,
+            vec![super::OnnxExecutionProvider::Cpu]
+        );
+        assert!(!config.runtimes.onnx.allow_cpu_fallback);
+        for build in config.model_builds.values() {
+            let Some(onnx) = build.onnx.as_ref() else {
+                continue;
+            };
+            assert_eq!(
+                onnx.allowed_execution_providers,
+                vec![super::OnnxExecutionProvider::Cpu]
+            );
+        }
+    }
+
+    #[test]
     fn ffmpeg_is_a_typed_audio_worker_dependency() {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
@@ -2594,7 +2782,7 @@ mod tests {
             ModelLicenseStatus::Unreviewed
         );
         assert_eq!(
-            config.model_builds["yunet_2026may_onnx"]
+            config.model_builds["yunet_2026may_onnx_cpu_v1"]
                 .provenance
                 .artifact_sha256
                 .as_deref(),

@@ -107,6 +107,14 @@ fn base_router(runtime: Arc<Runtime>) -> Router {
             post(vision::create_face_embedding),
         )
         .route(
+            "/infer/v1/vision/subject-segmentations",
+            post(vision::create_subject_segmentation),
+        )
+        .route(
+            "/infer/v1/vision/face-parsings",
+            post(vision::create_face_parsing),
+        )
+        .route(
             "/infer/v1/vision/image-embeddings",
             post(vision::create_image_embedding),
         )

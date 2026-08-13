@@ -14,8 +14,9 @@ use async_trait::async_trait;
 use image::{ImageFormat, RgbImage};
 use infer_artifact::ArtifactStore;
 use infer_core::{
-    FaceDetection, FaceDetectionRequest, FaceEmbeddingEligibility, FaceEmbeddingRequest,
-    FaceEmbeddingVector, ImageEmbeddingRequest, ImageGeometry, MAX_VISION_IMAGE_PIXELS,
+    EncodedLabelMap, FaceDetection, FaceDetectionRequest, FaceEmbeddingEligibility,
+    FaceEmbeddingRequest, FaceEmbeddingVector, FaceParsingOntology, FaceParsingRegion,
+    FaceParsingRequest, ImageEmbeddingRequest, ImageGeometry, MAX_VISION_IMAGE_PIXELS,
     ModelBuildConfig, OnnxAdapterKind, OnnxExecutionProvider, OnnxRuntimeConfig,
     SemanticEmbeddingVector, TextEmbeddingRequest, VisionImage,
 };
@@ -32,6 +33,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::ProviderError;
 
+mod bisenet;
 mod sface;
 mod siglip;
 mod yunet;
@@ -66,7 +68,17 @@ pub struct TextEmbeddingExecutionOutput {
 }
 
 #[derive(Debug)]
-pub struct OnnxExecutionProvenance {
+pub struct FaceParsingExecutionOutput {
+    pub image: ImageGeometry,
+    pub face_box: infer_core::BoundingBox,
+    pub label_map: EncodedLabelMap,
+    pub ontology: FaceParsingOntology,
+    pub regions: Vec<FaceParsingRegion>,
+    pub provenance: VisionExecutionProvenance,
+}
+
+#[derive(Debug)]
+pub struct VisionExecutionProvenance {
     pub model_build: String,
     pub artifact_sha256: String,
     pub preprocessing_identity: String,
@@ -78,6 +90,8 @@ pub struct OnnxExecutionProvenance {
     pub execution_provider_fallback_reason: Option<String>,
     pub precision: String,
 }
+
+pub type OnnxExecutionProvenance = VisionExecutionProvenance;
 
 #[derive(Debug)]
 pub struct OnnxTokenizerProvenance {
@@ -112,6 +126,19 @@ pub trait FaceEmbeddingExecutor: Send + Sync {
 }
 
 pub type DynFaceEmbeddingExecutor = Arc<dyn FaceEmbeddingExecutor>;
+
+#[async_trait]
+pub trait FaceParsingExecutor: Send + Sync {
+    fn id(&self) -> &str;
+    async fn parse_face(
+        &self,
+        physical_model: &str,
+        request: FaceParsingRequest,
+        cancellation: CancellationToken,
+    ) -> Result<FaceParsingExecutionOutput, ProviderError>;
+}
+
+pub type DynFaceParsingExecutor = Arc<dyn FaceParsingExecutor>;
 
 #[async_trait]
 pub trait ImageEmbeddingExecutor: Send + Sync {
@@ -453,6 +480,60 @@ impl FaceEmbeddingExecutor for OnnxProviderRuntime {
 }
 
 #[async_trait]
+impl FaceParsingExecutor for OnnxProviderRuntime {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    async fn parse_face(
+        &self,
+        physical_model: &str,
+        request: FaceParsingRequest,
+        cancellation: CancellationToken,
+    ) -> Result<FaceParsingExecutionOutput, ProviderError> {
+        if cancellation.is_cancelled() {
+            return Err(ProviderError::NativeRuntime(
+                "ONNX execution cancelled".into(),
+            ));
+        }
+        let entry = {
+            let this = self.clone();
+            let model = physical_model.to_owned();
+            tokio::task::spawn_blocking(move || this.load_sync(&model))
+                .await
+                .map_err(|error| ProviderError::NativeRuntime(error.to_string()))??
+        };
+        if entry
+            .build
+            .onnx
+            .as_ref()
+            .is_none_or(|onnx| onnx.adapter != OnnxAdapterKind::BisenetFaceParsing)
+        {
+            return Err(ProviderError::Protocol(
+                "selected ONNX build is not a face parsing adapter".into(),
+            ));
+        }
+        let run_options = Arc::new(
+            RunOptions::new().map_err(|error| ProviderError::NativeRuntime(error.to_string()))?,
+        );
+        let options_for_run = Arc::clone(&run_options);
+        let entry_for_run = Arc::clone(&entry);
+        let mut task = tokio::task::spawn_blocking(move || {
+            bisenet::run(&entry_for_run, request, options_for_run.as_ref())
+        });
+        tokio::select! {
+            result = &mut task => result
+                .map_err(|error| ProviderError::NativeRuntime(error.to_string()))?,
+            _ = cancellation.cancelled() => {
+                let _ = run_options.terminate();
+                let _ = task.await;
+                Err(ProviderError::NativeRuntime("ONNX execution cancelled".into()))
+            }
+        }
+    }
+}
+
+#[async_trait]
 impl ImageEmbeddingExecutor for OnnxProviderRuntime {
     fn id(&self) -> &str {
         &self.id
@@ -780,7 +861,11 @@ mod tests {
     use std::io::Cursor;
     use std::sync::Barrier;
 
-    use infer_core::{FaceEmbeddingRequest, FivePointLandmarks, Point, RuntimeConfig, VisionImage};
+    use infer_core::{
+        BoundingBox, FACE_PARSING_ONTOLOGY_ID, FaceEmbeddingRequest, FaceParsingRequest,
+        FivePointLandmarks, Point, RuntimeConfig, VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS,
+        VisionImage,
+    };
 
     use super::*;
 
@@ -790,7 +875,7 @@ mod tests {
     ) -> Arc<OnnxProviderRuntime> {
         let config_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.toml");
         let config = RuntimeConfig::load(config_path).unwrap();
-        let build_id = "yunet_2026may_onnx";
+        let build_id = "yunet_2026may_onnx_cpu_v1";
         let build = config.model_builds[build_id].clone();
         let model = build.model_id.clone();
         let mut runtime = config.runtimes.onnx.clone();
@@ -808,7 +893,7 @@ mod tests {
     fn real_sface_runtime() -> Arc<OnnxProviderRuntime> {
         let config_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.toml");
         let config = RuntimeConfig::load(config_path).unwrap();
-        let build_id = "sface_2021dec_onnx";
+        let build_id = "sface_2021dec_onnx_cpu_v1";
         let build = config.model_builds[build_id].clone();
         let model = build.model_id.clone();
         let mut runtime = config.runtimes.onnx.clone();
@@ -816,6 +901,24 @@ mod tests {
         runtime.allow_cpu_fallback = false;
         OnnxProviderRuntime::new(
             "onnx-sface-test",
+            runtime,
+            ArtifactStore::from_config(&config.artifacts).unwrap(),
+            BTreeMap::from([(model, (build_id.into(), build))]),
+        )
+        .unwrap()
+    }
+
+    fn real_bisenet_runtime() -> Arc<OnnxProviderRuntime> {
+        let config_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.toml");
+        let config = RuntimeConfig::load(config_path).unwrap();
+        let build_id = "bisenet_resnet18_face_parsing_onnx_cpu_v1";
+        let build = config.model_builds[build_id].clone();
+        let model = build.model_id.clone();
+        let mut runtime = config.runtimes.onnx.clone();
+        runtime.preferred_execution_providers = vec![OnnxExecutionProvider::Cpu];
+        runtime.allow_cpu_fallback = false;
+        OnnxProviderRuntime::new(
+            "onnx-bisenet-test",
             runtime,
             ArtifactStore::from_config(&config.artifacts).unwrap(),
             BTreeMap::from([(model, (build_id.into(), build))]),
@@ -958,7 +1061,7 @@ mod tests {
     async fn real_sface_cpu_session_load_inventory_and_unload() {
         let config_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.toml");
         let config = RuntimeConfig::load(config_path).unwrap();
-        let build_id = "sface_2021dec_onnx";
+        let build_id = "sface_2021dec_onnx_cpu_v1";
         let build = config.model_builds[build_id].clone();
         let model = build.model_id.clone();
         let mut runtime_config = config.runtimes.onnx.clone();
@@ -989,6 +1092,55 @@ mod tests {
                 .running
                 .contains_key(&model)
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the pinned local ONNX Runtime and BiSeNet artifact"]
+    async fn real_bisenet_cpu_face_parsing_is_bounded_and_typed() {
+        let runtime = real_bisenet_runtime();
+        let model = runtime.builds.keys().next().unwrap().clone();
+        let image = RgbImage::from_fn(512, 512, |x, y| {
+            image::Rgb([(x / 2) as u8, (y / 2) as u8, ((x + y) / 4) as u8])
+        });
+        let mut bytes = Cursor::new(Vec::new());
+        image.write_to(&mut bytes, ImageFormat::Png).unwrap();
+        let response = runtime
+            .parse_face(
+                &model,
+                FaceParsingRequest {
+                    model: "vision.parse_face".into(),
+                    image: VisionImage {
+                        content_type: "image/png".into(),
+                        bytes: bytes.into_inner(),
+                    },
+                    source_revision: "test:synthetic-gradient".into(),
+                    image_orientation: VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS.into(),
+                    face_box: BoundingBox {
+                        x: 128.0,
+                        y: 96.0,
+                        width: 256.0,
+                        height: 320.0,
+                    },
+                    metadata: BTreeMap::from([
+                        ("infer.placement".into(), "local_only".into()),
+                        ("infer.offline_required".into(), "true".into()),
+                        ("infer.fallback".into(), "none".into()),
+                    ]),
+                },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!((response.image.width, response.image.height), (512, 512));
+        assert_eq!(response.ontology.id, FACE_PARSING_ONTOLOGY_ID);
+        assert_eq!(response.ontology.class_count, 19);
+        assert_eq!(response.regions.len(), 19);
+        assert_eq!(
+            (response.label_map.width, response.label_map.height),
+            (512, 512)
+        );
+        assert_eq!(response.label_map.encoding, "indexed_u8_png");
+        assert_eq!(response.provenance.actual_execution_provider, "cpu");
     }
 
     #[tokio::test]
@@ -1028,10 +1180,10 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires the pinned local ONNX Runtime, Core ML, and SFace artifact"]
-    async fn real_sface_strict_coreml_rejection_is_explicit() {
+    async fn real_sface_cpu_build_never_admits_coreml() {
         let config_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.toml");
         let config = RuntimeConfig::load(config_path).unwrap();
-        let build_id = "sface_2021dec_onnx";
+        let build_id = "sface_2021dec_onnx_cpu_v1";
         let build = config.model_builds[build_id].clone();
         let model = build.model_id.clone();
         let mut runtime_config = config.runtimes.onnx.clone();
@@ -1047,7 +1199,7 @@ mod tests {
         let error = NativeModelController::load(runtime.as_ref(), &model)
             .await
             .unwrap_err();
-        assert!(error.to_string().contains("CPU EP"));
+        assert!(error.to_string().contains("no common execution provider"));
         assert!(!runtime.sessions.lock().unwrap().contains_key(&model));
     }
 
@@ -1081,7 +1233,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires the pinned local ONNX Runtime, Core ML, and YuNet artifact"]
-    async fn real_yunet_coreml_route_or_disclosed_cpu_fallback() {
+    async fn real_yunet_cpu_build_never_attempts_coreml() {
         let runtime = real_yunet_runtime(
             vec![OnnxExecutionProvider::Coreml, OnnxExecutionProvider::Cpu],
             true,
@@ -1091,17 +1243,13 @@ mod tests {
             .detect_faces(&model, blank_request(), CancellationToken::new())
             .await
             .unwrap();
-        assert_eq!(result.provenance.requested_execution_provider, "coreml");
-        assert!(matches!(
-            result.provenance.actual_execution_provider.as_str(),
-            "coreml" | "cpu"
-        ));
-        assert_eq!(
+        assert_eq!(result.provenance.requested_execution_provider, "cpu");
+        assert_eq!(result.provenance.actual_execution_provider, "cpu");
+        assert!(
             result
                 .provenance
                 .execution_provider_fallback_reason
-                .is_some(),
-            result.provenance.actual_execution_provider == "cpu"
+                .is_none()
         );
     }
 }

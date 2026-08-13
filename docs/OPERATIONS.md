@@ -266,8 +266,8 @@ root = ".infer-runtime/artifacts"
 [runtimes.onnx]
 library = ".infer-runtime/runtimes/onnxruntime/lib/libonnxruntime.dylib"
 version = "1.27.0"
-preferred_execution_providers = ["coreml", "cpu"]
-allow_cpu_fallback = true
+preferred_execution_providers = ["cpu"]
+allow_cpu_fallback = false
 ```
 
 下载先进入 `artifacts/staging`，不得直接放入可执行 blob 路径。固定来源 revision、license、
@@ -280,8 +280,10 @@ SHA-256、size、opset、tensor 和 preprocessing manifest 后，用本机 opera
 artifact SHA-256、verified license expression/URL/license-text SHA-256。
 
 ```bash
-infer import-onnx yunet_2026may_onnx --file '/verified/staging/yunet.onnx'
-infer import-onnx sface_2021dec_onnx --file '/verified/staging/sface.onnx'
+infer import-onnx yunet_2026may_onnx_cpu_v1 --file '/verified/staging/yunet.onnx'
+infer import-onnx sface_2021dec_onnx_cpu_v1 --file '/verified/staging/sface.onnx'
+infer import-onnx bisenet_resnet18_face_parsing_onnx_cpu_v1 \
+  --file '/verified/staging/bisenet-resnet18.onnx'
 infer import-onnx siglip2_base_patch16_224_text_onnx_cpu_v1 \
   --file '/verified/staging/siglip2-text.onnx'
 infer import-onnx-auxiliary siglip2_base_patch16_224_text_onnx_cpu_v1 tokenizer \
@@ -308,6 +310,45 @@ YuNet/SFace 严格 Core ML 测试不能让整个图脱离 CPU；若 Build 与 ru
 provider 会重建纯 CPU Session 并披露稳定 fallback reason。禁止 CPU fallback 时必须失败，
 不能记录一个虚假的 Core ML route。升级 ORT、修改 EP、precision 或模型导出都要作为新的
 验证组合，不得沿用旧证据。
+
+## SAM 2.1 Core ML 与 BiSeNet face parsing Build
+
+SAM 2.1 Small 使用三个 Apple Core ML `.mlpackage`，但权重仍为 `user_managed`，不会进入 Git
+或随 infer-runtime 分发。Operator 必须把每个 package 的 `Manifest.json`、`model.mlmodel` 与
+`weights/weight.bin` 共九个文件逐一登记到 `LocalWorkerBuildManifest`；adapter 固定为
+`sam21_coreml`。artifact-set SHA-256 仍按排序后的
+`relative-name NUL file-sha256 LF` 记录计算。Provider 从 ArtifactStore 解析只读 Build root，
+不会接受 Consumer 路径或联网下载。
+
+SAM worker 使用 owner-only Python 3.12 venv 和
+`tools/requirements-coreml-sam-runtime.txt`。启动 readiness 会先核对三个模型的精确输入输出；
+请求只通过短 JSON frame 传递私有临时文件路径，stderr 被丢弃，取消会 kill/wait worker。
+输入图、mask 和 Core ML 诊断不会写入普通 daemon 日志。`.mlpackage` 不能直接作为服务时
+加载真源；先在安装/升级窗口生成宿主专用、可重建的 `.mlmodelc` 缓存：
+
+```sh
+<coreml-sam-python> tools/coreml_sam_worker.py \
+  --compiled-cache-root <runtimes.coreml_sam.compiled_cache_root> \
+  --prepare-model <resolved-sam-artifact-runtime-root> \
+  --artifact-sha256 <sam-artifact-set-sha256>
+```
+
+缓存 identity 包含 artifact、macOS/kernel、架构、Python 与 Core ML Tools 版本；任一变化都会
+fail closed 为 `sam_model_not_prepared`。Console/readiness 会显示“需要准备”，不能把分钟级编译
+或 specialization 隐藏到首个 Consumer 请求。缓存是派生物，不得写回不可变 ArtifactStore。
+
+当前 macOS 实测默认固定 `runtimes.coreml_sam.compute_units = "cpu_and_gpu"`。同一已编译
+SAM 2.1 Small 使用 `coreml_all` 时触发 405–539 秒的异常 ANE 首请求；`cpu_and_gpu` 的正式
+HTTP cold 为 1.26 秒，同图第二次点击因 image embedding cache 为 48.5 ms。改变 compute
+units 必须同步 Build provenance 并重新做真实 cold/warm smoke，不能把 `ALL` 当作自动更快。
+
+BiSeNet ResNet18 使用普通 `infer import-onnx`，但 typed adapter 会同时锁定 opset 20、
+动态 batch `input=[N,3,512,512]`、三个已命名的动态输出（typed adapter 只消费主 `output`）、
+ImageNet RGB normalization、1.8 倍 face context crop 与 19-class argmax/restore policy。任何
+tensor、preprocess 或 ontology 变化都必须
+建立新 Build，不能复用现有 identity。仓库代码为 MIT，但该预训练权重明确使用
+CelebAMask-HQ；其数据协议仅允许非商业研究并禁止再分发数据/derived data，因此 Build 记录为
+`restricted`。当前启用边界是用户自行下载、单机内部、非商业使用；infer-runtime 不分发权重。
 
 ## YAMNet 声音事件 Build
 

@@ -325,6 +325,12 @@ macro_rules! capability_schema_digest {
     ("infer.vision.face-embedding") => {
         "e225a4e06bcadb7274074d3af5aec4d0b96e476f81cac1b4f5e10e33a7d02ccc"
     };
+    ("infer.vision.subject-segmentation") => {
+        "4df56eefaa7ced43ef3c823f933e9bea689bee23f60d3279c3d84f75414bdb1d"
+    };
+    ("infer.vision.face-parsing") => {
+        "663e549c77528811a2c78406ef87b34b6d0add5c0702eec042a49bf7c8968b39"
+    };
     ("infer.vision.image-embedding") => {
         "1f30793c1c7866f1cd4239e35dcdb10842b609f021731882810d4de143df42e9"
     };
@@ -427,6 +433,22 @@ pub const CAPABILITIES: &[CapabilityEntry] = &[
         ),]
     ),
     capability!(
+        "infer.vision.subject-segmentation",
+        "20260813.1",
+        "experimental",
+        [route!(
+            "POST",
+            "/infer/v1/vision/subject-segmentations",
+            &["unary"]
+        ),]
+    ),
+    capability!(
+        "infer.vision.face-parsing",
+        "20260813.1",
+        "experimental",
+        [route!("POST", "/infer/v1/vision/face-parsings", &["unary"]),]
+    ),
+    capability!(
         "infer.vision.image-embedding",
         "20260811.1",
         "experimental",
@@ -518,6 +540,10 @@ pub fn required_capability_id(path: &str) -> Option<&'static str> {
         Some("infer.vision.face-detection")
     } else if path == "/infer/v1/vision/face-embeddings" {
         Some("infer.vision.face-embedding")
+    } else if path == "/infer/v1/vision/subject-segmentations" {
+        Some("infer.vision.subject-segmentation")
+    } else if path == "/infer/v1/vision/face-parsings" {
+        Some("infer.vision.face-parsing")
     } else if path == "/infer/v1/vision/image-embeddings" {
         Some("infer.vision.image-embedding")
     } else if path == "/infer/v1/vision/text-embeddings" {

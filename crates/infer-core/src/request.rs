@@ -576,6 +576,7 @@ string_enum!(ProviderProtocol {
     AudioWorker => "audio_worker",
     RetrievalWorker => "retrieval_worker",
     OcrWorker => "ocr_worker",
+    CoremlWorker => "coreml_worker",
     Onnx => "onnx"
 });
 string_enum!(ProviderCapability {

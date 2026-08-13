@@ -371,6 +371,7 @@ impl Store {
                         app_id,
                         provider,
                         deployment,
+                        execution_origin: None,
                         outcome: "interrupted".into(),
                         amount_usd,
                         estimated: true,

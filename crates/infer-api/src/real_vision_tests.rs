@@ -1,7 +1,7 @@
 //! Explicit real-provider contract tests. They stay ignored in the portable
 //! suite because they require this host's pinned ONNX Runtime and artifacts.
 
-use std::{io::Cursor, path::Path};
+use std::{io::Cursor, path::Path, time::Instant};
 
 use axum::{
     body::Body,
@@ -53,7 +53,10 @@ async fn face_detection_traverses_auth_http_job_attempt_and_cpu_provider() {
     assert_eq!(body["object"], "vision.face_detection");
     assert_eq!(body["source_revision"], "photo:test:1");
     assert_eq!(body["provenance"]["actual_execution_provider"], "cpu");
-    assert_eq!(body["provenance"]["model_build"], "yunet_2026may_onnx");
+    assert_eq!(
+        body["provenance"]["model_build"],
+        "yunet_2026may_onnx_cpu_v1"
+    );
     assert_eq!(body["image"]["width"], 320);
     assert_eq!(body["image"]["height"], 240);
 }
@@ -101,10 +104,13 @@ async fn face_embedding_traverses_auth_acl_job_attempt_and_cpu_provider() {
     assert_eq!(body["embedding"]["distance_metric"], "cosine");
     assert_eq!(
         body["embedding"]["space"],
-        "sface_2021dec_onnx:0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79:l2_normalized_embedding_cosine_space_v1"
+        "sface_2021dec_onnx_cpu_v1:0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79:l2_normalized_embedding_cosine_space_v1"
     );
     assert_eq!(body["provenance"]["actual_execution_provider"], "cpu");
-    assert_eq!(body["provenance"]["model_build"], "sface_2021dec_onnx");
+    assert_eq!(
+        body["provenance"]["model_build"],
+        "sface_2021dec_onnx_cpu_v1"
+    );
     assert_eq!(body["eligibility"]["eligible"], true);
 
     let job_id = body["id"].as_str().unwrap();
@@ -338,6 +344,134 @@ async fn siglip_coreml_route_is_used_or_discloses_cpu_fallback() {
     }
 }
 
+#[tokio::test]
+#[ignore = "requires the pinned Apple SAM 2.1 Small Core ML artifact and runtime"]
+async fn subject_segmentation_traverses_auth_acl_job_attempt_and_coreml_provider() {
+    let (service, token, _temporary) = real_service(&["vision.segment_subject"]).await;
+    let image = RgbImage::from_fn(512, 512, |x, y| {
+        image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8])
+    });
+    let mut encoded = Cursor::new(Vec::new());
+    image.write_to(&mut encoded, ImageFormat::Png).unwrap();
+    let encoded = encoded.into_inner();
+    let cold_started = Instant::now();
+    let body = subject_segmentation_response(&service, &token, encoded.clone()).await;
+    let cold_elapsed = cold_started.elapsed();
+    assert_eq!(body["object"], "vision.subject_segmentation");
+    assert_eq!(body["source_revision"], "photo:test:segment:1");
+    assert_eq!(body["image"]["width"], 512);
+    assert_eq!(body["image"]["height"], 512);
+    assert_eq!(body["mask"]["content_type"], "image/png");
+    assert_eq!(body["mask"]["width"], 512);
+    assert_eq!(body["mask"]["height"], 512);
+    assert_eq!(body["prompt_count"], 1);
+    assert_eq!(
+        body["provenance"]["actual_execution_provider"],
+        "coreml_cpu_and_gpu"
+    );
+    assert_eq!(body["provenance"]["model_build"], "sam21_small_coreml_fp16");
+    assert!(body["mask"]["data_base64"].as_str().unwrap().len() < 16 * 1024 * 1024);
+
+    let job_id = body["id"].as_str().unwrap();
+    let job = service
+        .clone()
+        .oneshot(
+            Request::get(format!("/infer/v1/jobs/{job_id}"))
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let job = job.into_body().collect().await.unwrap().to_bytes();
+    let job: serde_json::Value = serde_json::from_slice(&job).unwrap();
+    assert_eq!(job["state"], "succeeded");
+    assert!(job.get("mask").is_none());
+    assert!(job.get("image").is_none());
+
+    let warm_started = Instant::now();
+    let warm = subject_segmentation_response(&service, &token, encoded).await;
+    let warm_elapsed = warm_started.elapsed();
+    assert_eq!(warm["object"], "vision.subject_segmentation");
+    assert_eq!(warm["provenance"]["model_build"], "sam21_small_coreml_fp16");
+    eprintln!("SAM Core ML HTTP timing: cold={cold_elapsed:?} warm_same_image={warm_elapsed:?}");
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned BiSeNet ResNet18 ONNX artifact"]
+async fn face_parsing_traverses_auth_acl_job_attempt_and_cpu_provider() {
+    let (service, token, _temporary) = real_service(&["vision.parse_face"]).await;
+    let image = RgbImage::from_fn(512, 512, |x, y| {
+        image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8])
+    });
+    let mut encoded = Cursor::new(Vec::new());
+    image.write_to(&mut encoded, ImageFormat::Png).unwrap();
+    let response = service
+        .clone()
+        .oneshot(
+            Request::post("/infer/v1/vision/face-parsings")
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .header(
+                    crate::contract::CAPABILITY_CONTRACT_HEADER,
+                    "infer.vision.face-parsing@20260813.1",
+                )
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(
+                    header::CONTENT_TYPE,
+                    "multipart/form-data; boundary=infer-boundary",
+                )
+                .body(Body::from(face_parsing_multipart(encoded.into_inner())))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["object"], "vision.face_parsing");
+    assert_eq!(body["source_revision"], "photo:test:face-parse:1");
+    assert_eq!(body["data_classification"], "sensitive_biometric");
+    assert_eq!(body["label_map"]["content_type"], "image/png");
+    assert_eq!(body["label_map"]["width"], 512);
+    assert_eq!(body["label_map"]["height"], 512);
+    assert_eq!(body["ontology"]["id"], "celebamask_hq_19");
+    assert_eq!(body["ontology"]["class_count"], 19);
+    assert_eq!(body["regions"].as_array().unwrap().len(), 19);
+    assert_eq!(body["provenance"]["actual_execution_provider"], "cpu");
+    assert_eq!(
+        body["provenance"]["model_build"],
+        "bisenet_resnet18_face_parsing_onnx_cpu_v1"
+    );
+    assert!(body["label_map"]["data_base64"].as_str().unwrap().len() < 16 * 1024 * 1024);
+
+    let job_id = body["id"].as_str().unwrap();
+    let job = service
+        .oneshot(
+            Request::get(format!("/infer/v1/jobs/{job_id}"))
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let job = job.into_body().collect().await.unwrap().to_bytes();
+    let job: serde_json::Value = serde_json::from_slice(&job).unwrap();
+    assert_eq!(job["state"], "succeeded");
+    assert!(job.get("label_map").is_none());
+    assert!(job.get("image").is_none());
+}
+
 async fn real_service(allowed_intents: &[&str]) -> (axum::Router, String, tempfile::TempDir) {
     real_service_with_execution_providers(allowed_intents, vec![OnnxExecutionProvider::Cpu], false)
         .await
@@ -350,6 +484,7 @@ async fn real_service_with_execution_providers(
 ) -> (axum::Router, String, tempfile::TempDir) {
     let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut config = RuntimeConfig::load(repository.join("config/infer.toml")).unwrap();
+    restrict_new_segmentation_slice(&mut config, allowed_intents);
     let temporary = tempfile::tempdir().unwrap();
     config.persistence.path = temporary
         .path()
@@ -393,6 +528,31 @@ async fn real_service_with_execution_providers(
     let token = credentials.token_for("local-operator").unwrap().to_owned();
     let runtime = Runtime::from_config(config).await.unwrap();
     (router(runtime), token, temporary)
+}
+
+fn restrict_new_segmentation_slice(config: &mut RuntimeConfig, allowed_intents: &[&str]) {
+    let identities = match allowed_intents {
+        ["vision.segment_subject"] => Some((
+            "coreml-sam-local",
+            "sam21_small_coreml",
+            "sam21_small_coreml_fp16",
+            "coreml_sam21_small",
+        )),
+        ["vision.parse_face"] => Some((
+            "onnx-local",
+            "bisenet_resnet18_face_parsing",
+            "bisenet_resnet18_face_parsing_onnx_cpu_v1",
+            "onnx_bisenet_resnet18_face_parsing",
+        )),
+        _ => None,
+    };
+    let Some((provider, profile, build, deployment)) = identities else {
+        return;
+    };
+    config.providers.retain(|id, _| id == provider);
+    config.model_profiles.retain(|id, _| id == profile);
+    config.model_builds.retain(|id, _| id == build);
+    config.deployments.retain(|id, _| id == deployment);
 }
 
 fn image_embedding_multipart(image: Vec<u8>) -> Vec<u8> {
@@ -440,6 +600,85 @@ fn embedding_multipart(image: Vec<u8>) -> Vec<u8> {
     );
     body.extend_from_slice(
         b"--infer-boundary\r\nContent-Disposition: form-data; name=\"landmarks\"\r\n\r\n{\"right_eye\":{\"x\":38.2946,\"y\":51.6963},\"left_eye\":{\"x\":73.5318,\"y\":51.5014},\"nose_tip\":{\"x\":56.0252,\"y\":71.7366},\"right_mouth_corner\":{\"x\":41.5493,\"y\":92.3655},\"left_mouth_corner\":{\"x\":70.7299,\"y\":92.2041}}\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"image\"; filename=\"synthetic.png\"\r\nContent-Type: image/png\r\n\r\n",
+    );
+    body.extend_from_slice(&image);
+    body.extend_from_slice(b"\r\n--infer-boundary--\r\n");
+    body
+}
+
+fn subject_segmentation_multipart(image: Vec<u8>) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nvision.segment_subject\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"source_revision\"\r\n\r\nphoto:test:segment:1\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"image_orientation\"\r\n\r\ndisplay_pixels_orientation_normalized\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"prompt_coordinate_space\"\r\n\r\nnormalized_0_1\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"points\"\r\n\r\n[{\"x\":0.5,\"y\":0.5,\"label\":\"foreground\"}]\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"image\"; filename=\"synthetic.png\"\r\nContent-Type: image/png\r\n\r\n",
+    );
+    body.extend_from_slice(&image);
+    body.extend_from_slice(b"\r\n--infer-boundary--\r\n");
+    body
+}
+
+async fn subject_segmentation_response(
+    service: &axum::Router,
+    token: &str,
+    image: Vec<u8>,
+) -> serde_json::Value {
+    let response = service
+        .clone()
+        .oneshot(
+            Request::post("/infer/v1/vision/subject-segmentations")
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .header(
+                    crate::contract::CAPABILITY_CONTRACT_HEADER,
+                    "infer.vision.subject-segmentation@20260813.1",
+                )
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(
+                    header::CONTENT_TYPE,
+                    "multipart/form-data; boundary=infer-boundary",
+                )
+                .body(Body::from(subject_segmentation_multipart(image)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&body).unwrap()
+}
+
+fn face_parsing_multipart(image: Vec<u8>) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nvision.parse_face\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"source_revision\"\r\n\r\nphoto:test:face-parse:1\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"image_orientation\"\r\n\r\ndisplay_pixels_orientation_normalized\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"face_box\"\r\n\r\n{\"x\":128.0,\"y\":96.0,\"width\":256.0,\"height\":320.0}\r\n",
     );
     body.extend_from_slice(
         b"--infer-boundary\r\nContent-Disposition: form-data; name=\"image\"; filename=\"synthetic.png\"\r\nContent-Type: image/png\r\n\r\n",

@@ -34,8 +34,16 @@ root = ".infer-runtime/artifacts"
 [runtimes.onnx]
 library = ".infer-runtime/runtimes/onnxruntime/lib/libonnxruntime.dylib"
 version = "1.27.0"
-preferred_execution_providers = ["coreml", "cpu"]
-allow_cpu_fallback = true
+# Every admitted ONNX Build is CPU-only on the supported host. Keep a future
+# Core ML Build separate and explicitly benchmark it before admitting it.
+preferred_execution_providers = ["cpu"]
+allow_cpu_fallback = false
+
+# Host-local derived cache. Prepare it once per artifact/OS/Core ML Tools
+# identity; do not publish it as part of the immutable source model artifact.
+[runtimes.coreml_sam]
+compiled_cache_root = ".infer-runtime/runtimes/coreml-sam/compiled"
+compute_units = "cpu_and_gpu"
 
 # Optional typed RAW foundation assembly. Keep disabled until the exact graph,
 # digest, ORT 1.27 library, Deployment, and Consumer ACL are configured.
@@ -232,6 +240,22 @@ protocol = "onnx"
 [providers.onnx-local.local_inventory]
 kind = "onnx_sessions"
 
+# Optional owner-installed Apple Core ML SAM 2.1 Small runtime. Model package
+# files are user-managed and must be published into ArtifactStore under the
+# exact typed Build manifest below; infer-runtime does not redistribute them.
+[providers.coreml-sam-local]
+kind = "coreml_worker"
+command = ".infer-runtime/runtimes/coreml-sam/bin/python"
+args = ["tools/coreml_sam_worker.py"]
+placement = "local"
+max_concurrency = 1
+max_queue = 8
+priority_aging_ms = 10000
+
+[providers.coreml-sam-local.capability_profile]
+version = 1
+protocol = "coreml_worker"
+
 [providers.raw-foundation-local]
 kind = "raw_foundation"
 placement = "local"
@@ -413,6 +437,22 @@ data_plane = "vision.face_embedding"
 input_modalities = ["image"]
 output_modalities = ["json"]
 required_features = ["face_embedding_128d", "sensitive_biometric"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[intents."vision.segment_subject"]
+data_plane = "vision.subject_segmentation"
+input_modalities = ["image"]
+output_modalities = ["json"]
+required_features = ["prompted_binary_mask", "normalized_point_and_box_prompts"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[intents."vision.parse_face"]
+data_plane = "vision.face_parsing"
+input_modalities = ["image"]
+output_modalities = ["json"]
+required_features = ["face_parsing_19", "sensitive_biometric"]
 default_capability_floor = "foundational"
 default_policy = "local-first"
 
@@ -754,6 +794,20 @@ status = "provisional"
 family = "sface"
 
 [model_profiles.sface_2021dec.ratings."vision.embed_face"]
+level = "foundational"
+status = "provisional"
+
+[model_profiles.sam21_small_coreml]
+family = "sam2.1"
+
+[model_profiles.sam21_small_coreml.ratings."vision.segment_subject"]
+level = "foundational"
+status = "provisional"
+
+[model_profiles.bisenet_resnet18_face_parsing]
+family = "bisenet"
+
+[model_profiles.bisenet_resnet18_face_parsing.ratings."vision.parse_face"]
 level = "foundational"
 status = "provisional"
 
@@ -1182,7 +1236,7 @@ upstream = "local:sensevoice-small"
 [model_builds.sensevoice_small_pytorch.license]
 status = "unreviewed"
 
-[model_builds.yunet_2026may_onnx]
+[model_builds.yunet_2026may_onnx_cpu_v1]
 profile = "yunet_2026may"
 model_id = "sha256:ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0"
 variant = "onnx-opset11-fp32"
@@ -1190,18 +1244,18 @@ input_modalities = ["image"]
 output_modalities = ["json"]
 features = ["five_point_landmarks"]
 
-[model_builds.yunet_2026may_onnx.provenance]
+[model_builds.yunet_2026may_onnx_cpu_v1.provenance]
 source_kind = "user_managed"
 upstream = "opencv/opencv_zoo"
 source_revision = "opencv-zoo@47534e27c9851bb1128ccc0102f1145e27f23f98"
 artifact_sha256 = "ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0"
 
-[model_builds.yunet_2026may_onnx.license]
+[model_builds.yunet_2026may_onnx_cpu_v1.license]
 status = "declared"
 expression = "MIT"
 license_url = "https://github.com/opencv/opencv_zoo/blob/47534e27c9851bb1128ccc0102f1145e27f23f98/LICENSE"
 
-[model_builds.yunet_2026may_onnx.onnx]
+[model_builds.yunet_2026may_onnx_cpu_v1.onnx]
 adapter = "yunet_face_detection"
 opset = 11
 inputs = [{ name = "input", dtype = "float32", shape = ["1", "3", "height", "width"] }]
@@ -1221,17 +1275,17 @@ outputs = [
 ]
 postprocessing_identity = "opencv_yunet_decode_sqrt_score_nms_v1"
 postprocessing_parameters = { score_threshold = 0.6, nms_threshold = 0.3, top_k = 5000.0 }
-allowed_execution_providers = ["coreml", "cpu"]
+allowed_execution_providers = ["cpu"]
 precision = "fp32"
 
-[model_builds.yunet_2026may_onnx.onnx.artifact]
+[model_builds.yunet_2026may_onnx_cpu_v1.onnx.artifact]
 sha256 = "ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0"
 size_bytes = 229738
 source_url = "https://github.com/opencv/opencv_zoo/raw/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/face_detection_yunet_2026may.onnx"
 source_revision = "opencv-zoo@47534e27c9851bb1128ccc0102f1145e27f23f98"
 license_spdx = "MIT"
 
-[model_builds.yunet_2026may_onnx.onnx.preprocessing]
+[model_builds.yunet_2026may_onnx_cpu_v1.onnx.preprocessing]
 identity = "srgb_no_exif_triangle_long_edge_1600_bgr_nchw_pad32_v1"
 orientation = "input_pixels_no_exif_transform"
 resize = "triangle_long_edge_1600_no_upscale_then_pad_bottom_right_to_32"
@@ -1242,7 +1296,7 @@ dtype = "float32"
 mean = [0.0, 0.0, 0.0]
 scale = [1.0]
 
-[model_builds.sface_2021dec_onnx]
+[model_builds.sface_2021dec_onnx_cpu_v1]
 profile = "sface_2021dec"
 model_id = "sha256:0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
 variant = "onnx-opset11-fp32"
@@ -1250,34 +1304,34 @@ input_modalities = ["image"]
 output_modalities = ["json"]
 features = ["face_embedding_128d", "sensitive_biometric"]
 
-[model_builds.sface_2021dec_onnx.provenance]
+[model_builds.sface_2021dec_onnx_cpu_v1.provenance]
 source_kind = "user_managed"
 upstream = "opencv/opencv_zoo"
 source_revision = "opencv-zoo@47534e27c9851bb1128ccc0102f1145e27f23f98"
 artifact_sha256 = "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
 
-[model_builds.sface_2021dec_onnx.license]
+[model_builds.sface_2021dec_onnx_cpu_v1.license]
 status = "declared"
 expression = "Apache-2.0"
 license_url = "https://github.com/opencv/opencv_zoo/blob/47534e27c9851bb1128ccc0102f1145e27f23f98/LICENSE"
 
-[model_builds.sface_2021dec_onnx.onnx]
+[model_builds.sface_2021dec_onnx_cpu_v1.onnx]
 adapter = "sface_embedding"
 opset = 11
 inputs = [{ name = "data", dtype = "float32", shape = ["1", "3", "112", "112"] }]
 outputs = [{ name = "fc1", dtype = "float32", shape = ["1", "128"] }]
 postprocessing_identity = "l2_normalized_embedding_cosine_space_v1"
-allowed_execution_providers = ["coreml", "cpu"]
+allowed_execution_providers = ["cpu"]
 precision = "fp32"
 
-[model_builds.sface_2021dec_onnx.onnx.artifact]
+[model_builds.sface_2021dec_onnx_cpu_v1.onnx.artifact]
 sha256 = "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
 size_bytes = 38696353
 source_url = "https://github.com/opencv/opencv_zoo/raw/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/face_recognition_sface_2021dec.onnx"
 source_revision = "opencv-zoo@47534e27c9851bb1128ccc0102f1145e27f23f98"
 license_spdx = "Apache-2.0"
 
-[model_builds.sface_2021dec_onnx.onnx.preprocessing]
+[model_builds.sface_2021dec_onnx_cpu_v1.onnx.preprocessing]
 identity = "opencv_sface_similarity_align_112_rgb_nchw_v1"
 orientation = "input_pixels_no_exif_transform"
 resize = "five_point_similarity_transform_to_112x112_inter_linear"
@@ -1287,6 +1341,90 @@ layout = "nchw"
 dtype = "float32"
 mean = [0.0, 0.0, 0.0]
 scale = [1.0]
+
+[model_builds.sam21_small_coreml_fp16]
+profile = "sam21_small_coreml"
+model_id = "sha256:1baa118281b46331139031b509095aa34b3301f1647691a4865ca30051d8572d"
+variant = "apple-coreml-sam2.1-small-float16"
+input_modalities = ["image"]
+output_modalities = ["json"]
+features = ["prompted_binary_mask", "normalized_point_and_box_prompts"]
+
+[model_builds.sam21_small_coreml_fp16.provenance]
+source_kind = "user_managed"
+upstream = "apple/coreml-sam2.1-small"
+source_revision = "883f5787eb0be35ce6965907a8bc1f5320a5a02e"
+artifact_sha256 = "1baa118281b46331139031b509095aa34b3301f1647691a4865ca30051d8572d"
+
+[model_builds.sam21_small_coreml_fp16.license]
+status = "declared"
+expression = "Apache-2.0"
+license_url = "https://github.com/facebookresearch/sam2/blob/2b90b9f5ceec907a1c18123530e92e794ad901a8/LICENSE"
+license_text_sha256 = "648b81e6c6f9975c3b6cf6d630229b6c8d6f1ddaef55f5770f576adda19f3495"
+reviewed_at = "2026-08-13"
+
+[model_builds.sam21_small_coreml_fp16.local_worker]
+adapter = "sam21_coreml"
+artifact_set_sha256 = "1baa118281b46331139031b509095aa34b3301f1647691a4865ca30051d8572d"
+runtime = "python3.12;coremltools-9.0"
+precision = "float16"
+preprocessing_identity = "display_rgb_direct_resize_1024_bilinear_v1"
+postprocessing_identity = "best_iou_mask_bilinear_restore_logit_gt_zero_v1"
+requested_execution_provider = "coreml_cpu_and_gpu"
+actual_execution_provider = "coreml_cpu_and_gpu"
+
+[model_builds.bisenet_resnet18_face_parsing_onnx_cpu_v1]
+profile = "bisenet_resnet18_face_parsing"
+model_id = "sha256:0d9bd318e46987c3bdbfacae9e2c0f461cae1c6ac6ea6d43bbe541a91727e33f"
+variant = "resnet18-onnx-opset20-fp32"
+input_modalities = ["image"]
+output_modalities = ["json"]
+features = ["face_parsing_19", "sensitive_biometric"]
+
+[model_builds.bisenet_resnet18_face_parsing_onnx_cpu_v1.provenance]
+source_kind = "user_managed"
+upstream = "yakhyo/face-parsing"
+source_revision = "8a4729d95118d0e97c44185f9bdef3d6bfeaaf99"
+artifact_sha256 = "0d9bd318e46987c3bdbfacae9e2c0f461cae1c6ac6ea6d43bbe541a91727e33f"
+
+[model_builds.bisenet_resnet18_face_parsing_onnx_cpu_v1.license]
+status = "restricted"
+expression = "MIT AND LicenseRef-CelebAMask-HQ-NC-Research"
+license_url = "https://github.com/switchablenorms/CelebAMask-HQ#dataset-agreement"
+reviewed_at = "2026-08-13"
+
+[model_builds.bisenet_resnet18_face_parsing_onnx_cpu_v1.onnx]
+adapter = "bisenet_face_parsing"
+opset = 20
+inputs = [{ name = "input", dtype = "float32", shape = ["batch", "3", "512", "512"] }]
+outputs = [
+  { name = "output", dtype = "float32", shape = ["batch", "classes", "height", "width"] },
+  { name = "414", dtype = "float32", shape = ["batch", "classes", "height", "width"] },
+  { name = "424", dtype = "float32", shape = ["batch", "classes", "height", "width"] },
+]
+postprocessing_identity = "argmax_19_then_nearest_restore_full_image_indexed_png_v1"
+# This exported graph is admitted only on the verified CPU path. Do not let
+# the global ONNX Core ML preference widen this Build's execution providers.
+allowed_execution_providers = ["cpu"]
+precision = "fp32"
+
+[model_builds.bisenet_resnet18_face_parsing_onnx_cpu_v1.onnx.artifact]
+sha256 = "0d9bd318e46987c3bdbfacae9e2c0f461cae1c6ac6ea6d43bbe541a91727e33f"
+size_bytes = 53205364
+source_url = "https://github.com/yakhyo/face-parsing/releases/download/weights/resnet18.onnx"
+source_revision = "yakhyo/face-parsing@8a4729d95118d0e97c44185f9bdef3d6bfeaaf99"
+license_spdx = "MIT AND LicenseRef-CelebAMask-HQ-NC-Research"
+
+[model_builds.bisenet_resnet18_face_parsing_onnx_cpu_v1.onnx.preprocessing]
+identity = "bisenet_resnet18_celeba_512_rgb_imagenet_v1"
+orientation = "display_pixels_orientation_normalized"
+resize = "face_box_context_1_8_then_triangle_512x512"
+color_space = "srgb"
+channel_order = "rgb"
+layout = "nchw"
+dtype = "float32"
+mean = [0.485, 0.456, 0.406]
+scale = [0.229, 0.224, 0.225]
 
 [model_builds.siglip2_base_patch16_224_image_onnx_cpu_v1]
 profile = "siglip2_base_patch16_224"
@@ -1517,14 +1655,26 @@ supported_execution_modes = ["unary"]
 
 [deployments.onnx_yunet_2026may]
 provider = "onnx-local"
-build = "yunet_2026may_onnx"
+build = "yunet_2026may_onnx_cpu_v1"
 resource_class = "light"
 estimated_cost_usd = 0.0
 
 [deployments.onnx_sface_2021dec]
 provider = "onnx-local"
-build = "sface_2021dec_onnx"
+build = "sface_2021dec_onnx_cpu_v1"
 resource_class = "light"
+estimated_cost_usd = 0.0
+
+[deployments.coreml_sam21_small]
+provider = "coreml-sam-local"
+build = "sam21_small_coreml_fp16"
+resource_class = "standard"
+estimated_cost_usd = 0.0
+
+[deployments.onnx_bisenet_resnet18_face_parsing]
+provider = "onnx-local"
+build = "bisenet_resnet18_face_parsing_onnx_cpu_v1"
+resource_class = "standard"
 estimated_cost_usd = 0.0
 
 [deployments.onnx_siglip2_base_patch16_224_image]
@@ -1647,6 +1797,31 @@ max_cost_usd = { min = 0.0, max = 0.0 }
 # [apps.example-local-consumer.routing.intents."text.summarize"]
 # deployment_ids = ["ollama_qwen3_5_2b"]
 # model_profile_ids = []
+
+# Tracked review fixture for Shape's least-privilege candidate.4 contract. It
+# does not activate or replace the ignored live `apps.shape` entry. The global
+# ceiling permits only text editing and the existing TTS slice; the empty
+# routing default denies every other named route, while each Intent rule grants
+# exactly one Runtime Deployment.
+[apps.example-shadow-vision-consumer]
+credential = { source = "managed" }
+resource_admin = false
+allowed_intents = ["vision.segment_subject", "vision.parse_face"]
+allowed_provider_access_classes = ["standard"]
+allowed_cloud_input_modalities = []
+max_pending_jobs = 8
+default_policy = "local-first"
+allowed_policies = ["local-first"]
+
+[apps.example-shadow-vision-consumer.request_overrides]
+priority = ["interactive"]
+placement = ["local_only"]
+prefer = ["local"]
+offline_required = true
+capability_floor = ["foundational"]
+latency = ["interactive", "balanced"]
+fallback = ["none"]
+max_cost_usd = { min = 0.0, max = 0.0 }
 
 # Tracked review fixture for Shape's least-privilege candidate.4 contract. It
 # does not activate or replace the ignored live `apps.shape` entry. The global

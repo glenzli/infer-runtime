@@ -36,21 +36,22 @@ use infer_core::{
     AppConfig, AttemptOutcome, AttemptSnapshot, AttemptTrigger, AudioExecutionRequest, BuiltinTool,
     ContractError, DurablePayloadRef, EventDetectionResult, ExecutionMode, ExecutionRequirements,
     Fallback, IntentProfile, JobListPage, JobPageCursor, JobSnapshot, JobState, Modality, Priority,
-    ProviderCapability, ProviderProtocol, QuotaConfig, RequestConstraints, ResponsesRequest,
-    RuntimeConfig,
+    ProviderCapability, ProviderKind, ProviderProtocol, QuotaConfig, RequestConstraints,
+    ResponsesRequest, RuntimeConfig,
 };
 use infer_payload::PayloadError;
 use infer_provider::{
     DynAudioDuplexExecutor, DynAudioExecutor, DynAudioStreamExecutor, DynFaceDetectionExecutor,
-    DynFaceEmbeddingExecutor, DynImageEmbeddingExecutor, DynImageUnderstandingExecutor,
-    DynOcrExecutor, DynProvider, DynRetrievalExecutor, DynTextEmbeddingExecutor, ProviderError,
-    ProviderModelCatalog, probe_responses_provider, probe_responses_provider_with_effort,
+    DynFaceEmbeddingExecutor, DynFaceParsingExecutor, DynImageEmbeddingExecutor,
+    DynImageUnderstandingExecutor, DynOcrExecutor, DynProvider, DynRetrievalExecutor,
+    DynSubjectSegmentationExecutor, DynTextEmbeddingExecutor, ProviderError, ProviderModelCatalog,
+    probe_responses_provider, probe_responses_provider_with_effort,
 };
 use infer_resource::{ModelReservation, ResourceError, ResourceManager};
 use infer_store::{
     ActiveReservation, AttemptReservation, AuditEvent, AuditEventInput, ConfigSnapshot,
-    QuotaLimits, QuotaResource, Store, StoreError, TelemetryBucket, TelemetryWindow,
-    UsageLedgerEntry,
+    ExecutionOrigin, QuotaLimits, QuotaResource, Store, StoreError, TelemetryBucket,
+    TelemetryWindow, UsageLedgerEntry,
 };
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -374,6 +375,8 @@ pub struct Runtime {
     audio_duplex_executors: BTreeMap<String, DynAudioDuplexExecutor>,
     face_detection_executors: BTreeMap<String, DynFaceDetectionExecutor>,
     face_embedding_executors: BTreeMap<String, DynFaceEmbeddingExecutor>,
+    face_parsing_executors: BTreeMap<String, DynFaceParsingExecutor>,
+    subject_segmentation_executors: BTreeMap<String, DynSubjectSegmentationExecutor>,
     image_embedding_executors: BTreeMap<String, DynImageEmbeddingExecutor>,
     text_embedding_executors: BTreeMap<String, DynTextEmbeddingExecutor>,
     image_understanding_executors: BTreeMap<String, DynImageUnderstandingExecutor>,
@@ -486,6 +489,8 @@ impl Runtime {
             audio_duplex_executors: assembly.audio_duplex_executors,
             face_detection_executors: assembly.face_detection_executors,
             face_embedding_executors: assembly.face_embedding_executors,
+            face_parsing_executors: assembly.face_parsing_executors,
+            subject_segmentation_executors: assembly.subject_segmentation_executors,
             image_embedding_executors: assembly.image_embedding_executors,
             text_embedding_executors: assembly.text_embedding_executors,
             image_understanding_executors: assembly.image_understanding_executors,
@@ -578,6 +583,8 @@ impl Runtime {
             audio_duplex_executors: BTreeMap::new(),
             face_detection_executors: BTreeMap::new(),
             face_embedding_executors: BTreeMap::new(),
+            face_parsing_executors: BTreeMap::new(),
+            subject_segmentation_executors: BTreeMap::new(),
             image_embedding_executors: BTreeMap::new(),
             text_embedding_executors: BTreeMap::new(),
             image_understanding_executors: BTreeMap::new(),
@@ -2080,6 +2087,10 @@ impl Runtime {
                     app_id: prepared.app_id.clone(),
                     provider: prepared.provider_id.clone(),
                     deployment: prepared.deployment_id.clone(),
+                    execution_origin: execution_origin_for_provider(
+                        &self.config,
+                        &prepared.provider_id,
+                    ),
                     outcome: attempt_outcome_code(outcome).into(),
                     amount_usd: prepared.estimated_cost_usd,
                     // A deployment currently supplies a whole-request cost
@@ -2400,6 +2411,23 @@ fn attempt_outcome_code(outcome: AttemptOutcome) -> &'static str {
     }
 }
 
+/// Produces the infrastructure accounting origin from the configured Provider
+/// kind selected for this Attempt. This deliberately does not inspect the
+/// provider identifier or physical model label: those are mutable names and
+/// cannot safely drive cross-collector de-duplication.
+fn execution_origin_for_provider(
+    config: &RuntimeConfig,
+    provider_id: &str,
+) -> Option<ExecutionOrigin> {
+    config
+        .providers
+        .get(provider_id)
+        .map(|provider| match provider.kind {
+            ProviderKind::CodexAppServer => ExecutionOrigin::Codex,
+            _ => ExecutionOrigin::Other,
+        })
+}
+
 fn attempt_trigger_code(trigger: AttemptTrigger) -> &'static str {
     match trigger {
         AttemptTrigger::Initial => "initial",
@@ -2513,7 +2541,8 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use infer_core::{
-        CapabilityLevel, LocalInventoryConfig, LocalInventoryKind, QuotaLimitConfig, RuntimeConfig,
+        CapabilityLevel, LocalInventoryConfig, LocalInventoryKind, ProviderKind, QuotaLimitConfig,
+        RuntimeConfig,
     };
     use infer_payload::EncryptedPayloadSpool;
     use infer_provider::Provider;
@@ -2977,11 +3006,43 @@ mod tests {
         let accounting = runtime.budget_snapshot().unwrap();
         assert_eq!(accounting.usage_ledger.len(), 1);
         assert!(accounting.usage_ledger[0].estimated);
+        assert_eq!(
+            accounting.usage_ledger[0].execution_origin,
+            Some(ExecutionOrigin::Other)
+        );
         assert!(accounting.active_reservations.is_empty());
+        let observer = runtime.observer_snapshot().await.unwrap();
+        let usage_daily = &observer.extensions["infer-runtime"]["usage_daily"];
+        assert_eq!(usage_daily["schema"], "infer-runtime.usage.daily");
+        assert_eq!(usage_daily["schema_version"], "20260813.2");
+        assert_eq!(usage_daily["calendar"], "host_local");
+        let days = usage_daily["days"].as_array().unwrap();
+        assert_eq!(days.len(), 1);
+        assert_eq!(days[0]["models"][0]["id"], "qwen");
+        assert_eq!(days[0]["models"][0]["execution_origin"], "other");
+        assert_eq!(days[0]["models"][0]["total_tokens"], 0);
+        assert_eq!(days[0]["models"][0]["cost_usd"], 0.0);
         let audit = runtime.audit_events(job_id).unwrap();
         assert!(audit.iter().any(|event| event.kind == "job.admitted"));
         assert!(audit.iter().any(|event| event.kind == "attempt.opened"));
         assert!(audit.iter().any(|event| event.kind == "attempt.finished"));
+    }
+
+    #[test]
+    fn usage_execution_origin_uses_provider_kind_not_provider_or_model_name() {
+        let mut config = config();
+        let provider = config.providers.get_mut("local").unwrap();
+        provider.kind = ProviderKind::CodexAppServer;
+
+        assert_eq!(
+            execution_origin_for_provider(&config, "local"),
+            Some(ExecutionOrigin::Codex)
+        );
+        assert_eq!(
+            execution_origin_for_provider(&config, "missing"),
+            None,
+            "unknown source must fail closed rather than be guessed"
+        );
     }
 
     #[tokio::test]

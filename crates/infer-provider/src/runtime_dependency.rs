@@ -307,6 +307,115 @@ pub fn verify_yamnet_worker(
     })
 }
 
+/// Verifies that the configured Python runtime can import Core ML Tools and
+/// that the exact admitted SAM artifact set exposes the frozen three-model
+/// interface. The probe never receives image input and never emits paths.
+pub fn verify_coreml_sam_worker(
+    command: &str,
+    args: &[String],
+    model_path: &str,
+    artifact_sha256: &str,
+) -> Result<RuntimeDependencyCheck, Box<RuntimeDependencyCheck>> {
+    let failure = |message: &str| RuntimeDependencyCheck {
+        name: "coreml_sam_worker".into(),
+        requested: "admitted_build".into(),
+        status: ProviderReadinessStatus::Unavailable,
+        resolved_path: None,
+        canonical_target: None,
+        version: None,
+        searched_paths: Vec::new(),
+        message: Some(message.into()),
+    };
+    let mut child = Command::new(command)
+        .args(args)
+        .args([
+            "--verify-model",
+            model_path,
+            "--artifact-sha256",
+            artifact_sha256,
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| Box::new(failure("SAM readiness probe could not start")))?;
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() < WORKER_PROBE_TIMEOUT => {
+                thread::sleep(Duration::from_millis(25));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(Box::new(failure("SAM readiness probe timed out")));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(Box::new(failure("SAM readiness probe failed")));
+            }
+        }
+    };
+    let mut output = String::new();
+    if let Some(stdout) = child.stdout.take() {
+        stdout
+            .take(MAX_WORKER_PROBE_OUTPUT_BYTES)
+            .read_to_string(&mut output)
+            .map_err(|_| Box::new(failure("SAM readiness response was unreadable")))?;
+    }
+    if !status.success() {
+        let message = serde_json::from_str::<serde_json::Value>(&output)
+            .ok()
+            .and_then(|response| response.get("error")?.as_str().map(str::to_owned))
+            .map_or(
+                "SAM readiness probe reported an unavailable runtime or model",
+                |code| {
+                    if code == "sam_model_not_prepared" {
+                        "SAM Core ML compiled cache is missing or incompatible; prepare this Build before restarting inferd"
+                    } else {
+                        "SAM readiness probe reported an unavailable runtime or model"
+                    }
+                },
+            );
+        return Err(Box::new(failure(message)));
+    }
+    let response: serde_json::Value = serde_json::from_str(&output)
+        .map_err(|_| Box::new(failure("SAM readiness response was malformed")))?;
+    let version = response
+        .get("runtime_version")
+        .and_then(serde_json::Value::as_str);
+    let components = response
+        .get("model_components")
+        .and_then(serde_json::Value::as_array);
+    let input_size = response
+        .get("input_size")
+        .and_then(serde_json::Value::as_u64);
+    let max_prompts = response
+        .get("max_prompts")
+        .and_then(serde_json::Value::as_u64);
+    if version.is_none_or(str::is_empty)
+        || components.is_none_or(|items| items.len() != 3)
+        || input_size != Some(1024)
+        || max_prompts != Some(16)
+    {
+        return Err(Box::new(failure(
+            "SAM readiness response did not match the admitted runtime contract",
+        )));
+    }
+    Ok(RuntimeDependencyCheck {
+        name: "coreml_sam_worker".into(),
+        requested: "admitted_build".into(),
+        status: ProviderReadinessStatus::Ready,
+        resolved_path: None,
+        canonical_target: None,
+        version: Some(format!("coremltools {}", version.unwrap_or_default())),
+        searched_paths: Vec::new(),
+        message: None,
+    })
+}
+
 fn worker_probe_failure(message: &str) -> RuntimeDependencyCheck {
     RuntimeDependencyCheck {
         name: "yamnet_worker".into(),
