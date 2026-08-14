@@ -39,6 +39,7 @@ Consumer 选择某个条目的精确 `id@schema_version` 后，在该能力请�
 | `infer.responses` | `20260812.1` | `/v1/responses` | stable |
 | `infer.audio.transcription` | `20260811.1` | `/v1/audio/transcriptions` | stable |
 | `infer.audio.event-detection` | `20260813.2` | `/v1/audio/event-detections` | stable |
+| `infer.audio.embedding` | `20260815.1` | `/v1/audio/embeddings`、`/v1/audio/text-embeddings` | experimental |
 | `infer.audio.alignment` | `20260811.1` | `/v1/audio/alignments` | stable |
 | `infer.audio.speech` | `20260811.1` | `/v1/audio/speech` | stable |
 | `infer.audio.voice-clone` | `20260811.1` | `/v1/audio/voice-clones` | experimental |

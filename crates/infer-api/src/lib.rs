@@ -50,8 +50,9 @@ use infer_control::{
     MaintenanceLeaseRevokeRequest, Runtime, RuntimeError, TelemetryRange,
 };
 use infer_core::{
-    AlignmentRequest, AudioExecutionRequest, AudioFile, EventDetectionRequest, JobPageCursor,
-    JobState, MAX_AUDIO_UPLOAD_BYTES, Priority, ResponsesRequest, SpeechFormat, SpeechRequest,
+    AlignmentRequest, AudioEmbeddingRequest, AudioExecutionRequest, AudioFile,
+    AudioTextEmbeddingRequest, EventDetectionRequest, JobPageCursor, JobState,
+    MAX_AUDIO_UPLOAD_BYTES, Priority, ResponsesRequest, SpeechFormat, SpeechRequest,
     TranscriptionFormat, TranscriptionRequest, VoiceCloneRequest,
 };
 use infer_payload::PayloadError;
@@ -93,6 +94,11 @@ fn base_router(runtime: Arc<Runtime>) -> Router {
         .route("/v1/responses/{response_id}/cancel", post(cancel_response))
         .route("/v1/audio/transcriptions", post(create_transcription))
         .route("/v1/audio/event-detections", post(create_event_detection))
+        .route("/v1/audio/embeddings", post(create_audio_embedding))
+        .route(
+            "/v1/audio/text-embeddings",
+            post(create_audio_text_embedding),
+        )
         .route(
             "/v1/audio/transcriptions/stream",
             get(audio_streaming::open_transcription_stream),
@@ -528,6 +534,69 @@ async fn create_event_detection(
     }
 }
 
+async fn create_audio_embedding(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    multipart: Multipart,
+) -> Result<Response<Body>, ApiError> {
+    let app_id = authenticate(&state, &headers)?;
+    let form = AudioMultipart::parse(multipart, AudioMultipartContract::Embedding).await?;
+    let request = AudioEmbeddingRequest {
+        model: form.required_text("model")?,
+        file: form.required_file()?,
+        source_revision: form.required_text("source_revision")?,
+        metadata: fail_closed_audio_embedding_metadata(form.metadata)?,
+    };
+    let result = state
+        .runtime
+        .execute_audio(&app_id, AudioExecutionRequest::Embedding(request))
+        .await?;
+    match result.output {
+        AudioExecutionOutput::Json(value) => json_response(value),
+        AudioExecutionOutput::Audio { .. } => Err(ApiError::internal(
+            "audio embedding executor returned audio",
+        )),
+    }
+}
+
+async fn create_audio_text_embedding(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    request: Result<Json<AudioTextEmbeddingRequest>, JsonRejection>,
+) -> Result<Response<Body>, ApiError> {
+    let app_id = authenticate(&state, &headers)?;
+    let mut request = strict_json(request)?;
+    request.metadata = fail_closed_audio_embedding_metadata(request.metadata)?;
+    let result = state
+        .runtime
+        .execute_audio(&app_id, AudioExecutionRequest::TextEmbedding(request))
+        .await?;
+    match result.output {
+        AudioExecutionOutput::Json(value) => json_response(value),
+        AudioExecutionOutput::Audio { .. } => Err(ApiError::internal(
+            "audio text embedding executor returned audio",
+        )),
+    }
+}
+
+fn fail_closed_audio_embedding_metadata(
+    mut metadata: BTreeMap<String, String>,
+) -> Result<BTreeMap<String, String>, ApiError> {
+    for (key, required) in [
+        ("infer.placement", "local_only"),
+        ("infer.offline_required", "true"),
+        ("infer.fallback", "none"),
+    ] {
+        if metadata.get(key).is_some_and(|actual| actual != required) {
+            return Err(ApiError::bad_request(format!(
+                "{key} is fixed to {required} for audio-text embedding"
+            )));
+        }
+        metadata.insert(key.into(), required.into());
+    }
+    Ok(metadata)
+}
+
 fn fail_closed_event_metadata(
     mut metadata: BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, String>, ApiError> {
@@ -675,13 +744,16 @@ enum AudioMultipartContract {
     Transcription,
     Alignment,
     EventDetection,
+    Embedding,
     VoiceClone,
 }
 
 impl AudioMultipartContract {
     fn file_field(self) -> &'static str {
         match self {
-            Self::Transcription | Self::Alignment | Self::EventDetection => "file",
+            Self::Transcription | Self::Alignment | Self::EventDetection | Self::Embedding => {
+                "file"
+            }
             Self::VoiceClone => "reference_audio",
         }
     }
@@ -694,6 +766,7 @@ impl AudioMultipartContract {
             ),
             Self::Alignment => matches!(name, "model" | "text" | "language"),
             Self::EventDetection => name == "model",
+            Self::Embedding => matches!(name, "model" | "source_revision"),
             Self::VoiceClone => matches!(
                 name,
                 "model" | "input" | "reference_text" | "language" | "response_format"

@@ -5,6 +5,7 @@
     "contracts/capabilities/infer.audio.alignment/20260811.1/openapi.json": "76c7f4ab7d5e6333808aceec558822d9deceb2918bc478e326593d302dcb96e8",
     "contracts/capabilities/infer.audio.event-detection/20260813.1/openapi.json": "c7b6e74840bc92d92d582df58252f01f2e0dfed9178f8f7d4318349bdae42ada",
     "contracts/capabilities/infer.audio.event-detection/20260813.2/openapi.json": "a7179c88c03a768299835bd84c4c6f8d68e47f3c51a96ed4fe01387cf6fb8613",
+    "contracts/capabilities/infer.audio.embedding/20260815.1/openapi.json": "757d8ca9f8ca1375f841a831e46036a2658b93e85ab28661c889f717907a1924",
     "contracts/capabilities/infer.audio.speech/20260811.1/openapi.json": "19d29d6799a6cee1a6d24a63f9a9aab73ab925dd2e79f7181fbfe922f6906c68",
     "contracts/capabilities/infer.audio.transcription-stream/20260811.1/openapi.json": "855d7a886689e442d5aa6260271061bc1a317bf81fbb28d6257071d4e2f81726",
     "contracts/capabilities/infer.audio.transcription/20260811.1/openapi.json": "53ee5993abbaa3ccc04a5b5f77f3457fbd2f29cccda0b33b0959b6b900c25e59",

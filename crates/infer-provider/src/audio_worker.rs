@@ -11,9 +11,10 @@ use std::{
 
 use async_trait::async_trait;
 use infer_core::{
-    AlignmentRequest, AudioExecutionRequest, AudioFile, EventDetectionRequest,
-    EventDetectionResult, SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1, SpeechFormat, SpeechRequest,
-    TranscriptionRequest, VoiceCloneRequest,
+    AlignmentRequest, AudioEmbeddingRequest, AudioExecutionRequest, AudioFile,
+    AudioTextEmbeddingRequest, EventDetectionRequest, EventDetectionResult,
+    SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1, SpeechFormat, SpeechRequest, TranscriptionRequest,
+    VoiceCloneRequest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -24,6 +25,7 @@ use tokio::{
     process::{Child, ChildStdin, ChildStdout, Command},
     sync::Mutex,
 };
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::ProviderError;
@@ -46,6 +48,7 @@ pub trait AudioExecutor: Send + Sync {
         &self,
         physical_model: &str,
         request: AudioExecutionRequest,
+        cancellation: CancellationToken,
     ) -> Result<AudioExecutionOutput, ProviderError>;
 }
 
@@ -154,7 +157,11 @@ impl AudioWorkerExecutor {
         spawn_worker(&self.command, &self.args).await
     }
 
-    async fn round_trip(&self, request: &WorkerRequest) -> Result<Value, ProviderError> {
+    async fn round_trip(
+        &self,
+        request: &WorkerRequest,
+        cancellation: CancellationToken,
+    ) -> Result<Value, ProviderError> {
         let mut guard = self.process.lock().await;
         let mut process = match guard.take() {
             Some(mut process) => {
@@ -173,10 +180,19 @@ impl AudioWorkerExecutor {
 
         loop {
             let mut response_line = String::new();
-            let bytes = (&mut process.stdout)
-                .take((MAX_WORKER_RESPONSE_LINE_BYTES + 1) as u64)
-                .read_line(&mut response_line)
-                .await?;
+            let bytes = {
+                let mut limited =
+                    (&mut process.stdout).take((MAX_WORKER_RESPONSE_LINE_BYTES + 1) as u64);
+                let read = limited.read_line(&mut response_line);
+                tokio::pin!(read);
+                tokio::select! {
+                    result = &mut read => result?,
+                    _ = cancellation.cancelled() => {
+                        let _ = process.child.kill().await;
+                        return Err(ProviderError::Protocol("audio_execution_cancelled".into()));
+                    }
+                }
+            };
             if bytes == 0 {
                 return Err(ProviderError::Protocol(
                     "audio worker exited without a response".into(),
@@ -239,6 +255,7 @@ impl AudioExecutor for AudioWorkerExecutor {
         &self,
         physical_model: &str,
         request: AudioExecutionRequest,
+        cancellation: CancellationToken,
     ) -> Result<AudioExecutionOutput, ProviderError> {
         if matches!(
             &request,
@@ -262,7 +279,7 @@ impl AudioExecutor for AudioWorkerExecutor {
                 })?
         };
         let prepared = prepare_worker_request(physical_model, request).await?;
-        let mut result = self.round_trip(&prepared.request).await?;
+        let mut result = self.round_trip(&prepared.request, cancellation).await?;
         if prepared.request.operation == "detect_events" {
             let typed: EventDetectionResult = serde_json::from_value(result)?;
             typed
@@ -298,6 +315,12 @@ async fn prepare_worker_request(
         AudioExecutionRequest::EventDetection(request) => {
             prepare_event_detection(request_id, physical_model, request, &temporary_files).await?
         }
+        AudioExecutionRequest::Embedding(request) => {
+            prepare_audio_embedding(request_id, physical_model, request, &temporary_files).await?
+        }
+        AudioExecutionRequest::TextEmbedding(request) => {
+            prepare_text_embedding(request_id, physical_model, request)
+        }
         AudioExecutionRequest::Speech(request) => {
             prepare_speech(request_id, physical_model, request, &temporary_files)
         }
@@ -310,6 +333,33 @@ async fn prepare_worker_request(
         _temporary_files: temporary_files,
         audio_output,
     })
+}
+
+async fn prepare_audio_embedding(
+    request_id: String,
+    model: &str,
+    request: AudioEmbeddingRequest,
+    temporary_files: &TempDir,
+) -> Result<(WorkerRequest, Option<(PathBuf, SpeechFormat)>), ProviderError> {
+    let audio_path = write_audio_file(temporary_files, "input", &request.file).await?;
+    Ok((
+        worker_request(request_id, "embed_audio", model, Some(audio_path)),
+        None,
+    ))
+}
+
+fn prepare_text_embedding(
+    request_id: String,
+    model: &str,
+    request: AudioTextEmbeddingRequest,
+) -> (WorkerRequest, Option<(PathBuf, SpeechFormat)>) {
+    (
+        WorkerRequest {
+            text: Some(request.text),
+            ..worker_request(request_id, "embed_text", model, None)
+        },
+        None,
+    )
 }
 
 async fn prepare_event_detection(
@@ -440,6 +490,41 @@ fn worker_request(
         speed: None,
         temperature: None,
         format: None,
+    }
+}
+
+#[cfg(all(test, unix))]
+mod cancellation_tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn cancellation_terminates_a_worker_waiting_for_an_embedding_response() {
+        let executor = AudioWorkerExecutor::new(
+            "test-audio-worker",
+            "/bin/sh".into(),
+            vec!["-c".into(), "read _; sleep 30".into()],
+        );
+        let cancellation = CancellationToken::new();
+        let request = AudioExecutionRequest::TextEmbedding(AudioTextEmbeddingRequest {
+            model: "audio.embed_text_query".into(),
+            text: "bounded fixture".into(),
+            query_revision: "query:1".into(),
+            language: "en".into(),
+            metadata: BTreeMap::new(),
+        });
+        let task = tokio::spawn({
+            let cancellation = cancellation.clone();
+            async move { executor.execute("test-model", request, cancellation).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        cancellation.cancel();
+        let error = task.await.unwrap().unwrap_err();
+        assert!(matches!(
+            error,
+            ProviderError::Protocol(message) if message == "audio_execution_cancelled"
+        ));
     }
 }
 

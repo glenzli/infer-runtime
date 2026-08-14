@@ -39,3 +39,9 @@ The package currently supports Unix owner/mode verification (macOS/Linux). A Win
 blocked until Infra Discovery and credential ACL checks are implemented with the platform's native
 current-user security model. Stable Responses SSE and speech PCM streaming use separate bounded
 session APIs (`stream_response` and `stream_speech`); unary return types remain unchanged.
+
+`embed_audio_file` and `embed_audio_text` implement the additive experimental
+`infer.audio.embedding@20260815.1` capability. They validate one 512d
+L2-normalized audio/text retrieval space, exact Build provenance, and source/query revision shape;
+unknown response fields remain available in `AudioEmbeddingResponse::extra`. They do not turn
+audio evidence into transcript/event facts or claim multilingual retrieval quality.

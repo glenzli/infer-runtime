@@ -57,7 +57,7 @@ pub use probe::{
 pub use runtime_dependency::{
     ProviderReadinessStatus, ProviderRuntimeReadiness, ResolvedProviderProcess,
     RuntimeDependencyCheck, preflight_provider_runtime, provider_requires_ffmpeg,
-    resolve_provider_process, verify_coreml_sam_worker, verify_yamnet_worker,
+    resolve_provider_process, verify_clap_worker, verify_coreml_sam_worker, verify_yamnet_worker,
 };
 pub use text_retrieval_worker::{
     DynRetrievalExecutor, RetrievalBuildContract, RetrievalEmbeddingExecutionOutput,

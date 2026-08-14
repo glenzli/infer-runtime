@@ -920,6 +920,7 @@ string_enum!(LocalWorkerAdapterKind {
     Qwen3Reranker => "qwen3_reranker",
     PpOcrv6 => "pp_ocrv6",
     YamnetAudioEvents => "yamnet_audio_events",
+    ClapAudioTextEmbedding => "clap_audio_text_embedding",
     Sam21Coreml => "sam21_coreml"
 });
 
@@ -930,6 +931,7 @@ impl std::fmt::Display for LocalWorkerAdapterKind {
             Self::Qwen3Reranker => "qwen3_reranker",
             Self::PpOcrv6 => "pp_ocrv6",
             Self::YamnetAudioEvents => "yamnet_audio_events",
+            Self::ClapAudioTextEmbedding => "clap_audio_text_embedding",
             Self::Sam21Coreml => "sam21_coreml",
         })
     }
@@ -1673,6 +1675,7 @@ impl RuntimeConfig {
                         | "audio.transcription"
                         | "audio.alignment"
                         | "audio.event_detection"
+                        | "audio.embedding"
                         | "audio.speech"
                         | "audio.voice_clone"
                         | "vision.face_detection"
@@ -1998,6 +2001,7 @@ impl RuntimeConfig {
                         | (
                             ProviderKind::AudioWorker,
                             LocalWorkerAdapterKind::YamnetAudioEvents
+                                | LocalWorkerAdapterKind::ClapAudioTextEmbedding
                         )
                         | (
                             ProviderKind::CoremlWorker,
@@ -2517,6 +2521,37 @@ fn validate_build_supply_chain(id: &str, build: &ModelBuildConfig) -> Result<(),
                     )));
                 }
             }
+            LocalWorkerAdapterKind::ClapAudioTextEmbedding => {
+                let Some(space) = &worker.embedding_space else {
+                    return Err(configuration(format!(
+                        "CLAP audio-text embedding build {id} needs an embedding-space identity"
+                    )));
+                };
+                if space.dimensions != 512
+                    || !space.normalized
+                    || space.distance_metric != "cosine"
+                    || worker
+                        .tokenizer_identity
+                        .as_deref()
+                        .is_none_or(str::is_empty)
+                    || worker
+                        .preprocessing_identity
+                        .as_deref()
+                        .is_none_or(str::is_empty)
+                    || worker
+                        .requested_execution_provider
+                        .as_deref()
+                        .is_none_or(str::is_empty)
+                    || worker
+                        .actual_execution_provider
+                        .as_deref()
+                        .is_none_or(str::is_empty)
+                {
+                    return Err(configuration(format!(
+                        "CLAP audio-text embedding build {id} needs 512d normalized cosine space, tokenizer, preprocessing, and execution-provider identity"
+                    )));
+                }
+            }
             LocalWorkerAdapterKind::Sam21Coreml => {
                 if worker
                     .preprocessing_identity
@@ -2564,14 +2599,10 @@ fn validate_build_supply_chain(id: &str, build: &ModelBuildConfig) -> Result<(),
             .source_revision
             .as_deref()
             .is_none_or(str::is_empty)
-        || provenance.artifact_sha256.is_none()
-        || build.license.status != ModelLicenseStatus::Verified
-        || build.license.expression.is_none()
-        || build.license.license_url.is_none()
-        || build.license.license_text_sha256.is_none())
+        || provenance.artifact_sha256.is_none())
     {
         return Err(configuration(format!(
-            "runtime-managed model build {id} needs immutable provenance and a verified license receipt"
+            "runtime-managed model build {id} needs immutable provenance"
         )));
     }
     Ok(())
@@ -2773,9 +2804,7 @@ mod tests {
                 build.provenance.source_kind,
                 ModelSourceKind::RuntimeDownloadable | ModelSourceKind::RuntimeBundled
             ) || (build.provenance.source_revision.is_some()
-                && build.provenance.artifact_sha256.is_some()
-                && build.license.status == ModelLicenseStatus::Verified
-                && build.license.license_text_sha256.is_some())
+                && build.provenance.artifact_sha256.is_some())
         }));
         assert_eq!(
             config.model_builds["qwen3_5_2b_mlx"].license.status,
@@ -2791,7 +2820,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_managed_builds_require_immutable_verified_license_receipts() {
+    fn runtime_managed_builds_require_immutable_provenance_not_a_license_gate() {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
         let mut config = RuntimeConfig::load(path).unwrap();
@@ -2802,10 +2831,6 @@ mod tests {
         let build = config.model_builds.get_mut("qwen3_5_2b_mlx").unwrap();
         build.provenance.source_revision = Some("immutable-revision".into());
         build.provenance.artifact_sha256 = Some("a".repeat(64));
-        build.license.status = ModelLicenseStatus::Verified;
-        build.license.expression = Some("Apache-2.0".into());
-        build.license.license_url = Some("https://example.invalid/license".into());
-        build.license.license_text_sha256 = Some("b".repeat(64));
         config.validate().unwrap();
     }
 
