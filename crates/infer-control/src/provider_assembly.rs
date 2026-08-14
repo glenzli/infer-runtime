@@ -9,14 +9,14 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use infer_artifact::ArtifactStore;
 use infer_core::{LocalInventoryKind, LocalWorkerAdapterKind, ProviderKind, RuntimeConfig};
 use infer_provider::{
-    AudioWorkerExecutor, CodexAppServerProvider, CoremlSamExecutor, DynAudioDuplexExecutor,
-    DynAudioExecutor, DynAudioStreamExecutor, DynFaceDetectionExecutor, DynFaceEmbeddingExecutor,
-    DynFaceParsingExecutor, DynImageEmbeddingExecutor, DynImageUnderstandingExecutor,
-    DynOcrExecutor, DynProvider, DynRetrievalExecutor, DynSubjectSegmentationExecutor,
-    DynTextEmbeddingExecutor, OcrBuildContract, OcrWorkerExecutor, OllamaVisionExecutor,
-    OnnxProviderRuntime, ProviderRuntimeReadiness, ResponsesProvider, RetrievalBuildContract,
-    RetrievalWorkerExecutor, SamBuildContract, provider_requires_ffmpeg, resolve_provider_process,
-    verify_clap_worker, verify_coreml_sam_worker, verify_yamnet_worker,
+    AudioTextQueryNormalizer, AudioWorkerExecutor, CodexAppServerProvider, CoremlSamExecutor,
+    DynAudioDuplexExecutor, DynAudioExecutor, DynAudioStreamExecutor, DynFaceDetectionExecutor,
+    DynFaceEmbeddingExecutor, DynFaceParsingExecutor, DynImageEmbeddingExecutor,
+    DynImageUnderstandingExecutor, DynOcrExecutor, DynProvider, DynRetrievalExecutor,
+    DynSubjectSegmentationExecutor, DynTextEmbeddingExecutor, OcrBuildContract, OcrWorkerExecutor,
+    OllamaVisionExecutor, OnnxProviderRuntime, ProviderRuntimeReadiness, ResponsesProvider,
+    RetrievalBuildContract, RetrievalWorkerExecutor, SamBuildContract, provider_requires_ffmpeg,
+    resolve_provider_process, verify_clap_worker, verify_coreml_sam_worker, verify_yamnet_worker,
 };
 use infer_resource::{DynNativeModelController, NativeControllerMap};
 
@@ -128,6 +128,7 @@ impl ProviderAssembly {
                         .as_ref()
                         .expect("audio worker requires an artifact store");
                     let mut admitted_model_paths = BTreeMap::new();
+                    let mut query_normalizers = BTreeMap::new();
                     let mut admitted_worker_paths = Vec::new();
                     for deployment in config
                         .deployments
@@ -161,6 +162,65 @@ impl ProviderAssembly {
                             build.model_id.clone(),
                             resolved.runtime_root.to_string_lossy().into_owned(),
                         );
+                        if let Some(normalizer) = &worker.audio_text_query_normalizer {
+                            let deployment = config
+                                .deployments
+                                .get(&normalizer.deployment)
+                                .ok_or_else(|| {
+                                    RuntimeError::Provider(infer_provider::ProviderError::Protocol(
+                                        format!(
+                                            "CLAP query normalizer Deployment {} is absent",
+                                            normalizer.deployment
+                                        ),
+                                    ))
+                                })?;
+                            let provider =
+                                config.providers.get(&deployment.provider).ok_or_else(|| {
+                                    RuntimeError::Provider(infer_provider::ProviderError::Protocol(
+                                        "CLAP query normalizer Provider is absent".into(),
+                                    ))
+                                })?;
+                            let normalizer_build =
+                                config.model_builds.get(&deployment.build).ok_or_else(|| {
+                                    RuntimeError::Provider(infer_provider::ProviderError::Protocol(
+                                        "CLAP query normalizer Build is absent".into(),
+                                    ))
+                                })?;
+                            if provider.kind != ProviderKind::Responses
+                                || provider.placement != infer_core::Placement::Local
+                                || normalizer_build.input_modalities
+                                    != vec![infer_core::Modality::Text]
+                                || normalizer_build.output_modalities
+                                    != vec![infer_core::Modality::Text]
+                            {
+                                return Err(RuntimeError::Provider(infer_provider::ProviderError::Protocol("CLAP query normalizer must be a local text Responses Deployment".into())));
+                            }
+                            query_normalizers.insert(
+                                build.model_id.clone(),
+                                AudioTextQueryNormalizer {
+                                    endpoint: format!(
+                                        "{}/responses",
+                                        provider
+                                            .base_url
+                                            .as_deref()
+                                            .ok_or_else(|| RuntimeError::Provider(
+                                                infer_provider::ProviderError::Protocol(
+                                                    "CLAP query normalizer has no endpoint".into()
+                                                )
+                                            ))?
+                                            .trim_end_matches('/')
+                                    ),
+                                    model: normalizer_build.model_id.clone(),
+                                    deployment: normalizer.deployment.clone(),
+                                    build: deployment.build.clone(),
+                                    prompt_revision: normalizer.prompt_revision.clone(),
+                                    source_language: normalizer.source_language.clone(),
+                                    target_language: normalizer.target_language.clone(),
+                                    max_query_bytes: normalizer.max_query_bytes,
+                                    max_output_bytes: normalizer.max_output_bytes,
+                                },
+                            );
+                        }
                         admitted_worker_paths.push((
                             worker.adapter,
                             resolved.runtime_root.to_string_lossy().into_owned(),
@@ -205,12 +265,15 @@ impl ProviderAssembly {
                             }
                         }
                     }
-                    let adapter = Arc::new(AudioWorkerExecutor::with_admitted_model_paths(
-                        id,
-                        process.command.clone().expect("resolved command"),
-                        process.args.clone(),
-                        admitted_model_paths,
-                    ));
+                    let adapter = Arc::new(
+                        AudioWorkerExecutor::with_admitted_model_paths_and_normalizers(
+                            id,
+                            process.command.clone().expect("resolved command"),
+                            process.args.clone(),
+                            admitted_model_paths,
+                            query_normalizers,
+                        ),
+                    );
                     assembly
                         .audio_executors
                         .insert(id.clone(), Arc::clone(&adapter) as DynAudioExecutor);
