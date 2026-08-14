@@ -18,11 +18,14 @@ mod transport;
 mod vision;
 
 pub use audio::{
-    AlignmentItem, AlignmentResponse, AudioAnalysisCoverage, AudioBytesResponse,
-    AudioCoverageStatus, AudioEventDetectionResponse, DetectedSoundEvent, ExecutionMode,
-    SoundEventDetectionPolicy, SoundEventOntology, SoundEventProvenance, SoundEventSmoothingPolicy,
-    SpeechByteStream, SpeechFormat, SpeechPresence, SpeechPresenceStatus, SpeechRequest,
-    TranscriptionFormat, TranscriptionLanguageEvidence, TranscriptionLanguageEvidenceSource,
+    ALIGNMENT_CAPABILITIES, AUDIO_EMBEDDING_CAPABILITIES, AlignmentItem, AlignmentResponse,
+    AudioAnalysisCoverage, AudioBytesResponse, AudioCoverageStatus, AudioEmbeddingProvenance,
+    AudioEmbeddingResponse, AudioEmbeddingSpace, AudioEventDetectionResponse,
+    AudioTextEmbeddingRequest, DetectedSoundEvent, EVENT_DETECTION_CAPABILITIES, ExecutionMode,
+    SPEECH_CAPABILITIES, SoundEventDetectionPolicy, SoundEventOntology, SoundEventProvenance,
+    SoundEventSmoothingPolicy, SpeechByteStream, SpeechFormat, SpeechPresence,
+    SpeechPresenceStatus, SpeechRequest, TRANSCRIPTION_CAPABILITIES, TranscriptionFormat,
+    TranscriptionLanguageEvidence, TranscriptionLanguageEvidenceSource,
     TranscriptionLanguageSegment, TranscriptionResponse,
 };
 pub use contract::{

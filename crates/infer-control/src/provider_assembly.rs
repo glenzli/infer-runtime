@@ -16,7 +16,7 @@ use infer_provider::{
     DynTextEmbeddingExecutor, OcrBuildContract, OcrWorkerExecutor, OllamaVisionExecutor,
     OnnxProviderRuntime, ProviderRuntimeReadiness, ResponsesProvider, RetrievalBuildContract,
     RetrievalWorkerExecutor, SamBuildContract, provider_requires_ffmpeg, resolve_provider_process,
-    verify_coreml_sam_worker, verify_yamnet_worker,
+    verify_clap_worker, verify_coreml_sam_worker, verify_yamnet_worker,
 };
 use infer_resource::{DynNativeModelController, NativeControllerMap};
 
@@ -128,6 +128,7 @@ impl ProviderAssembly {
                         .as_ref()
                         .expect("audio worker requires an artifact store");
                     let mut admitted_model_paths = BTreeMap::new();
+                    let mut admitted_worker_paths = Vec::new();
                     for deployment in config
                         .deployments
                         .values()
@@ -137,7 +138,11 @@ impl ProviderAssembly {
                         let Some(worker) = &build.local_worker else {
                             continue;
                         };
-                        debug_assert_eq!(worker.adapter, LocalWorkerAdapterKind::YamnetAudioEvents);
+                        debug_assert!(matches!(
+                            worker.adapter,
+                            LocalWorkerAdapterKind::YamnetAudioEvents
+                                | LocalWorkerAdapterKind::ClapAudioTextEmbedding
+                        ));
                         let resolved = match store.resolve_local_worker_build_identity(
                             &deployment.build,
                             &worker.adapter.to_string(),
@@ -156,14 +161,29 @@ impl ProviderAssembly {
                             build.model_id.clone(),
                             resolved.runtime_root.to_string_lossy().into_owned(),
                         );
+                        admitted_worker_paths.push((
+                            worker.adapter,
+                            resolved.runtime_root.to_string_lossy().into_owned(),
+                        ));
                     }
                     if provider_requires_ffmpeg(config, id) {
-                        for model_path in admitted_model_paths.values() {
-                            match verify_yamnet_worker(
-                                process.command.as_deref().expect("resolved command"),
-                                &process.args,
-                                model_path,
-                            ) {
+                        for (adapter_kind, model_path) in admitted_worker_paths {
+                            let check = match adapter_kind {
+                                LocalWorkerAdapterKind::YamnetAudioEvents => verify_yamnet_worker(
+                                    process.command.as_deref().expect("resolved command"),
+                                    &process.args,
+                                    &model_path,
+                                ),
+                                LocalWorkerAdapterKind::ClapAudioTextEmbedding => {
+                                    verify_clap_worker(
+                                        process.command.as_deref().expect("resolved command"),
+                                        &process.args,
+                                        &model_path,
+                                    )
+                                }
+                                _ => continue,
+                            };
+                            match check {
                                 Ok(check) => assembly
                                     .readiness
                                     .get_mut(id)
@@ -178,7 +198,7 @@ impl ProviderAssembly {
                                     readiness.summary = check
                                         .message
                                         .clone()
-                                        .unwrap_or_else(|| "YAMNet worker is unavailable".into());
+                                        .unwrap_or_else(|| "audio worker is unavailable".into());
                                     readiness.checks.push(*check);
                                     continue 'providers;
                                 }

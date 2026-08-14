@@ -1,0 +1,288 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.audio.embedding",
+    "version": "20260815.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.audio.embedding@20260815.1",
+  "paths": {
+    "/v1/audio/embeddings": {
+      "post": {
+        "operationId": "createAudioEmbedding",
+        "x-infer-stability": "experimental",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AudioEmbeddingCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/AudioEmbeddingForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "L2-normalized vector for one bounded audio chunk",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioEmbeddingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/audio/text-embeddings": {
+      "post": {
+        "operationId": "createAudioTextEmbedding",
+        "x-infer-stability": "experimental",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/AudioEmbeddingCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AudioTextEmbeddingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "L2-normalized paired text-query vector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AudioEmbeddingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "AudioEmbeddingCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.audio.embedding@20260815.1"
+        }
+      }
+    },
+    "schemas": {
+      "AudioEmbeddingForm": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": {
+          "^infer\\.": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "file",
+          "source_revision"
+        ],
+        "properties": {
+          "model": {
+            "const": "audio.embed"
+          },
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "description": "One decodeable audio file, at most 25 MiB and at most 10 decoded seconds for the admitted Build"
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON object whose values are strings; placement/offline/fallback are fixed to local_only/true/none"
+          }
+        }
+      },
+      "AudioEmbeddingProvenance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "build",
+          "artifact_set_sha256",
+          "runtime",
+          "precision",
+          "requested_execution_provider",
+          "actual_execution_provider",
+          "preprocessing_identity",
+          "tokenizer_identity"
+        ],
+        "properties": {
+          "build": {
+            "type": "string",
+            "minLength": 1
+          },
+          "artifact_set_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "runtime": {
+            "type": "string",
+            "minLength": 1
+          },
+          "precision": {
+            "type": "string",
+            "minLength": 1
+          },
+          "requested_execution_provider": {
+            "type": "string",
+            "minLength": 1
+          },
+          "actual_execution_provider": {
+            "type": "string",
+            "minLength": 1
+          },
+          "preprocessing_identity": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tokenizer_identity": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "AudioEmbeddingResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "object",
+          "model",
+          "embedding",
+          "embedding_space",
+          "provenance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Runtime Job identity"
+          },
+          "object": {
+            "const": "audio.embedding"
+          },
+          "model": {
+            "enum": [
+              "audio.embed",
+              "audio.embed_text_query"
+            ]
+          },
+          "source_revision": {
+            "type": "string",
+            "description": "Present exactly for audio.embed"
+          },
+          "query_revision": {
+            "type": "string",
+            "description": "Present exactly for audio.embed_text_query"
+          },
+          "embedding": {
+            "type": "array",
+            "minItems": 512,
+            "maxItems": 512,
+            "items": {
+              "type": "number"
+            }
+          },
+          "embedding_space": {
+            "$ref": "#/components/schemas/AudioEmbeddingSpace"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/AudioEmbeddingProvenance"
+          }
+        }
+      },
+      "AudioEmbeddingSpace": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "identity",
+          "dimensions",
+          "normalized",
+          "distance_metric"
+        ],
+        "properties": {
+          "identity": {
+            "type": "string",
+            "minLength": 1
+          },
+          "dimensions": {
+            "const": 512
+          },
+          "normalized": {
+            "const": true
+          },
+          "distance_metric": {
+            "const": "cosine"
+          }
+        }
+      },
+      "AudioTextEmbeddingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model",
+          "text",
+          "query_revision",
+          "language"
+        ],
+        "properties": {
+          "model": {
+            "const": "audio.embed_text_query"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384
+          },
+          "query_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "language": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,35}$",
+            "description": "BCP-47-shaped Consumer query evidence, not a model-language quality assertion"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/Metadata"
+          }
+        }
+      },
+      "Metadata": {
+        "type": "object",
+        "default": {},
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Application metadata plus documented infer.* routing constraints. Unknown reserved infer.* keys are rejected."
+      }
+    }
+  }
+}

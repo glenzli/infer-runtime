@@ -5,7 +5,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ContractError, ExecutionMode, RequestConstraints, audio_event::EventDetectionRequest,
+    ContractError, ExecutionMode, RequestConstraints,
+    audio_embedding::{AudioEmbeddingRequest, AudioTextEmbeddingRequest},
+    audio_event::EventDetectionRequest,
     string_enum,
 };
 
@@ -217,6 +219,8 @@ pub enum AudioExecutionRequest {
     Transcription(TranscriptionRequest),
     Alignment(AlignmentRequest),
     EventDetection(EventDetectionRequest),
+    Embedding(AudioEmbeddingRequest),
+    TextEmbedding(AudioTextEmbeddingRequest),
     Speech(SpeechRequest),
     VoiceClone(VoiceCloneRequest),
 }
@@ -227,6 +231,8 @@ impl AudioExecutionRequest {
             Self::Transcription(request) => &request.model,
             Self::Alignment(request) => &request.model,
             Self::EventDetection(request) => &request.model,
+            Self::Embedding(request) => &request.model,
+            Self::TextEmbedding(request) => &request.model,
             Self::Speech(request) => &request.model,
             Self::VoiceClone(request) => &request.model,
         }
@@ -237,6 +243,8 @@ impl AudioExecutionRequest {
             Self::Transcription(request) => request.constraints(),
             Self::Alignment(request) => request.constraints(),
             Self::EventDetection(request) => request.constraints(),
+            Self::Embedding(request) => request.constraints(),
+            Self::TextEmbedding(request) => request.constraints(),
             Self::Speech(request) => request.constraints(),
             Self::VoiceClone(request) => request.constraints(),
         }
@@ -247,6 +255,8 @@ impl AudioExecutionRequest {
             Self::Transcription(request) => request.validate(),
             Self::Alignment(request) => request.validate(),
             Self::EventDetection(request) => request.validate(),
+            Self::Embedding(request) => request.validate(),
+            Self::TextEmbedding(request) => request.validate(),
             Self::Speech(request) => request.validate(),
             Self::VoiceClone(request) => request.validate(),
         }

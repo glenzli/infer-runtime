@@ -208,7 +208,13 @@ pub fn provider_requires_ffmpeg(config: &RuntimeConfig, provider_id: &str) -> bo
                 .model_builds
                 .get(&deployment.build)
                 .and_then(|build| build.local_worker.as_ref())
-                .is_some_and(|worker| worker.adapter == LocalWorkerAdapterKind::YamnetAudioEvents)
+                .is_some_and(|worker| {
+                    matches!(
+                        worker.adapter,
+                        LocalWorkerAdapterKind::YamnetAudioEvents
+                            | LocalWorkerAdapterKind::ClapAudioTextEmbedding
+                    )
+                })
     })
 }
 
@@ -302,6 +308,88 @@ pub fn verify_yamnet_worker(
             runtime_version.unwrap_or_default(),
             decoder_version.unwrap_or_default()
         )),
+        searched_paths: Vec::new(),
+        message: None,
+    })
+}
+
+/// Loads the exact admitted CLAP artifact without Consumer content and verifies
+/// the MPS-only local worker contract.  This is intentionally distinct from
+/// the YAMNet probe: both use ffmpeg for bounded decode, but their model and
+/// output contracts are unrelated.
+pub fn verify_clap_worker(
+    command: &str,
+    args: &[String],
+    model_path: &str,
+) -> Result<RuntimeDependencyCheck, Box<RuntimeDependencyCheck>> {
+    let failure = |message: &str| RuntimeDependencyCheck {
+        name: "clap_audio_embedding_worker".into(),
+        requested: "admitted_build".into(),
+        status: ProviderReadinessStatus::Unavailable,
+        resolved_path: None,
+        canonical_target: None,
+        version: None,
+        searched_paths: Vec::new(),
+        message: Some(message.into()),
+    };
+    let mut child = Command::new(command)
+        .args(args)
+        .args(["--verify-model", model_path])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| Box::new(failure("CLAP readiness probe could not start")))?;
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() < WORKER_PROBE_TIMEOUT => {
+                thread::sleep(Duration::from_millis(25));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(Box::new(failure("CLAP readiness probe timed out")));
+            }
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(Box::new(failure("CLAP readiness probe failed")));
+            }
+        }
+    };
+    let mut output = String::new();
+    if let Some(stdout) = child.stdout.take() {
+        stdout
+            .take(MAX_WORKER_PROBE_OUTPUT_BYTES)
+            .read_to_string(&mut output)
+            .map_err(|_| Box::new(failure("CLAP readiness response was unreadable")))?;
+    }
+    if !status.success() {
+        return Err(Box::new(failure(
+            "CLAP readiness probe reported an unavailable MPS runtime or model",
+        )));
+    }
+    let response: serde_json::Value = serde_json::from_str(&output)
+        .map_err(|_| Box::new(failure("CLAP readiness response was malformed")))?;
+    if response
+        .get("dimensions")
+        .and_then(serde_json::Value::as_u64)
+        != Some(512)
+        || response.get("runtime").and_then(serde_json::Value::as_str) != Some("pytorch-mps")
+    {
+        return Err(Box::new(failure(
+            "CLAP readiness response did not match the admitted runtime contract",
+        )));
+    }
+    Ok(RuntimeDependencyCheck {
+        name: "clap_audio_embedding_worker".into(),
+        requested: "admitted_build".into(),
+        status: ProviderReadinessStatus::Ready,
+        resolved_path: None,
+        canonical_target: None,
+        version: Some("pytorch-mps; dimensions=512".into()),
         searched_paths: Vec::new(),
         message: None,
     })

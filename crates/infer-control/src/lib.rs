@@ -33,11 +33,12 @@ use futures_util::{Stream, StreamExt};
 use infer_artifact::ArtifactError;
 use infer_auth::{AppCredentials, CredentialError};
 use infer_core::{
-    AppConfig, AttemptOutcome, AttemptSnapshot, AttemptTrigger, AudioExecutionRequest, BuiltinTool,
-    ContractError, DurablePayloadRef, EventDetectionResult, ExecutionMode, ExecutionRequirements,
-    Fallback, IntentProfile, JobListPage, JobPageCursor, JobSnapshot, JobState, Modality, Priority,
-    ProviderCapability, ProviderKind, ProviderProtocol, QuotaConfig, RequestConstraints,
-    ResponsesRequest, RuntimeConfig,
+    AppConfig, AttemptOutcome, AttemptSnapshot, AttemptTrigger, AudioEmbeddingProvenance,
+    AudioEmbeddingResponse, AudioExecutionRequest, BuiltinTool, ContractError, DurablePayloadRef,
+    EventDetectionResult, ExecutionMode, ExecutionRequirements, Fallback, IntentProfile,
+    JobListPage, JobPageCursor, JobSnapshot, JobState, Modality, Priority, ProviderCapability,
+    ProviderKind, ProviderProtocol, QuotaConfig, RequestConstraints, ResponsesRequest,
+    RuntimeConfig,
 };
 use infer_payload::PayloadError;
 use infer_provider::{
@@ -53,6 +54,7 @@ use infer_store::{
     ExecutionOrigin, QuotaLimits, QuotaResource, Store, StoreError, TelemetryBucket,
     TelemetryWindow, UsageLedgerEntry,
 };
+use serde::Deserialize;
 use serde_json::{Value, json};
 use thiserror::Error;
 use tokio::{
@@ -327,6 +329,16 @@ struct UsageTokens {
     input_tokens: u64,
     output_tokens: u64,
     total_tokens: u64,
+}
+
+/// Private bounded JSON frame returned by the CLAP worker. Public semantic
+/// identity is attached only by `normalize_audio_embedding_output`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkerAudioEmbedding {
+    embedding: Vec<f32>,
+    dimensions: usize,
+    normalized: bool,
 }
 
 /// All request-specific input needed to admit one Job. Grouping this preserves
@@ -1349,8 +1361,21 @@ impl Runtime {
             self.authorize_speech_voice(app_id, speech)?;
         }
         let logical_model = request.model().to_owned();
+        let embedding_revision = match &request {
+            AudioExecutionRequest::Embedding(request) => {
+                Some((Some(request.source_revision.clone()), None))
+            }
+            AudioExecutionRequest::TextEmbedding(request) => {
+                Some((None, Some(request.query_revision.clone())))
+            }
+            _ => None,
+        };
         let constraints = request.constraints()?;
         let is_event_detection = matches!(&request, AudioExecutionRequest::EventDetection(_));
+        let is_audio_embedding = matches!(
+            &request,
+            AudioExecutionRequest::Embedding(_) | AudioExecutionRequest::TextEmbedding(_)
+        );
         let is_transcription = matches!(&request, AudioExecutionRequest::Transcription(_));
         let (expected_data_plane, input_modalities) = match &request {
             AudioExecutionRequest::Transcription(_) => {
@@ -1362,6 +1387,12 @@ impl Runtime {
             ),
             AudioExecutionRequest::EventDetection(_) => {
                 ("audio.event_detection", BTreeSet::from([Modality::Audio]))
+            }
+            AudioExecutionRequest::Embedding(_) => {
+                ("audio.embedding", BTreeSet::from([Modality::Audio]))
+            }
+            AudioExecutionRequest::TextEmbedding(_) => {
+                ("audio.embedding", BTreeSet::from([Modality::Text]))
             }
             AudioExecutionRequest::Speech(_) => ("audio.speech", BTreeSet::from([Modality::Text])),
             AudioExecutionRequest::VoiceClone(_) => (
@@ -1389,6 +1420,7 @@ impl Runtime {
                             "audio.transcription" => "infer.audio.transcription@20260814.1",
                             "audio.alignment" => "infer.audio.alignment@20260811.1",
                             "audio.event_detection" => "infer.audio.event-detection@20260813.2",
+                            "audio.embedding" => "infer.audio.embedding@20260815.1",
                             "audio.speech" => "infer.audio.speech@20260811.1",
                             "audio.voice_clone" => "infer.audio.voice-clone@20260811.1",
                             _ => unreachable!("validated audio data plane"),
@@ -1405,7 +1437,11 @@ impl Runtime {
             .begin_attempt(&prepared, AttemptTrigger::Initial)
             .await?;
         let executor = self.audio_executor(&prepared.provider_id)?;
-        let upstream = executor.execute(&prepared.physical_model, request);
+        let upstream = executor.execute(
+            &prepared.physical_model,
+            request,
+            prepared.cancellation.clone(),
+        );
         let result = match prepared.deadline {
             Some(deadline) => tokio::select! {
                 _ = prepared.cancellation.cancelled() => Err(RuntimeError::Cancelled),
@@ -1426,6 +1462,23 @@ impl Runtime {
                     }
                     AudioExecutionOutput::Audio { .. } => Err(ProviderError::Protocol(
                         "sound-event executor returned audio".into(),
+                    )),
+                };
+                validation.map(|()| output).map_err(RuntimeError::Provider)
+            }
+            Ok(mut output) if is_audio_embedding => {
+                let validation = match &mut output {
+                    AudioExecutionOutput::Json(value) => self.normalize_audio_embedding_output(
+                        &prepared,
+                        value,
+                        &prepared.job_id,
+                        &logical_model,
+                        embedding_revision
+                            .clone()
+                            .expect("embedding request has a revision"),
+                    ),
+                    AudioExecutionOutput::Audio { .. } => Err(ProviderError::Protocol(
+                        "audio embedding executor returned audio".into(),
                     )),
                 };
                 validation.map(|()| output).map_err(RuntimeError::Provider)
@@ -1792,6 +1845,84 @@ impl Runtime {
                 "sound-event result identity does not match the selected Build".into(),
             ));
         }
+        Ok(())
+    }
+
+    /// Converts the deliberately minimal local-worker frame into the stable
+    /// Consumer response and binds it to the selected Build. The worker never
+    /// gets to choose embedding-space or execution provenance.
+    fn normalize_audio_embedding_output(
+        &self,
+        prepared: &PreparedRun,
+        value: &mut Value,
+        job_id: &str,
+        logical_model: &str,
+        (source_revision, query_revision): (Option<String>, Option<String>),
+    ) -> Result<(), ProviderError> {
+        let raw: WorkerAudioEmbedding = serde_json::from_value(value.clone()).map_err(|_| {
+            ProviderError::Protocol("audio embedding worker returned an invalid result".into())
+        })?;
+        if !raw.normalized || raw.dimensions != raw.embedding.len() {
+            return Err(ProviderError::Protocol(
+                "audio embedding worker returned invalid dimensions or normalization".into(),
+            ));
+        }
+        let deployment = self
+            .config
+            .deployments
+            .get(&prepared.deployment_id)
+            .ok_or_else(|| ProviderError::Protocol("selected Deployment disappeared".into()))?;
+        let build = self
+            .config
+            .model_builds
+            .get(&deployment.build)
+            .ok_or_else(|| ProviderError::Protocol("selected Model Build disappeared".into()))?;
+        let worker = build.local_worker.as_ref().ok_or_else(|| {
+            ProviderError::Protocol("selected Build has no local-worker identity".into())
+        })?;
+        let embedding_space = worker.embedding_space.clone().ok_or_else(|| {
+            ProviderError::Protocol("selected Build has no embedding-space identity".into())
+        })?;
+        let provenance = AudioEmbeddingProvenance {
+            build: deployment.build.clone(),
+            artifact_set_sha256: worker.artifact_set_sha256.clone(),
+            runtime: worker.runtime.clone(),
+            precision: worker.precision.clone(),
+            requested_execution_provider: worker.requested_execution_provider.clone().ok_or_else(
+                || {
+                    ProviderError::Protocol(
+                        "selected Build has no requested execution provider".into(),
+                    )
+                },
+            )?,
+            actual_execution_provider: worker.actual_execution_provider.clone().ok_or_else(
+                || {
+                    ProviderError::Protocol(
+                        "selected Build has no actual execution provider".into(),
+                    )
+                },
+            )?,
+            preprocessing_identity: worker.preprocessing_identity.clone().ok_or_else(|| {
+                ProviderError::Protocol("selected Build has no preprocessing identity".into())
+            })?,
+            tokenizer_identity: worker.tokenizer_identity.clone().ok_or_else(|| {
+                ProviderError::Protocol("selected Build has no tokenizer identity".into())
+            })?,
+        };
+        let response = AudioEmbeddingResponse {
+            id: job_id.into(),
+            object: "audio.embedding".into(),
+            model: logical_model.into(),
+            source_revision,
+            query_revision,
+            embedding: raw.embedding,
+            embedding_space,
+            provenance,
+        };
+        response
+            .validate()
+            .map_err(|error| ProviderError::Protocol(error.to_string()))?;
+        *value = serde_json::to_value(response)?;
         Ok(())
     }
 

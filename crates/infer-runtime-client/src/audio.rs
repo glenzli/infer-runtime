@@ -16,6 +16,7 @@ pub const TRANSCRIPTION_CAPABILITIES: &[&str] = &["infer.audio.transcription@202
 pub const EVENT_DETECTION_CAPABILITIES: &[&str] = &["infer.audio.event-detection@20260813.2"];
 pub const ALIGNMENT_CAPABILITIES: &[&str] = &["infer.audio.alignment@20260811.1"];
 pub const SPEECH_CAPABILITIES: &[&str] = &["infer.audio.speech@20260811.1"];
+pub const AUDIO_EMBEDDING_CAPABILITIES: &[&str] = &["infer.audio.embedding@20260815.1"];
 
 #[derive(Debug, Clone, Copy)]
 pub enum TranscriptionFormat {
@@ -187,6 +188,60 @@ pub struct AudioEventDetectionResponse {
     pub provenance: SoundEventProvenance,
 }
 
+/// A bounded text query for the paired local audio retrieval space. `language`
+/// describes the query supplied by the Consumer; it is not a model-quality
+/// assertion and must not be used to infer multilingual support.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioTextEmbeddingRequest {
+    pub model: String,
+    pub text: String,
+    pub query_revision: String,
+    pub language: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AudioEmbeddingResponse {
+    pub id: String,
+    pub object: String,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_revision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_revision: Option<String>,
+    pub embedding: Vec<f32>,
+    pub embedding_space: AudioEmbeddingSpace,
+    pub provenance: AudioEmbeddingProvenance,
+    /// Forward-compatible capability fields are deliberately retained rather
+    /// than rejected by the SDK.
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioEmbeddingSpace {
+    pub identity: String,
+    pub dimensions: usize,
+    pub normalized: bool,
+    pub distance_metric: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioEmbeddingProvenance {
+    pub build: String,
+    pub artifact_set_sha256: String,
+    pub runtime: String,
+    pub precision: String,
+    pub requested_execution_provider: String,
+    pub actual_execution_provider: String,
+    pub preprocessing_identity: String,
+    pub tokenizer_identity: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct DetectedSoundEvent {
@@ -339,7 +394,114 @@ impl AudioEventDetectionResponse {
     }
 }
 
+impl AudioEmbeddingResponse {
+    fn validate(&self) -> Result<()> {
+        let digest =
+            |value: &str| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit());
+        let expected_revision = match self.model.as_str() {
+            "audio.embed" => self.source_revision.is_some() && self.query_revision.is_none(),
+            "audio.embed_text_query" => {
+                self.source_revision.is_none() && self.query_revision.is_some()
+            }
+            _ => false,
+        };
+        let norm = self
+            .embedding
+            .iter()
+            .map(|value| value * value)
+            .sum::<f32>()
+            .sqrt();
+        if self.id.is_empty()
+            || self.object != "audio.embedding"
+            || !expected_revision
+            || self.embedding_space.dimensions != 512
+            || !self.embedding_space.normalized
+            || self.embedding_space.distance_metric != "cosine"
+            || self.embedding.len() != 512
+            || self.embedding.iter().any(|value| !value.is_finite())
+            || (norm - 1.0).abs() > 1e-4
+            || self.embedding_space.identity.is_empty()
+            || !digest(&self.provenance.artifact_set_sha256)
+            || self.provenance.build.is_empty()
+            || self.provenance.runtime.is_empty()
+            || self.provenance.precision.is_empty()
+            || self.provenance.requested_execution_provider.is_empty()
+            || self.provenance.actual_execution_provider.is_empty()
+            || self.provenance.preprocessing_identity.is_empty()
+            || self.provenance.tokenizer_identity.is_empty()
+        {
+            return Err(Error::MalformedResponse(
+                "audio embedding violates the dated capability contract".into(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl Client {
+    pub async fn embed_audio_file(
+        &self,
+        path: &Path,
+        content_type: &'static str,
+        source_revision: &str,
+        metadata: &BTreeMap<String, String>,
+    ) -> Result<AudioEmbeddingResponse> {
+        let bytes = read_bounded_file(path, MAX_AUDIO_INPUT_BYTES, "audio").await?;
+        let filename = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("audio.bin")
+            .to_owned();
+        let source_revision = source_revision.to_owned();
+        let metadata = serde_json::to_string(metadata)
+            .map_err(|error| Error::MalformedResponse(error.to_string()))?;
+        let response = self
+            .send_capability_with(AUDIO_EMBEDDING_CAPABILITIES, move |http, endpoint| {
+                let file = Part::bytes(bytes.clone())
+                    .file_name(filename.clone())
+                    .mime_str(content_type)
+                    .expect("static MIME type is valid");
+                http.post(format!("{endpoint}/v1/audio/embeddings"))
+                    .multipart(
+                        Form::new()
+                            .text("model", "audio.embed")
+                            .text("source_revision", source_revision.clone())
+                            .text("metadata", metadata.clone())
+                            .part("file", file),
+                    )
+            })
+            .await?;
+        let response = ensure_success(response).await?;
+        let parsed: AudioEmbeddingResponse =
+            serde_json::from_slice(&read_bounded(response, MAX_JSON_RESPONSE_BYTES).await?)
+                .map_err(|error| Error::MalformedResponse(error.to_string()))?;
+        parsed.validate()?;
+        Ok(parsed)
+    }
+
+    pub async fn embed_audio_text(
+        &self,
+        request: &AudioTextEmbeddingRequest,
+    ) -> Result<AudioEmbeddingResponse> {
+        if request.model != "audio.embed_text_query" {
+            return Err(Error::Input(
+                "audio text embedding requires model=audio.embed_text_query".into(),
+            ));
+        }
+        let response = self
+            .send_capability_with(AUDIO_EMBEDDING_CAPABILITIES, |http, endpoint| {
+                http.post(format!("{endpoint}/v1/audio/text-embeddings"))
+                    .json(request)
+            })
+            .await?;
+        let response = ensure_success(response).await?;
+        let parsed: AudioEmbeddingResponse =
+            serde_json::from_slice(&read_bounded(response, MAX_JSON_RESPONSE_BYTES).await?)
+                .map_err(|error| Error::MalformedResponse(error.to_string()))?;
+        parsed.validate()?;
+        Ok(parsed)
+    }
+
     pub async fn detect_audio_events_file(
         &self,
         path: &Path,
@@ -593,6 +755,42 @@ mod tests {
                 languages,
             }) if languages == vec!["Chinese".to_owned(), "English".to_owned()]
         ));
+    }
+
+    #[test]
+    fn audio_embedding_response_is_space_bound_and_forward_compatible() {
+        let response: AudioEmbeddingResponse = serde_json::from_value(serde_json::json!({
+            "id": "audio_test",
+            "object": "audio.embedding",
+            "model": "audio.embed_text_query",
+            "query_revision": "query:1",
+            "embedding": std::iter::once(1.0f32)
+                .chain(std::iter::repeat_n(0.0f32, 511))
+                .collect::<Vec<_>>(),
+            "embedding_space": {
+                "identity": "test-space",
+                "dimensions": 512,
+                "normalized": true,
+                "distance_metric": "cosine"
+            },
+            "provenance": {
+                "build": "exact-build",
+                "artifact_set_sha256": "a".repeat(64),
+                "runtime": "pytorch-mps",
+                "precision": "fp32",
+                "requested_execution_provider": "mps",
+                "actual_execution_provider": "mps",
+                "preprocessing_identity": "fixed-preprocess",
+                "tokenizer_identity": "exact-tokenizer"
+            },
+            "future_additive_field": true
+        }))
+        .unwrap();
+        response.validate().unwrap();
+        assert_eq!(
+            response.extra.get("future_additive_field"),
+            Some(&Value::Bool(true))
+        );
     }
 
     #[tokio::test]

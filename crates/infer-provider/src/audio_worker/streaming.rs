@@ -329,6 +329,7 @@ impl AudioDuplexSession for WorkerTranscriptionSession {
                     temperature: self.request.temperature,
                     metadata: BTreeMap::new(),
                 }),
+                tokio_util::sync::CancellationToken::new(),
             )
             .await?;
         let AudioExecutionOutput::Json(value) = output else {

@@ -87,6 +87,23 @@
 - **边界**：当前只承诺文件调用；实时 session/streaming 另行设计。SenseVoice 缺少可运行 FunASR 环境，因此只有 Profile/Build，没有 Deployment。
 - **ADR**：[ADR-0009](adr/0009-task-oriented-audio-protocols.md)
 
+### D-018：音频-文本检索使用独立 CLAP evidence space
+
+- **状态**：Accepted for inactive experimental baseline
+- **决定**：`audio.embed` 与 `audio.embed_text_query` 只产生同空间、512d、L2-normalized 的可重建
+  retrieval evidence；它们不替代 transcript、SigLIP text evidence 或 YAMNet/AudioSet event facts。
+  首个 local-only/offline/no-fallback Build 是 MPS-only 的 CLAP baseline，中文质量尚未通过，故不得
+  以中文语义搜索能力对外承诺或自动扩大任何 App ACL。
+- **中文查询边界**：CLAP 用于非语音、无文本或文字不足的原始声音；语音内容优先 ASR/对齐/FTS/
+  文本语义。待 Echo 选择本地 zh→en normalizer Build 后，才可把它作为
+  `audio.embed_text_query` 的受控短查询预处理，并在 provenance 回显 normalizer Build/version 与
+  source/target language。它不是 `text.translate`，normalizer 不可用即该 CLAP 查询分支不可用，
+  不隐式回退。GLAP 明确 deferred/rejected，不进入下载、评测或接入计划。
+- **本机制品边界**：Runtime-managed download 只要求 immutable artifact provenance；license 事实
+  作为 Build evidence 保留，不构成本机安装、校验和提供本地访问的运行时阻塞条件。Runtime 不分发
+  权重。
+- **ADR**：[ADR-0018](adr/0018-local-clap-audio-text-embedding.md)
+
 ### D-010：本机 operator credential 由 runtime 管理，外部 App 身份不预置
 
 - **状态**：Accepted

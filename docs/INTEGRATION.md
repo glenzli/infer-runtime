@@ -195,10 +195,19 @@ POST /v1/responses/{response_id}/cancel
 | --- | --- | --- | --- |
 | `audio.transcribe` | `POST /v1/audio/transcriptions` | multipart | JSON 或 text |
 | `audio.detect_events` | `POST /v1/audio/event-detections` | multipart | AudioSet events + coverage/evidence/provenance JSON |
+| `audio.embed` | `POST /v1/audio/embeddings` | multipart | bounded audio's 512d local retrieval evidence |
+| `audio.embed_text_query` | `POST /v1/audio/text-embeddings` | strict JSON | paired text-query 512d retrieval evidence |
 | `audio.transcribe`（实验流） | `GET /v1/audio/transcriptions/stream` | WebSocket PCM + control JSON | revisioned partial/final JSON |
 | `audio.align` | `POST /v1/audio/alignments` | multipart | JSON timestamps |
 | `speech.synthesize` / `speech.design_voice` | `POST /v1/audio/speech` | JSON | 完整音频或 streamed PCM bytes |
 | `speech.clone_voice` | `POST /v1/audio/voice-clones` | multipart | 音频 bytes |
+
+`audio.embed` / `audio.embed_text_query` 是独立的 experimental CLAP retrieval space，不是 transcript、
+AudioSet event 或 SigLIP text embedding 的替代品。两个 endpoint 均强制 local-only、offline 和
+no-fallback；音频最多 25 MiB 且首个 Build 限为 10 decoded seconds。`source_revision` 或
+`query_revision` 必填并原样回显。`language` 只是 text query 的 BCP-47-shaped evidence，不能被
+Consumer 用作模型已支持该语言的质量声明。仅在 capability catalog 宣告
+`infer.audio.embedding@20260815.1`、App 有两个相应 Intent ACL 且 exact Build 已 ready 时调用。
 
 转写示例：
 
