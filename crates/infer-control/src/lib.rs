@@ -34,11 +34,11 @@ use infer_artifact::ArtifactError;
 use infer_auth::{AppCredentials, CredentialError};
 use infer_core::{
     AppConfig, AttemptOutcome, AttemptSnapshot, AttemptTrigger, AudioEmbeddingProvenance,
-    AudioEmbeddingResponse, AudioExecutionRequest, BuiltinTool, ContractError, DurablePayloadRef,
-    EventDetectionResult, ExecutionMode, ExecutionRequirements, Fallback, IntentProfile,
-    JobListPage, JobPageCursor, JobSnapshot, JobState, Modality, Priority, ProviderCapability,
-    ProviderKind, ProviderProtocol, QuotaConfig, RequestConstraints, ResponsesRequest,
-    RuntimeConfig,
+    AudioEmbeddingResponse, AudioExecutionRequest, AudioTextQueryNormalizerProvenance, BuiltinTool,
+    ContractError, DurablePayloadRef, EventDetectionResult, ExecutionMode, ExecutionRequirements,
+    Fallback, IntentProfile, JobListPage, JobPageCursor, JobSnapshot, JobState, Modality, Priority,
+    ProviderCapability, ProviderKind, ProviderProtocol, QuotaConfig, RequestConstraints,
+    ResponsesRequest, RuntimeConfig,
 };
 use infer_payload::PayloadError;
 use infer_provider::{
@@ -339,6 +339,8 @@ struct WorkerAudioEmbedding {
     embedding: Vec<f32>,
     dimensions: usize,
     normalized: bool,
+    #[serde(default)]
+    normalizer: Option<AudioTextQueryNormalizerProvenance>,
 }
 
 /// All request-specific input needed to admit one Job. Grouping this preserves
@@ -1420,7 +1422,7 @@ impl Runtime {
                             "audio.transcription" => "infer.audio.transcription@20260814.1",
                             "audio.alignment" => "infer.audio.alignment@20260811.1",
                             "audio.event_detection" => "infer.audio.event-detection@20260813.2",
-                            "audio.embedding" => "infer.audio.embedding@20260815.1",
+                            "audio.embedding" => "infer.audio.embedding@20260815.2",
                             "audio.speech" => "infer.audio.speech@20260811.1",
                             "audio.voice_clone" => "infer.audio.voice-clone@20260811.1",
                             _ => unreachable!("validated audio data plane"),
@@ -1918,6 +1920,7 @@ impl Runtime {
             embedding: raw.embedding,
             embedding_space,
             provenance,
+            query_normalizer: raw.normalizer,
         };
         response
             .validate()

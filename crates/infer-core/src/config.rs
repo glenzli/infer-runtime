@@ -883,6 +883,23 @@ pub struct LocalWorkerModelBuildConfig {
     pub requested_execution_provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actual_execution_provider: Option<String>,
+    /// Optional, Build-owned preprocessing used only before CLAP text-query
+    /// embedding. It is never a public translation capability.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_text_query_normalizer: Option<AudioTextQueryNormalizerConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize, serde::Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AudioTextQueryNormalizerConfig {
+    /// Existing, admitted local Responses deployment; no physical model name
+    /// is supplied by a Consumer.
+    pub deployment: String,
+    pub source_language: String,
+    pub target_language: String,
+    pub prompt_revision: String,
+    pub max_query_bytes: usize,
+    pub max_output_bytes: usize,
 }
 
 #[derive(Debug, Clone, Deserialize, serde::Serialize, PartialEq)]
@@ -2549,6 +2566,20 @@ fn validate_build_supply_chain(id: &str, build: &ModelBuildConfig) -> Result<(),
                 {
                     return Err(configuration(format!(
                         "CLAP audio-text embedding build {id} needs 512d normalized cosine space, tokenizer, preprocessing, and execution-provider identity"
+                    )));
+                }
+                if let Some(normalizer) = &worker.audio_text_query_normalizer
+                    && (normalizer.deployment.trim().is_empty()
+                        || normalizer.source_language != "zh"
+                        || normalizer.target_language != "en"
+                        || normalizer.prompt_revision.trim().is_empty()
+                        || normalizer.max_query_bytes == 0
+                        || normalizer.max_query_bytes > 16 * 1024
+                        || normalizer.max_output_bytes == 0
+                        || normalizer.max_output_bytes > 1024)
+                {
+                    return Err(configuration(format!(
+                        "CLAP build {id} has an invalid audio_text_query_normalizer"
                     )));
                 }
             }

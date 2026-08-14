@@ -154,7 +154,7 @@ async fn audio_embedding_endpoint_binds_build_provenance_and_sdk_shape() {
                 .header(contract::CONSUMER_CORE_HEADER, contract::CORE_CONTRACT)
                 .header(
                     contract::CAPABILITY_CONTRACT_HEADER,
-                    "infer.audio.embedding@20260815.1",
+                    "infer.audio.embedding@20260815.2",
                 )
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
@@ -197,7 +197,7 @@ async fn audio_embedding_endpoint_binds_build_provenance_and_sdk_shape() {
                 .header(contract::CONSUMER_CORE_HEADER, contract::CORE_CONTRACT)
                 .header(
                     contract::CAPABILITY_CONTRACT_HEADER,
-                    "infer.audio.embedding@20260815.1",
+                    "infer.audio.embedding@20260815.2",
                 )
                 .header(
                     header::CONTENT_TYPE,

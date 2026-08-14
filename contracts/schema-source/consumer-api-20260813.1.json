@@ -752,7 +752,7 @@
       },
       "AudioEmbeddingCapability": {
         "name": "Infer-Capability-Contract", "in": "header", "required": true,
-        "schema": { "const": "infer.audio.embedding@20260815.1" }
+        "schema": { "const": "infer.audio.embedding@20260815.2" }
       },
       "AlignmentCapability": {
         "name": "Infer-Capability-Contract", "in": "header", "required": true,
@@ -1149,7 +1149,20 @@
           "query_revision": { "type": "string", "description": "Present exactly for audio.embed_text_query" },
           "embedding": { "type": "array", "minItems": 512, "maxItems": 512, "items": { "type": "number" } },
           "embedding_space": { "$ref": "#/components/schemas/AudioEmbeddingSpace" },
-          "provenance": { "$ref": "#/components/schemas/AudioEmbeddingProvenance" }
+          "provenance": { "$ref": "#/components/schemas/AudioEmbeddingProvenance" },
+          "query_normalizer": { "$ref": "#/components/schemas/AudioTextQueryNormalizerProvenance", "description": "Present only when a Build-owned zh-to-en normalizer prepared the query for the English-first CLAP text tower" }
+        }
+      },
+      "AudioTextQueryNormalizerProvenance": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["deployment", "build", "prompt_revision", "source_language", "target_language"],
+        "properties": {
+          "deployment": { "type": "string", "minLength": 1 },
+          "build": { "type": "string", "minLength": 1 },
+          "prompt_revision": { "type": "string", "minLength": 1 },
+          "source_language": { "const": "zh" },
+          "target_language": { "const": "en" }
         }
       },
       "DetectedSoundEvent": {

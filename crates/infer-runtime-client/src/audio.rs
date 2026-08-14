@@ -16,7 +16,7 @@ pub const TRANSCRIPTION_CAPABILITIES: &[&str] = &["infer.audio.transcription@202
 pub const EVENT_DETECTION_CAPABILITIES: &[&str] = &["infer.audio.event-detection@20260813.2"];
 pub const ALIGNMENT_CAPABILITIES: &[&str] = &["infer.audio.alignment@20260811.1"];
 pub const SPEECH_CAPABILITIES: &[&str] = &["infer.audio.speech@20260811.1"];
-pub const AUDIO_EMBEDDING_CAPABILITIES: &[&str] = &["infer.audio.embedding@20260815.1"];
+pub const AUDIO_EMBEDDING_CAPABILITIES: &[&str] = &["infer.audio.embedding@20260815.2"];
 
 #[derive(Debug, Clone, Copy)]
 pub enum TranscriptionFormat {
@@ -214,6 +214,8 @@ pub struct AudioEmbeddingResponse {
     pub embedding: Vec<f32>,
     pub embedding_space: AudioEmbeddingSpace,
     pub provenance: AudioEmbeddingProvenance,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query_normalizer: Option<AudioTextQueryNormalizerProvenance>,
     /// Forward-compatible capability fields are deliberately retained rather
     /// than rejected by the SDK.
     #[serde(flatten)]
@@ -240,6 +242,16 @@ pub struct AudioEmbeddingProvenance {
     pub actual_execution_provider: String,
     pub preprocessing_identity: String,
     pub tokenizer_identity: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioTextQueryNormalizerProvenance {
+    pub deployment: String,
+    pub build: String,
+    pub prompt_revision: String,
+    pub source_language: String,
+    pub target_language: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

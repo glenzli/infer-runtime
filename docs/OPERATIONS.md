@@ -358,7 +358,7 @@ CelebAMask-HQ；其数据协议仅允许非商业研究并禁止再分发数据/
 
 ## CLAP 音频-文本 embedding Build（实验性，未激活）
 
-`infer.audio.embedding@20260815.1` 的首个 Build 使用本机下载、验证并发布到 ArtifactStore 的
+`infer.audio.embedding@20260815.2` 的首个 Build 使用本机下载、验证并发布到 ArtifactStore 的
 `laion/clap-htsat-unfused` exact revision
 `8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a`。它是 Runtime-owned local artifact，不是
 Consumer 上传、不是 API 可下载资产，也不会被提交进 Git。发布前需要逐文件 digest 与 artifact-set
@@ -374,9 +374,10 @@ Provider 的 Python command 必须是 owner-installed isolated runtime 的绝对
 unavailable，而不是悄悄改为 CPU。
 
 这个 baseline 目前只可作为 English-first 检索实验：`language` 字段只是 Consumer 提供的查询证据，
-不表示模型已通过任何语言的召回评测。中文短查询只有在另行安装、验证并冻结本地 zh→en normalizer
-Build 后才能由 `audio.embed_text_query` 的专属预处理执行；它不是通用翻译接口，normalizer 不可用时
-该分支 fail closed。配置示例登记 Provider/Build/Deployment 是为了可复现的 operator assembly；它不会
+不表示模型已通过任何语言的召回评测。中文短查询由已冻结的本地
+`ollama_qwen3_5_2b` / `qwen3_5_2b_mlx` 通过 `infer.audio.zh-en-short-query@20260815.1` 进行专属
+预处理；它不是通用翻译接口，normalizer 不可用时该分支 fail closed。配置示例登记
+Provider/Build/Deployment 是为了可复现的 operator assembly；它不会
 自动创建 App ACL、不会启用现有 daemon，也不授权 cloud fallback。具体激活门槛及中文限制见
 [ADR-0018](adr/0018-local-clap-audio-text-embedding.md)。
 

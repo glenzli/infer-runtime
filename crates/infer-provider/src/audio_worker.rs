@@ -54,11 +54,28 @@ pub trait AudioExecutor: Send + Sync {
 
 pub type DynAudioExecutor = Arc<dyn AudioExecutor>;
 
+/// A trusted, Build-owned local preprocessing dependency for a CLAP text
+/// query. It is injected by the assembly root, never parsed from Consumer
+/// input, and exists solely to normalize a bounded zh query to English.
+#[derive(Debug, Clone, Serialize)]
+pub struct AudioTextQueryNormalizer {
+    pub endpoint: String,
+    pub model: String,
+    pub deployment: String,
+    pub build: String,
+    pub prompt_revision: String,
+    pub source_language: String,
+    pub target_language: String,
+    pub max_query_bytes: usize,
+    pub max_output_bytes: usize,
+}
+
 pub struct AudioWorkerExecutor {
     id: String,
     command: String,
     args: Vec<String>,
     admitted_model_paths: Arc<BTreeMap<String, String>>,
+    query_normalizers: Arc<BTreeMap<String, AudioTextQueryNormalizer>>,
     process: Arc<Mutex<Option<WorkerProcess>>>,
 }
 
@@ -69,6 +86,7 @@ impl Clone for AudioWorkerExecutor {
             command: self.command.clone(),
             args: self.args.clone(),
             admitted_model_paths: Arc::clone(&self.admitted_model_paths),
+            query_normalizers: Arc::clone(&self.query_normalizers),
             process: Arc::clone(&self.process),
         }
     }
@@ -109,6 +127,8 @@ struct WorkerRequest {
     temperature: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     format: Option<SpeechFormat>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    normalizer: Option<AudioTextQueryNormalizer>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,6 +154,7 @@ impl AudioWorkerExecutor {
             command,
             args,
             admitted_model_paths: Arc::new(BTreeMap::new()),
+            query_normalizers: Arc::new(BTreeMap::new()),
             process: Arc::new(Mutex::new(None)),
         }
     }
@@ -149,6 +170,24 @@ impl AudioWorkerExecutor {
             command,
             args,
             admitted_model_paths: Arc::new(admitted_model_paths),
+            query_normalizers: Arc::new(BTreeMap::new()),
+            process: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub fn with_admitted_model_paths_and_normalizers(
+        id: impl Into<String>,
+        command: String,
+        args: Vec<String>,
+        admitted_model_paths: BTreeMap<String, String>,
+        query_normalizers: BTreeMap<String, AudioTextQueryNormalizer>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            command,
+            args,
+            admitted_model_paths: Arc::new(admitted_model_paths),
+            query_normalizers: Arc::new(query_normalizers),
             process: Arc::new(Mutex::new(None)),
         }
     }
@@ -266,6 +305,7 @@ impl AudioExecutor for AudioWorkerExecutor {
                 "streaming speech must use execute_speech_stream".into(),
             ));
         }
+        let normalizer = self.query_normalizers.get(physical_model).cloned();
         let physical_model = if self.admitted_model_paths.is_empty() {
             physical_model
         } else {
@@ -278,7 +318,7 @@ impl AudioExecutor for AudioWorkerExecutor {
                     )
                 })?
         };
-        let prepared = prepare_worker_request(physical_model, request).await?;
+        let prepared = prepare_worker_request(physical_model, request, normalizer).await?;
         let mut result = self.round_trip(&prepared.request, cancellation).await?;
         if prepared.request.operation == "detect_events" {
             let typed: EventDetectionResult = serde_json::from_value(result)?;
@@ -302,6 +342,7 @@ impl AudioExecutor for AudioWorkerExecutor {
 async fn prepare_worker_request(
     physical_model: &str,
     request: AudioExecutionRequest,
+    normalizer: Option<AudioTextQueryNormalizer>,
 ) -> Result<PreparedWorkerRequest, ProviderError> {
     let temporary_files = tempfile::tempdir()?;
     let request_id = Uuid::new_v4().simple().to_string();
@@ -319,7 +360,7 @@ async fn prepare_worker_request(
             prepare_audio_embedding(request_id, physical_model, request, &temporary_files).await?
         }
         AudioExecutionRequest::TextEmbedding(request) => {
-            prepare_text_embedding(request_id, physical_model, request)
+            prepare_text_embedding(request_id, physical_model, request, normalizer)?
         }
         AudioExecutionRequest::Speech(request) => {
             prepare_speech(request_id, physical_model, request, &temporary_files)
@@ -352,14 +393,32 @@ fn prepare_text_embedding(
     request_id: String,
     model: &str,
     request: AudioTextEmbeddingRequest,
-) -> (WorkerRequest, Option<(PathBuf, SpeechFormat)>) {
-    (
+    normalizer: Option<AudioTextQueryNormalizer>,
+) -> Result<(WorkerRequest, Option<(PathBuf, SpeechFormat)>), ProviderError> {
+    let normalizer = if request.language.eq_ignore_ascii_case("en")
+        || request.language.to_ascii_lowercase().starts_with("en-")
+    {
+        None
+    } else if request.language.eq_ignore_ascii_case("zh")
+        || request.language.to_ascii_lowercase().starts_with("zh-")
+    {
+        normalizer
+            .ok_or_else(|| ProviderError::Protocol("query_normalizer_unavailable".into()))?
+            .into()
+    } else {
+        return Err(ProviderError::Protocol(
+            "audio_query_language_unsupported".into(),
+        ));
+    };
+    Ok((
         WorkerRequest {
             text: Some(request.text),
+            language: Some(request.language),
+            normalizer,
             ..worker_request(request_id, "embed_text", model, None)
         },
         None,
-    )
+    ))
 }
 
 async fn prepare_event_detection(
@@ -490,6 +549,7 @@ fn worker_request(
         speed: None,
         temperature: None,
         format: None,
+        normalizer: None,
     }
 }
 

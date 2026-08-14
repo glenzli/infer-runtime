@@ -120,6 +120,18 @@ pub struct AudioEmbeddingProvenance {
     pub tokenizer_identity: String,
 }
 
+/// Present only when the Runtime applied the Build-owned zh→en short-query
+/// normalizer before the English-first CLAP text tower.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioTextQueryNormalizerProvenance {
+    pub deployment: String,
+    pub build: String,
+    pub prompt_revision: String,
+    pub source_language: String,
+    pub target_language: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AudioEmbeddingResponse {
@@ -133,6 +145,8 @@ pub struct AudioEmbeddingResponse {
     pub embedding: Vec<f32>,
     pub embedding_space: EmbeddingSpaceConfig,
     pub provenance: AudioEmbeddingProvenance,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query_normalizer: Option<AudioTextQueryNormalizerProvenance>,
 }
 
 impl AudioEmbeddingResponse {
@@ -157,6 +171,18 @@ impl AudioEmbeddingResponse {
             return Err(ContractError::InvalidAudio(
                 "audio embedding response has invalid embedding-space or provenance identity"
                     .into(),
+            ));
+        }
+        if let Some(normalizer) = &self.query_normalizer
+            && (self.model != "audio.embed_text_query"
+                || normalizer.deployment.is_empty()
+                || normalizer.build.is_empty()
+                || normalizer.prompt_revision.is_empty()
+                || normalizer.source_language != "zh"
+                || normalizer.target_language != "en")
+        {
+            return Err(ContractError::InvalidAudio(
+                "audio text-query normalizer provenance is invalid".into(),
             ));
         }
         let expected_revisions = match self.model.as_str() {
