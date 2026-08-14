@@ -19,7 +19,7 @@ plane.
 | Capability | Current implementation | Stability |
 | --- | --- | --- |
 | Text inference | Responses-shaped unary/SSE and encrypted local background work; local, cloud, and subscription Providers | `infer.responses@20260812.1`; subscription bridge remains experimental |
-| Local audio | Transcription, forced alignment, speech synthesis, voice design, voice cloning, and AudioSet event detection | Event detection is stable; streaming TTS/ASR and some generation capabilities remain experimental |
+| Local audio | Transcription, forced alignment, speech synthesis, voice design, voice cloning, AudioSet event detection, and experimental audio-text retrieval | Event detection is stable; CLAP retrieval, streaming TTS/ASR, and some generation capabilities remain experimental |
 | Local vision | Typed ONNX/Core ML Providers; face detection/embeddings, image-text embeddings, click-guided subject segmentation, and face parsing | Narrow experimental slices; face parsing is restricted research use |
 | Routing and execution | Intent → Model Profile → Build → Deployment; priority queues, deadline, cancellation, retry/fallback, and circuit breaking | M1/M2 are closed |
 | Budget and recovery | App/provider/global quotas, reservations, usage ledger, SQLite migrations, and local background recovery | M3 is closed |

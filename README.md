@@ -15,7 +15,7 @@ Provider 与 Deployment，并统一处理排队、配额、模型驻留、取消
 | 能力 | 当前实现 | 稳定性 |
 | --- | --- | --- |
 | 文本推理 | Responses-shaped unary/SSE、本地加密 background；可连接本地、云端和订阅式 Provider | `infer.responses@20260812.1`；订阅桥仍 experimental |
-| 本地音频 | 转写、强制对齐、语音合成、声音设计、声音克隆与 AudioSet 声音事件检测 | 事件检测为 stable；流式 TTS/ASR 与部分生成能力仍 experimental |
+| 本地音频 | 转写、强制对齐、语音合成、声音设计、声音克隆、AudioSet 声音事件与实验性 audio-text retrieval | 事件检测为 stable；CLAP retrieval、流式 TTS/ASR 与部分生成能力仍 experimental |
 | 本地视觉 | ONNX/Core ML typed Provider；人脸检测/向量、图文语义向量、点击式主体分割与人脸解析 | 收窄的 experimental slices；人脸解析为受限研究用途 |
 | 路由与执行 | Intent → Model Profile → Build → Deployment；优先队列、deadline、cancel、retry/fallback、熔断 | M1/M2 已闭环 |
 | 预算与恢复 | App/provider/global quota、reservation、usage ledger、SQLite migration、local background recovery | M3 已闭环 |

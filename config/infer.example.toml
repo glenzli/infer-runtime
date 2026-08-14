@@ -196,6 +196,26 @@ ffmpeg = "ffmpeg"
 version = 1
 protocol = "audio_worker"
 
+# Optional Runtime-managed CLAP baseline. A Runtime-owned install flow records
+# an immutable upstream revision in ArtifactStore; serving uses only that
+# verified local copy and never redistributes weights through the Consumer API.
+# This Build is intentionally MPS-only and has no implicit CPU fallback.
+[providers.clap-local]
+kind = "audio_worker"
+command = ".infer-runtime/runtimes/clap/bin/python"
+args = ["tools/clap_audio_embedding_worker.py"]
+placement = "local"
+max_concurrency = 1
+max_queue = 16
+priority_aging_ms = 10000
+
+[providers.clap-local.runtime_dependencies]
+ffmpeg = "ffmpeg"
+
+[providers.clap-local.capability_profile]
+version = 1
+protocol = "audio_worker"
+
 # Optional isolated MLX retrieval worker. Production installs should point to
 # an owner-only pinned Python runtime; this example path is intentionally
 # portable and does not imply that the models are installed.
@@ -528,6 +548,24 @@ required_features = ["audioset_521", "multilabel", "temporal_windows", "speech_p
 default_capability_floor = "foundational"
 default_policy = "local-first"
 
+# Experimental joint audio/text retrieval space. It deliberately does not
+# replace transcript, SigLIP text evidence, or AudioSet event facts.
+[intents."audio.embed"]
+data_plane = "audio.embedding"
+input_modalities = ["audio"]
+output_modalities = ["json"]
+required_features = ["audio_text_embedding", "l2_normalized_512"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[intents."audio.embed_text_query"]
+data_plane = "audio.embedding"
+input_modalities = ["text"]
+output_modalities = ["json"]
+required_features = ["audio_text_embedding", "l2_normalized_512"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
 [intents."speech.synthesize"]
 data_plane = "audio.speech"
 input_modalities = ["text"]
@@ -783,6 +821,17 @@ family = "yamnet"
 level = "foundational"
 status = "provisional"
 
+[model_profiles.clap_htsat_unfused]
+family = "clap"
+
+[model_profiles.clap_htsat_unfused.ratings."audio.embed"]
+level = "foundational"
+status = "provisional"
+
+[model_profiles.clap_htsat_unfused.ratings."audio.embed_text_query"]
+level = "foundational"
+status = "provisional"
+
 [model_profiles.yunet_2026may]
 family = "yunet"
 
@@ -1000,6 +1049,45 @@ speech_class_set_revision = "yamnet-audioset-speech-family-indices-0-through-12-
 speech_present_threshold = 0.30
 speech_absent_threshold = 0.05
 max_audio_seconds = 600
+
+# The exact local artifact set is recorded below. This is a generic
+# English-first baseline; `language` on a text query is evidence supplied by
+# the Consumer, not a claim that the Build has multilingual retrieval quality.
+[model_builds.clap_htsat_unfused_8fa0f1c6d043_pytorch_mps]
+profile = "clap_htsat_unfused"
+model_id = "laion/clap-htsat-unfused"
+variant = "htsat-unfused;pytorch-2.8.0;transformers-4.56.2;mps"
+input_modalities = ["audio", "text"]
+output_modalities = ["json"]
+features = ["audio_text_embedding", "l2_normalized_512", "mps_only"]
+
+[model_builds.clap_htsat_unfused_8fa0f1c6d043_pytorch_mps.provenance]
+source_kind = "runtime_downloadable"
+upstream = "https://huggingface.co/laion/clap-htsat-unfused"
+source_revision = "8fa0f1c6d0433df6e97c127f64b2a1d6c0dcda8a"
+artifact_sha256 = "7a1f92bf8247ba887c50432840973e47ed1dd6e6033058f4ddb189e9d8893ab4"
+
+[model_builds.clap_htsat_unfused_8fa0f1c6d043_pytorch_mps.license]
+status = "declared"
+expression = "Apache-2.0"
+license_url = "https://huggingface.co/laion/clap-htsat-unfused"
+
+[model_builds.clap_htsat_unfused_8fa0f1c6d043_pytorch_mps.local_worker]
+adapter = "clap_audio_text_embedding"
+artifact_set_sha256 = "7a1f92bf8247ba887c50432840973e47ed1dd6e6033058f4ddb189e9d8893ab4"
+runtime = "python3.12;torch-2.8.0;transformers-4.56.2"
+precision = "fp32"
+postprocessing_identity = "clap_l2_normalize_v1"
+tokenizer_identity = "clap_roberta_bpe@77ef9228d1b237f661cc9d2fdfca491d603c892446fd7492b1ccb9c062420a68"
+preprocessing_identity = "ffmpeg_decode_mono_f32le_48khz_max10s_then_clap_htsat_64mel_nfft1024_hop480_v1"
+requested_execution_provider = "mps"
+actual_execution_provider = "mps"
+
+[model_builds.clap_htsat_unfused_8fa0f1c6d043_pytorch_mps.local_worker.embedding_space]
+identity = "laion-clap-htsat-unfused@8fa0f1c6:audio-mono-48khz-10s:text-roberta-bpe:l2_512_fp32:mps:v1"
+dimensions = 512
+normalized = true
+distance_metric = "cosine"
 
 [model_builds.qwen3_5_2b_mlx]
 profile = "qwen3_5_2b"
@@ -1650,6 +1738,13 @@ supported_execution_modes = ["unary", "server_stream"]
 provider = "yamnet-local"
 build = "yamnet_tfhub_v1_tensorflow_2_20"
 resource_class = "light"
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary"]
+
+[deployments.clap_htsat_unfused_mps]
+provider = "clap-local"
+build = "clap_htsat_unfused_8fa0f1c6d043_pytorch_mps"
+resource_class = "heavy"
 estimated_cost_usd = 0.0
 supported_execution_modes = ["unary"]
 
