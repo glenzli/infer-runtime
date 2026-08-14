@@ -366,7 +366,7 @@ async fn audio_multipart_rejects_unknown_and_wrong_file_fields() {
             .oneshot(
                 capability(
                     authenticated(Request::builder()),
-                    "infer.audio.transcription@20260811.1",
+                    "infer.audio.transcription@20260814.1",
                 )
                 .method("POST")
                 .uri("/v1/audio/transcriptions")

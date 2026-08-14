@@ -1,0 +1,218 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.audio.transcription",
+    "version": "20260814.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.audio.transcription@20260814.1",
+  "paths": {
+    "/v1/audio/transcriptions": {
+      "post": {
+        "operationId": "createTranscription",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/TranscriptionCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/TranscriptionForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transcription result; text/plain is used when response_format=text",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TranscriptionResponse"
+                }
+              },
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "TranscriptionCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.audio.transcription@20260814.1"
+        }
+      }
+    },
+    "schemas": {
+      "TranscriptionForm": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": {
+          "^infer\\.": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "file"
+        ],
+        "properties": {
+          "model": {
+            "const": "audio.transcribe"
+          },
+          "file": {
+            "type": "string",
+            "format": "binary"
+          },
+          "language": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "response_format": {
+            "enum": [
+              "json",
+              "text",
+              "verbose_json"
+            ]
+          },
+          "temperature": {
+            "type": "number",
+            "minimum": 0
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON object whose values are strings"
+          }
+        }
+      },
+      "TranscriptionLanguageEvidence": {
+        "description": "Provider-reported language evidence. input_set preserves a whole-input set without inventing a primary language or time boundaries; segments is reserved for provider-supplied interval evidence.",
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "source",
+              "languages"
+            ],
+            "properties": {
+              "kind": {
+                "const": "input_set"
+              },
+              "source": {
+                "const": "provider_reported"
+              },
+              "languages": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Provider language label; Runtime does not infer or rewrite a language taxonomy."
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "source",
+              "segments"
+            ],
+            "properties": {
+              "kind": {
+                "const": "segments"
+              },
+              "source": {
+                "const": "provider_reported"
+              },
+              "segments": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "language",
+                    "start_seconds",
+                    "end_seconds"
+                  ],
+                  "properties": {
+                    "language": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "start_seconds": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "end_seconds": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "score": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "TranscriptionResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "model",
+          "text"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "model": {
+            "const": "audio.transcribe"
+          },
+          "text": {
+            "type": "string"
+          },
+          "language": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A single unambiguous document-level provider language. Mixed-language input is represented by language_evidence."
+          },
+          "language_evidence": {
+            "$ref": "#/components/schemas/TranscriptionLanguageEvidence"
+          },
+          "segments": {},
+          "usage": {}
+        }
+      }
+    }
+  }
+}

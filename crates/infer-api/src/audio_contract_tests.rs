@@ -30,7 +30,7 @@ impl AudioExecutor for ArrayLanguageTranscriptionExecutor {
         assert!(matches!(request, AudioExecutionRequest::Transcription(_)));
         Ok(AudioExecutionOutput::Json(serde_json::json!({
             "text": "provider output",
-            "language": ["Chinese"],
+            "language": ["Chinese", "English"],
             "segments": []
         })))
     }
@@ -66,7 +66,7 @@ async fn transcription_endpoint_normalizes_provider_language_arrays_for_official
                 .header(contract::CONSUMER_CORE_HEADER, contract::CORE_CONTRACT)
                 .header(
                     contract::CAPABILITY_CONTRACT_HEADER,
-                    "infer.audio.transcription@20260811.1",
+                    "infer.audio.transcription@20260814.1",
                 )
                 .header(
                     header::CONTENT_TYPE,
@@ -86,5 +86,12 @@ async fn transcription_endpoint_normalizes_provider_language_arrays_for_official
         transcription.extra.get("model"),
         Some(&serde_json::Value::String("audio.transcribe".into()))
     );
-    assert_eq!(transcription.language.as_deref(), Some("Chinese"));
+    assert_eq!(transcription.language, None);
+    assert!(matches!(
+        transcription.language_evidence,
+        Some(infer_runtime_client::TranscriptionLanguageEvidence::InputSet {
+            source: infer_runtime_client::TranscriptionLanguageEvidenceSource::ProviderReported,
+            languages,
+        }) if languages == vec!["Chinese".to_owned(), "English".to_owned()]
+    ));
 }

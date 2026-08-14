@@ -1386,7 +1386,7 @@ impl Runtime {
                     expected_data_plane,
                     capability_contract: current_admitted_capability_contract(
                         match expected_data_plane {
-                            "audio.transcription" => "infer.audio.transcription@20260811.1",
+                            "audio.transcription" => "infer.audio.transcription@20260814.1",
                             "audio.alignment" => "infer.audio.alignment@20260811.1",
                             "audio.event_detection" => "infer.audio.event-detection@20260813.2",
                             "audio.speech" => "infer.audio.speech@20260811.1",
@@ -2476,21 +2476,144 @@ fn normalize_audio_json(
 }
 
 fn normalize_transcription_language(object: &mut serde_json::Map<String, Value>) {
-    let Some(language) = object.get_mut("language") else {
-        return;
-    };
-    let Value::Array(candidates) = language else {
-        return;
-    };
+    // The scalar public field is strictly document-level. Preserve every
+    // provider-reported string in a typed evidence set instead of collapsing
+    // mixed-language input into an undifferentiated null.
+    let raw_language = object.remove("language");
+    let raw_evidence = object.remove("language_evidence");
+    let evidence = raw_evidence
+        .and_then(normalize_provider_language_evidence)
+        .or_else(|| raw_language.and_then(input_set_language_evidence));
 
-    // Some ASR adapters expose their detected language as a one-element list.
-    // The public transcription contract deliberately owns a scalar or null:
-    // a single candidate is unambiguous, while no/multiple/non-string values
-    // must not be misrepresented as one selected language.
-    *language = match candidates.as_slice() {
-        [Value::String(candidate)] => Value::String(candidate.clone()),
+    let Some((evidence, languages)) = evidence else {
+        object.insert("language".into(), Value::Null);
+        return;
+    };
+    let language = match languages.as_slice() {
+        [language] => Value::String(language.clone()),
         _ => Value::Null,
     };
+    object.insert("language".into(), language);
+    object.insert("language_evidence".into(), evidence);
+}
+
+fn input_set_language_evidence(value: Value) -> Option<(Value, Vec<String>)> {
+    let languages = match value {
+        Value::String(language) if !language.is_empty() => vec![language],
+        Value::Array(values) => values
+            .into_iter()
+            .map(|value| match value {
+                Value::String(language) if !language.is_empty() => Some(language),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>()?,
+        _ => return None,
+    };
+    let languages = unique_languages(languages)?;
+    Some((
+        json!({
+            "kind": "input_set",
+            "source": "provider_reported",
+            "languages": languages,
+        }),
+        languages,
+    ))
+}
+
+fn normalize_provider_language_evidence(value: Value) -> Option<(Value, Vec<String>)> {
+    let Value::Object(mut evidence) = value else {
+        return None;
+    };
+    if evidence.remove("source")?.as_str()? != "provider_reported" {
+        return None;
+    }
+    match evidence.remove("kind")?.as_str()? {
+        "input_set" => {
+            let languages = match evidence.remove("languages")? {
+                Value::Array(values) => values
+                    .into_iter()
+                    .map(|value| match value {
+                        Value::String(language) if !language.is_empty() => Some(language),
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<_>>>()?,
+                _ => return None,
+            };
+            let languages = unique_languages(languages)?;
+            Some((
+                json!({
+                    "kind": "input_set",
+                    "source": "provider_reported",
+                    "languages": languages,
+                }),
+                languages,
+            ))
+        }
+        "segments" => {
+            let Value::Array(segments) = evidence.remove("segments")? else {
+                return None;
+            };
+            let mut normalized = Vec::with_capacity(segments.len());
+            let mut languages = Vec::with_capacity(segments.len());
+            for segment in segments {
+                let Value::Object(mut segment) = segment else {
+                    return None;
+                };
+                let language = segment.remove("language")?.as_str()?.to_owned();
+                if language.is_empty() {
+                    return None;
+                }
+                let start_seconds = segment.remove("start_seconds")?.as_f64()?;
+                let end_seconds = segment.remove("end_seconds")?.as_f64()?;
+                if !start_seconds.is_finite()
+                    || !end_seconds.is_finite()
+                    || start_seconds < 0.0
+                    || end_seconds < start_seconds
+                {
+                    return None;
+                }
+                let score = match segment.remove("score") {
+                    Some(score) => {
+                        let score = score.as_f64()?;
+                        if !score.is_finite() || !(0.0..=1.0).contains(&score) {
+                            return None;
+                        }
+                        Some(score)
+                    }
+                    None => None,
+                };
+                let mut canonical = json!({
+                    "language": language,
+                    "start_seconds": start_seconds,
+                    "end_seconds": end_seconds,
+                });
+                if let Some(score) = score {
+                    canonical["score"] = json!(score);
+                }
+                normalized.push(canonical);
+                languages.push(language);
+            }
+            let languages = unique_languages(languages)?;
+            Some((
+                json!({
+                    "kind": "segments",
+                    "source": "provider_reported",
+                    "segments": normalized,
+                }),
+                languages,
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn unique_languages(languages: Vec<String>) -> Option<Vec<String>> {
+    let mut seen = std::collections::BTreeSet::new();
+    let languages: Vec<_> = languages
+        .into_iter()
+        .filter(|language| seen.insert(language.clone()))
+        .collect();
+    (!languages.is_empty()).then_some(languages)
 }
 
 struct NormalizedFrame {
@@ -2900,16 +3023,58 @@ mod tests {
     }
 
     #[test]
-    fn transcription_language_candidates_are_normalized_to_the_public_scalar() {
+    fn transcription_language_candidates_preserve_typed_multi_language_evidence() {
         let mut single = json!({"text":"provider output", "language":["Chinese"]});
         normalize_audio_json(&mut single, "audio_single", "audio.transcribe", true);
         assert_eq!(single["id"], "audio_single");
         assert_eq!(single["model"], "audio.transcribe");
         assert_eq!(single["language"], "Chinese");
+        assert_eq!(
+            single["language_evidence"],
+            json!({
+                "kind": "input_set",
+                "source": "provider_reported",
+                "languages": ["Chinese"],
+            })
+        );
 
         let mut ambiguous = json!({"text":"provider output", "language":["Chinese", "English"]});
         normalize_audio_json(&mut ambiguous, "audio_ambiguous", "audio.transcribe", true);
         assert!(ambiguous["language"].is_null());
+        assert_eq!(
+            ambiguous["language_evidence"],
+            json!({
+                "kind": "input_set",
+                "source": "provider_reported",
+                "languages": ["Chinese", "English"],
+            })
+        );
+
+        let mut segmented = json!({
+            "text": "provider output",
+            "language": ["Chinese", "English"],
+            "language_evidence": {
+                "kind": "segments",
+                "source": "provider_reported",
+                "segments": [
+                    {"language": "Chinese", "start_seconds": 0.0, "end_seconds": 2.0},
+                    {"language": "English", "start_seconds": 2.0, "end_seconds": 4.0, "score": 0.9}
+                ]
+            }
+        });
+        normalize_audio_json(&mut segmented, "audio_segmented", "audio.transcribe", true);
+        assert!(segmented["language"].is_null());
+        assert_eq!(
+            segmented["language_evidence"],
+            json!({
+                "kind": "segments",
+                "source": "provider_reported",
+                "segments": [
+                    {"language": "Chinese", "start_seconds": 0.0, "end_seconds": 2.0},
+                    {"language": "English", "start_seconds": 2.0, "end_seconds": 4.0, "score": 0.9}
+                ]
+            })
+        );
     }
 
     #[tokio::test]

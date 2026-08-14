@@ -12,7 +12,7 @@ use crate::{
     },
 };
 
-pub const TRANSCRIPTION_CAPABILITIES: &[&str] = &["infer.audio.transcription@20260811.1"];
+pub const TRANSCRIPTION_CAPABILITIES: &[&str] = &["infer.audio.transcription@20260814.1"];
 pub const EVENT_DETECTION_CAPABILITIES: &[&str] = &["infer.audio.event-detection@20260813.2"];
 pub const ALIGNMENT_CAPABILITIES: &[&str] = &["infer.audio.alignment@20260811.1"];
 pub const SPEECH_CAPABILITIES: &[&str] = &["infer.audio.speech@20260811.1"];
@@ -112,13 +112,49 @@ impl SpeechByteStream {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TranscriptionResponse {
     pub text: String,
+    /// A single document-level language only when the provider reported one
+    /// unambiguous value. For mixed-language audio, use `language_evidence`.
     pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language_evidence: Option<TranscriptionLanguageEvidence>,
     #[serde(default)]
     pub segments: Value,
     #[serde(default)]
     pub usage: Value,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
+}
+
+/// Provider-reported language evidence. `InputSet` preserves an unordered
+/// whole-input set without inventing a dominant language or time boundaries;
+/// `Segments` is reserved for providers that supply those boundaries.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TranscriptionLanguageEvidence {
+    InputSet {
+        source: TranscriptionLanguageEvidenceSource,
+        languages: Vec<String>,
+    },
+    Segments {
+        source: TranscriptionLanguageEvidenceSource,
+        segments: Vec<TranscriptionLanguageSegment>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscriptionLanguageEvidenceSource {
+    ProviderReported,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TranscriptionLanguageSegment {
+    pub language: String,
+    pub start_seconds: f64,
+    pub end_seconds: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -531,6 +567,32 @@ mod tests {
         partial.validate().unwrap();
         partial.speech_presence.status = SpeechPresenceStatus::Absent;
         assert!(partial.validate().is_err());
+    }
+
+    #[test]
+    fn transcription_language_evidence_preserves_a_mixed_input_set() {
+        assert_eq!(
+            TRANSCRIPTION_CAPABILITIES,
+            &["infer.audio.transcription@20260814.1"]
+        );
+        let response: TranscriptionResponse = serde_json::from_value(serde_json::json!({
+            "text": "provider output",
+            "language": null,
+            "language_evidence": {
+                "kind": "input_set",
+                "source": "provider_reported",
+                "languages": ["Chinese", "English"]
+            }
+        }))
+        .unwrap();
+        assert_eq!(response.language, None);
+        assert!(matches!(
+            response.language_evidence,
+            Some(TranscriptionLanguageEvidence::InputSet {
+                source: TranscriptionLanguageEvidenceSource::ProviderReported,
+                languages,
+            }) if languages == vec!["Chinese".to_owned(), "English".to_owned()]
+        ));
     }
 
     #[tokio::test]

@@ -22,7 +22,8 @@ pub use audio::{
     AudioCoverageStatus, AudioEventDetectionResponse, DetectedSoundEvent, ExecutionMode,
     SoundEventDetectionPolicy, SoundEventOntology, SoundEventProvenance, SoundEventSmoothingPolicy,
     SpeechByteStream, SpeechFormat, SpeechPresence, SpeechPresenceStatus, SpeechRequest,
-    TranscriptionFormat, TranscriptionResponse,
+    TranscriptionFormat, TranscriptionLanguageEvidence, TranscriptionLanguageEvidenceSource,
+    TranscriptionLanguageSegment, TranscriptionResponse,
 };
 pub use contract::{
     CAPABILITY_CATALOG_SCHEMA, CAPABILITY_CATALOG_VERSION, CAPABILITY_CONTRACT_HEADER,
