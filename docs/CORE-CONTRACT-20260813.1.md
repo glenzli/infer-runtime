@@ -34,7 +34,7 @@ Core 只承诺所有能力共同依赖的骨架：
 变化，新旧版本可在迁移窗口并行发布。
 
 每个类型化能力请求还必须恰好发送一个 `Infer-Capability-Contract`，值为 Catalog 中选定的
-完整能力身份，例如 `infer.audio.transcription@20260811.1`。Core-owned 的 Job/Explain/contract/
+完整能力身份，例如 `infer.audio.transcription@20260814.1`。Core-owned 的 Job/Explain/contract/
 catalog 操作不发送该头。缺失、重复或错误能力身份返回 HTTP 426、
 `error.code=capability_contract_unsupported`；这样某个能力 breaking 时只迁移使用该能力的
 Consumer，不升级 Core，也不影响其他能力。
