@@ -405,7 +405,7 @@ async fn main() -> anyhow::Result<()> {
                     .post(format!("{base}/v1/audio/transcriptions"))
                     .header(
                         infer_core::CAPABILITY_CONTRACT_HEADER,
-                        "infer.audio.transcription@20260811.1",
+                        "infer.audio.transcription@20260814.1",
                     )
                     .bearer_auth(&api_key)
                     .multipart(form)

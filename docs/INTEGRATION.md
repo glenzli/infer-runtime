@@ -206,12 +206,20 @@ POST /v1/responses/{response_id}/cancel
 curl "$INFER_BASE_URL/v1/audio/transcriptions" \
   -H "Authorization: Bearer $SAMPLE_CONSUMER_INFER_TOKEN" \
   -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
-  -H 'Infer-Capability-Contract: infer.audio.transcription@20260811.1' \
+  -H 'Infer-Capability-Contract: infer.audio.transcription@20260814.1' \
   -F model=audio.transcribe \
   -F file=@sample.wav \
   -F language=Chinese \
   -F response_format=verbose_json
 ```
+
+`infer.audio.transcription@20260814.1` keeps `language` as one unambiguous,
+document-level language only. Mixed-language input returns `language: null`
+together with typed `language_evidence`: `kind=input_set` is a provider-reported
+whole-input language set and deliberately has no invented time boundaries;
+`kind=segments` is only emitted when the provider supplies interval evidence.
+Consumers must use `language_evidence` rather than treating a null scalar as
+an absence of speech or of language evidence.
 
 TTS 示例：
 
