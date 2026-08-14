@@ -388,7 +388,7 @@ pub const CAPABILITIES: &[CapabilityEntry] = &[
     ),
     capability!(
         "infer.audio.embedding",
-        "20260815.1",
+        "20260815.2",
         "experimental",
         [
             route!("POST", "/v1/audio/embeddings", &["unary"]),

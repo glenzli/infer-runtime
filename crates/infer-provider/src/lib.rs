@@ -26,7 +26,8 @@ pub use audio_stream::{
     DynAudioDuplexSession, DynAudioStreamExecutor, ProviderAudioByteStream, SpeechStreamOutput,
 };
 pub use audio_worker::{
-    AudioExecutionOutput, AudioExecutor, AudioWorkerExecutor, DynAudioExecutor,
+    AudioExecutionOutput, AudioExecutor, AudioTextQueryNormalizer, AudioWorkerExecutor,
+    DynAudioExecutor,
 };
 pub use codex_app_server::CodexAppServerProvider;
 pub use coreml_sam::{

@@ -14,6 +14,8 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 # These must be set before importing torch: the admitted Build is MPS-only and
@@ -34,6 +36,7 @@ MAX_AUDIO_SECONDS = 10
 MAX_PCM_BYTES = SAMPLE_RATE_HZ * MAX_AUDIO_SECONDS * 4
 MAX_TEXT_BYTES = 16 * 1024
 MAX_REQUEST_BYTES = 128 * 1024
+MAX_NORMALIZER_RESPONSE_BYTES = 64 * 1024
 
 
 class WorkerFailure(Exception):
@@ -78,11 +81,21 @@ class ClapRuntime:
         except Exception as error:
             raise WorkerFailure("clap_audio_embedding_failed") from error
 
-    def embed_text(self, text: str) -> list[float]:
+    def embed_text(self, text: str, normalizer: dict | None = None) -> tuple[list[float], dict | None]:
         if not text.strip():
             raise WorkerFailure("text_required")
         if len(text.encode("utf-8")) > MAX_TEXT_BYTES:
             raise WorkerFailure("text_too_large")
+        normalizer_provenance = None
+        if normalizer is not None:
+            text = self._normalize_zh_query(text, normalizer)
+            normalizer_provenance = {
+                "deployment": normalizer["deployment"],
+                "build": normalizer["build"],
+                "prompt_revision": normalizer["prompt_revision"],
+                "source_language": normalizer["source_language"],
+                "target_language": normalizer["target_language"],
+            }
         try:
             inputs = self.processor(text=[text], return_tensors="pt", padding=True)
             inputs = {key: value.to(self.device) for key, value in inputs.items()}
@@ -90,9 +103,46 @@ class ClapRuntime:
                 vector = self.model.get_text_features(**inputs)
                 vector = F.normalize(vector, p=2, dim=-1)
             torch.mps.synchronize()
-            return vector[0].float().cpu().tolist()
+            return vector[0].float().cpu().tolist(), normalizer_provenance
         except Exception as error:
             raise WorkerFailure("clap_text_embedding_failed") from error
+
+    def _normalize_zh_query(self, text: str, normalizer: dict) -> str:
+        required = {
+            "endpoint", "model", "deployment", "build", "prompt_revision",
+            "source_language", "target_language", "max_query_bytes", "max_output_bytes",
+        }
+        if set(normalizer) != required or normalizer["source_language"] != "zh" or normalizer["target_language"] != "en":
+            raise WorkerFailure("query_normalizer_unavailable")
+        if len(text.encode("utf-8")) > normalizer["max_query_bytes"]:
+            raise WorkerFailure("query_normalizer_input_too_large")
+        payload = json.dumps({
+            "model": normalizer["model"], "input": text,
+            "instructions": "Translate this Chinese sound-search query into concise English only. Return plain English text. No explanation, quotation, markdown, or newlines.",
+            "stream": False, "reasoning": {"effort": "none"}, "max_output_tokens": 48,
+        }).encode("utf-8")
+        request = urllib.request.Request(normalizer["endpoint"], data=payload, headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                if response.status != 200:
+                    raise WorkerFailure("query_normalizer_unavailable")
+                body = response.read(MAX_NORMALIZER_RESPONSE_BYTES + 1)
+        except (OSError, urllib.error.URLError, urllib.error.HTTPError) as error:
+            raise WorkerFailure("query_normalizer_unavailable") from error
+        if len(body) > MAX_NORMALIZER_RESPONSE_BYTES:
+            raise WorkerFailure("query_normalizer_invalid_output")
+        try:
+            result = " ".join(
+                item["text"] for output in json.loads(body)["output"]
+                if output.get("type") == "message"
+                for item in output.get("content", [])
+                if item.get("type") == "output_text" and isinstance(item.get("text"), str)
+            ).strip()
+        except (KeyError, TypeError, json.JSONDecodeError) as error:
+            raise WorkerFailure("query_normalizer_invalid_output") from error
+        if not result or "\n" in result or not result.isascii() or len(result.encode("utf-8")) > normalizer["max_output_bytes"]:
+            raise WorkerFailure("query_normalizer_invalid_output")
+        return result
 
     def _decode_audio(self, audio_path: str) -> np.ndarray:
         path = Path(audio_path)
@@ -135,7 +185,7 @@ class ClapRuntime:
 
 def verify(model_path: str, ffmpeg: str) -> int:
     runtime = ClapRuntime.load(model_path, ffmpeg)
-    vector = runtime.embed_text("runtime readiness probe")
+    vector, _ = runtime.embed_text("runtime readiness probe")
     if len(vector) != 512:
         raise WorkerFailure("unexpected_embedding_dimensions")
     print(json.dumps({"dimensions": 512, "runtime": "pytorch-mps"}, sort_keys=True))
@@ -156,7 +206,7 @@ def serve(ffmpeg: str) -> int:
         try:
             request = json.loads(raw_line)
             if not isinstance(request, dict) or set(request) - {
-                "request_id", "operation", "model", "audio_path", "text"
+                "request_id", "operation", "model", "audio_path", "text", "language", "normalizer"
             }:
                 raise WorkerFailure("invalid_worker_request")
             request_id = request.get("request_id")
@@ -173,8 +223,9 @@ def serve(ffmpeg: str) -> int:
             operation = request.get("operation")
             if operation == "embed_audio" and isinstance(request.get("audio_path"), str):
                 vector = runtime.embed_audio(request["audio_path"])
+                normalizer_provenance = None
             elif operation == "embed_text" and isinstance(request.get("text"), str):
-                vector = runtime.embed_text(request["text"])
+                vector, normalizer_provenance = runtime.embed_text(request["text"], request.get("normalizer"))
             else:
                 raise WorkerFailure("invalid_worker_request")
             print(
@@ -182,7 +233,7 @@ def serve(ffmpeg: str) -> int:
                     {
                         "request_id": request_id,
                         "ok": True,
-                        "result": {"embedding": vector, "dimensions": len(vector), "normalized": True},
+                        "result": {"embedding": vector, "dimensions": len(vector), "normalized": True, **({"normalizer": normalizer_provenance} if normalizer_provenance else {})},
                     },
                     separators=(",", ":"),
                 ),
