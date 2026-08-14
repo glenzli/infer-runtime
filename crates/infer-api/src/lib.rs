@@ -10,6 +10,8 @@ mod retrieval;
 mod vision;
 
 #[cfg(test)]
+mod audio_contract_tests;
+#[cfg(test)]
 mod contract_tests;
 #[cfg(test)]
 mod observer_tests;
