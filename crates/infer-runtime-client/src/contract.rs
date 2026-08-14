@@ -24,9 +24,9 @@ pub(crate) fn expected_capability_schema(identity: &str) -> Option<(&'static str
             "/infer/v1/capability-schemas/infer.responses/20260812.1/openapi.json",
             "abfb3b4b9a3c5d3831d56bb877ecfdd43d62b4442ba101a5ef071ec2740adbd5",
         ),
-        "infer.audio.transcription@20260811.1" => (
-            "/infer/v1/capability-schemas/infer.audio.transcription/20260811.1/openapi.json",
-            "53ee5993abbaa3ccc04a5b5f77f3457fbd2f29cccda0b33b0959b6b900c25e59",
+        "infer.audio.transcription@20260814.1" => (
+            "/infer/v1/capability-schemas/infer.audio.transcription/20260814.1/openapi.json",
+            "ece4a288a01e8a72cd67a4242896f11f8751ed4a82e99f029f283bbc9de6c580",
         ),
         "infer.audio.event-detection@20260813.2" => (
             "/infer/v1/capability-schemas/infer.audio.event-detection/20260813.2/openapi.json",

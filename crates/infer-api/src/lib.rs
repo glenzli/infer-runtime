@@ -1627,7 +1627,7 @@ mod tests {
 
         headers.insert(
             infer_core::CAPABILITY_CONTRACT_HEADER,
-            HeaderValue::from_static("infer.audio.transcription@20260811.1"),
+            HeaderValue::from_static("infer.audio.transcription@20260814.1"),
         );
         assert!(
             require_current_capability_contract(&headers, Some("infer.audio.transcription"))

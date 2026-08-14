@@ -47,7 +47,7 @@ CAPABILITIES: dict[str, tuple[str, tuple[str, ...]]] = {
             "/v1/responses/{response_id}/cancel",
         ),
     ),
-    "infer.audio.transcription": ("20260811.1", ("/v1/audio/transcriptions",)),
+    "infer.audio.transcription": ("20260814.1", ("/v1/audio/transcriptions",)),
     "infer.audio.event-detection": ("20260813.2", ("/v1/audio/event-detections",)),
     "infer.audio.alignment": ("20260811.1", ("/v1/audio/alignments",)),
     "infer.audio.speech": ("20260811.1", ("/v1/audio/speech",)),

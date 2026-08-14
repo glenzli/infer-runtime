@@ -688,7 +688,7 @@
       },
       "TranscriptionCapability": {
         "name": "Infer-Capability-Contract", "in": "header", "required": true,
-        "schema": { "const": "infer.audio.transcription@20260811.1" }
+        "schema": { "const": "infer.audio.transcription@20260814.1" }
       },
       "TranscriptionStreamCapability": {
         "name": "Infer-Capability-Contract", "in": "header", "required": true,
@@ -1627,10 +1627,62 @@
           "id": { "type": "string" },
           "model": { "const": "audio.transcribe" },
           "text": { "type": "string" },
-          "language": { "type": ["string", "null"] },
+          "language": {
+            "type": ["string", "null"],
+            "description": "A single unambiguous document-level provider language. Mixed-language input is represented by language_evidence."
+          },
+          "language_evidence": { "$ref": "#/components/schemas/TranscriptionLanguageEvidence" },
           "segments": {},
           "usage": {}
         }
+      },
+      "TranscriptionLanguageEvidence": {
+        "description": "Provider-reported language evidence. input_set preserves a whole-input set without inventing a primary language or time boundaries; segments is reserved for provider-supplied interval evidence.",
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "source", "languages"],
+            "properties": {
+              "kind": { "const": "input_set" },
+              "source": { "const": "provider_reported" },
+              "languages": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Provider language label; Runtime does not infer or rewrite a language taxonomy."
+                }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "source", "segments"],
+            "properties": {
+              "kind": { "const": "segments" },
+              "source": { "const": "provider_reported" },
+              "segments": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["language", "start_seconds", "end_seconds"],
+                  "properties": {
+                    "language": { "type": "string", "minLength": 1 },
+                    "start_seconds": { "type": "number", "minimum": 0 },
+                    "end_seconds": { "type": "number", "minimum": 0 },
+                    "score": { "type": "number", "minimum": 0, "maximum": 1 }
+                  }
+                }
+              }
+            }
+          }
+        ]
       },
       "AlignmentResponse": {
         "type": "object",

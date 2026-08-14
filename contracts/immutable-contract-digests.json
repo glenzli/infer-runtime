@@ -8,6 +8,7 @@
     "contracts/capabilities/infer.audio.speech/20260811.1/openapi.json": "19d29d6799a6cee1a6d24a63f9a9aab73ab925dd2e79f7181fbfe922f6906c68",
     "contracts/capabilities/infer.audio.transcription-stream/20260811.1/openapi.json": "855d7a886689e442d5aa6260271061bc1a317bf81fbb28d6257071d4e2f81726",
     "contracts/capabilities/infer.audio.transcription/20260811.1/openapi.json": "53ee5993abbaa3ccc04a5b5f77f3457fbd2f29cccda0b33b0959b6b900c25e59",
+    "contracts/capabilities/infer.audio.transcription/20260814.1/openapi.json": "ece4a288a01e8a72cd67a4242896f11f8751ed4a82e99f029f283bbc9de6c580",
     "contracts/capabilities/infer.audio.voice-clone/20260811.1/openapi.json": "ac182b38d13a91dd5bb3d69f8f4715807357fc9a75e8cdbdaacf2b15931b0ef8",
     "contracts/capabilities/infer.document.ocr/20260812.1/openapi.json": "bad84843af128390030b40d845cca93072ef3ee96fede280773399ad35893aa9",
     "contracts/capabilities/infer.raw-foundation/20260811.1/openapi.json": "bb897cf44c58aec6c7173dda5ea43bba78993d0e4233aca7ce3168835d6c3597",
