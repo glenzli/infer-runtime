@@ -1199,6 +1199,7 @@ dependencies = [
  "infer-provider",
  "infer-raw-foundation",
  "infer-resource",
+ "infer-runtime-client",
  "libc",
  "serde",
  "serde_json",

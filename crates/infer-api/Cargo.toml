@@ -29,6 +29,7 @@ image.workspace = true
 infer-auth = { path = "../infer-auth" }
 infer-artifact-lease = { path = "../infer-artifact-lease" }
 infer-raw-foundation = { path = "../infer-raw-foundation" }
+infer-runtime-client = { path = "../infer-runtime-client" }
 libc.workspace = true
 tempfile.workspace = true
 toml.workspace = true

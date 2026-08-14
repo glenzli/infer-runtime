@@ -1351,6 +1351,7 @@ impl Runtime {
         let logical_model = request.model().to_owned();
         let constraints = request.constraints()?;
         let is_event_detection = matches!(&request, AudioExecutionRequest::EventDetection(_));
+        let is_transcription = matches!(&request, AudioExecutionRequest::Transcription(_));
         let (expected_data_plane, input_modalities) = match &request {
             AudioExecutionRequest::Transcription(_) => {
                 ("audio.transcription", BTreeSet::from([Modality::Audio]))
@@ -1448,7 +1449,7 @@ impl Runtime {
                 )
                 .await?;
                 if let AudioExecutionOutput::Json(value) = &mut output {
-                    normalize_audio_json(value, &prepared.job_id, &logical_model);
+                    normalize_audio_json(value, &prepared.job_id, &logical_model, is_transcription);
                 }
                 self.mark(&prepared.job_id, JobState::Succeeded, None)
                     .await?;
@@ -2455,7 +2456,12 @@ fn audit_event(kind: &str, details: Value) -> AuditEventInput {
     }
 }
 
-fn normalize_audio_json(value: &mut Value, job_id: &str, logical_model: &str) {
+fn normalize_audio_json(
+    value: &mut Value,
+    job_id: &str,
+    logical_model: &str,
+    is_transcription: bool,
+) {
     if !value.is_object() {
         *value = json!({ "output": value.take() });
     }
@@ -2464,6 +2470,27 @@ fn normalize_audio_json(value: &mut Value, job_id: &str, logical_model: &str) {
         .expect("audio value was normalized to an object");
     object.insert("id".into(), Value::String(job_id.into()));
     object.insert("model".into(), Value::String(logical_model.into()));
+    if is_transcription {
+        normalize_transcription_language(object);
+    }
+}
+
+fn normalize_transcription_language(object: &mut serde_json::Map<String, Value>) {
+    let Some(language) = object.get_mut("language") else {
+        return;
+    };
+    let Value::Array(candidates) = language else {
+        return;
+    };
+
+    // Some ASR adapters expose their detected language as a one-element list.
+    // The public transcription contract deliberately owns a scalar or null:
+    // a single candidate is unambiguous, while no/multiple/non-string values
+    // must not be misrepresented as one selected language.
+    *language = match candidates.as_slice() {
+        [Value::String(candidate)] => Value::String(candidate.clone()),
+        _ => Value::Null,
+    };
 }
 
 struct NormalizedFrame {
@@ -2870,6 +2897,19 @@ mod tests {
         assert_eq!(response["object"], "response");
         assert_eq!(response["model"], "text.summarize");
         assert!(response["created_at"].is_i64());
+    }
+
+    #[test]
+    fn transcription_language_candidates_are_normalized_to_the_public_scalar() {
+        let mut single = json!({"text":"provider output", "language":["Chinese"]});
+        normalize_audio_json(&mut single, "audio_single", "audio.transcribe", true);
+        assert_eq!(single["id"], "audio_single");
+        assert_eq!(single["model"], "audio.transcribe");
+        assert_eq!(single["language"], "Chinese");
+
+        let mut ambiguous = json!({"text":"provider output", "language":["Chinese", "English"]});
+        normalize_audio_json(&mut ambiguous, "audio_ambiguous", "audio.transcribe", true);
+        assert!(ambiguous["language"].is_null());
     }
 
     #[tokio::test]
