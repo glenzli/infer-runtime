@@ -207,7 +207,12 @@ AudioSet event 或 SigLIP text embedding 的替代品。两个 endpoint 均强�
 no-fallback；音频最多 25 MiB 且首个 Build 限为 10 decoded seconds。`source_revision` 或
 `query_revision` 必填并原样回显。`language` 只是 text query 的 BCP-47-shaped evidence，不能被
 Consumer 用作模型已支持该语言的质量声明。仅在 capability catalog 宣告
-`infer.audio.embedding@20260815.1`、App 有两个相应 Intent ACL 且 exact Build 已 ready 时调用。
+`infer.audio.embedding@20260815.2`、App 有两个相应 Intent ACL 且 exact Build 已 ready 时调用。
+`language=en` 直接进入 CLAP text tower；`zh`/`zh-*` 只会走 Runtime-owned local short-query
+normalizer，并在响应 `query_normalizer` 回显 `ollama_qwen3_5_2b`、`qwen3_5_2b_mlx`、
+`infer.audio.zh-en-short-query@20260815.1` 和 `zh`→`en`。其它语言、normalizer 不可用或其输出不满足
+English-only bounded contract 时返回稳定 provider-unavailable 类错误；Consumer 应保留既有搜索，不应发送
+raw Chinese 给 CLAP。
 
 转写示例：
 

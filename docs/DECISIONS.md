@@ -95,10 +95,11 @@
   首个 local-only/offline/no-fallback Build 是 MPS-only 的 CLAP baseline，中文质量尚未通过，故不得
   以中文语义搜索能力对外承诺或自动扩大任何 App ACL。
 - **中文查询边界**：CLAP 用于非语音、无文本或文字不足的原始声音；语音内容优先 ASR/对齐/FTS/
-  文本语义。待 Echo 选择本地 zh→en normalizer Build 后，才可把它作为
-  `audio.embed_text_query` 的受控短查询预处理，并在 provenance 回显 normalizer Build/version 与
-  source/target language。它不是 `text.translate`，normalizer 不可用即该 CLAP 查询分支不可用，
-  不隐式回退。GLAP 明确 deferred/rejected，不进入下载、评测或接入计划。
+  文本语义。`audio.embed_text_query` 对 `zh`/`zh-*` 只使用 Build-owned 的本地
+  `ollama_qwen3_5_2b` short-query normalizer（`infer.audio.zh-en-short-query@20260815.1`），并在
+  provenance 回显 normalizer deployment/build/prompt 和 `zh`→`en`。它不是 `text.translate`，
+  normalizer 不可用即该 CLAP 查询分支不可用，不隐式回退。GLAP 明确 deferred/rejected，不进入下载、
+  评测或接入计划。
 - **本机制品边界**：Runtime-managed download 只要求 immutable artifact provenance；license 事实
   作为 Build evidence 保留，不构成本机安装、校验和提供本地访问的运行时阻塞条件。Runtime 不分发
   权重。

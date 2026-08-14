@@ -21,11 +21,11 @@ pub use audio::{
     ALIGNMENT_CAPABILITIES, AUDIO_EMBEDDING_CAPABILITIES, AlignmentItem, AlignmentResponse,
     AudioAnalysisCoverage, AudioBytesResponse, AudioCoverageStatus, AudioEmbeddingProvenance,
     AudioEmbeddingResponse, AudioEmbeddingSpace, AudioEventDetectionResponse,
-    AudioTextEmbeddingRequest, DetectedSoundEvent, EVENT_DETECTION_CAPABILITIES, ExecutionMode,
-    SPEECH_CAPABILITIES, SoundEventDetectionPolicy, SoundEventOntology, SoundEventProvenance,
-    SoundEventSmoothingPolicy, SpeechByteStream, SpeechFormat, SpeechPresence,
-    SpeechPresenceStatus, SpeechRequest, TRANSCRIPTION_CAPABILITIES, TranscriptionFormat,
-    TranscriptionLanguageEvidence, TranscriptionLanguageEvidenceSource,
+    AudioTextEmbeddingRequest, AudioTextQueryNormalizerProvenance, DetectedSoundEvent,
+    EVENT_DETECTION_CAPABILITIES, ExecutionMode, SPEECH_CAPABILITIES, SoundEventDetectionPolicy,
+    SoundEventOntology, SoundEventProvenance, SoundEventSmoothingPolicy, SpeechByteStream,
+    SpeechFormat, SpeechPresence, SpeechPresenceStatus, SpeechRequest, TRANSCRIPTION_CAPABILITIES,
+    TranscriptionFormat, TranscriptionLanguageEvidence, TranscriptionLanguageEvidenceSource,
     TranscriptionLanguageSegment, TranscriptionResponse,
 };
 pub use contract::{

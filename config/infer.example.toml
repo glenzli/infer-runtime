@@ -1074,7 +1074,7 @@ license_url = "https://huggingface.co/laion/clap-htsat-unfused"
 
 [model_builds.clap_htsat_unfused_8fa0f1c6d043_pytorch_mps.local_worker]
 adapter = "clap_audio_text_embedding"
-artifact_set_sha256 = "7a1f92bf8247ba887c50432840973e47ed1dd6e6033058f4ddb189e9d8893ab4"
+artifact_set_sha256 = "372ad60e1aad6627c0cddcd7484d63d9db5ed5e41422ae6b4ff38c0f3c7b7b7a"
 runtime = "python3.12;torch-2.8.0;transformers-4.56.2"
 precision = "fp32"
 postprocessing_identity = "clap_l2_normalize_v1"
@@ -1088,6 +1088,17 @@ identity = "laion-clap-htsat-unfused@8fa0f1c6:audio-mono-48khz-10s:text-roberta-
 dimensions = 512
 normalized = true
 distance_metric = "cosine"
+
+# Optional and deliberately narrow: only Chinese audio-search queries can be
+# normalized into English before CLAP's English-first text tower. This does
+# not expose a reusable translation endpoint or permit cloud fallback.
+[model_builds.clap_htsat_unfused_8fa0f1c6d043_pytorch_mps.local_worker.audio_text_query_normalizer]
+deployment = "ollama_qwen3_5_2b"
+source_language = "zh"
+target_language = "en"
+prompt_revision = "infer.audio.zh-en-short-query@20260815.1"
+max_query_bytes = 512
+max_output_bytes = 1024
 
 [model_builds.qwen3_5_2b_mlx]
 profile = "qwen3_5_2b"

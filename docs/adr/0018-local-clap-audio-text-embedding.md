@@ -18,7 +18,7 @@ tensor surface 暴露给 Consumer 的窄 capability。
 
 1. 新增两个独立 Intent：`audio.embed`（有界音频）与 `audio.embed_text_query`（自然语言查询）；
    两者共享 `audio.embedding` 数据面，但不是通用 embedding/tensor API。稳定 capability identity
-   为 `infer.audio.embedding@20260815.1`，路由为 `POST /v1/audio/embeddings` 与
+   为 `infer.audio.embedding@20260815.2`，路由为 `POST /v1/audio/embeddings` 与
    `POST /v1/audio/text-embeddings`。它是 additive、experimental capability，不修改 Consumer Core。
 2. 请求强制 `placement=local_only`、`offline_required=true`、`fallback=none`；服务端补入这些
    约束，调用方不能放宽。音频是单个不超过 25 MiB 的 multipart 文件，worker 通过固定 ffmpeg
@@ -50,7 +50,12 @@ PyTorch MPS driver 观测约 1.14 GB。音频与文本都返回 512 维、norm=1
 
 这不是中文语义检索验收：同一合成正弦音频对英文正确查询的 cosine 为约 0.58，对中文同义查询
 仅约 0.14；错误英文查询约 -0.04。故第一条 Build 只能标为 generic English-first、provisional。
-请求里的 `language` 是 Consumer 的查询证据，不是语言质量声明；Echo 不得把它作为中文自然语言
+请求里的 `language` 是 Consumer 的查询证据，不是语言质量声明；`zh`/`zh-*` 的短查询在 exact
+Build 配置了 `audio_text_query_normalizer` 时，先由本机
+`ollama_qwen3_5_2b` / `qwen3_5_2b_mlx` 以
+`infer.audio.zh-en-short-query@20260815.1` 规范化为 English，再进入 CLAP text tower；响应的
+`query_normalizer` provenance 回显该 deployment/build/prompt 与 `zh`→`en`。normalizer unavailable、
+输出越界或非 English 时本条查询 fail closed。Echo 不得把它作为中文自然语言
 搜索承诺、不得用它替代已有 SigLIP2/YAMNet 证据。语音内容、方言与话语表达优先沿用
 ASR、对齐、FTS 和既有文本语义路径；CLAP 只覆盖非语音、无文本或文字不足的原始声音。
 
@@ -82,7 +87,7 @@ ASR、对齐、FTS 和既有文本语义路径；CLAP 只覆盖非语音、无�
    证据；
 2. Consumer SDK 对 capability catalog、512d response、space/provenance、未知扩展字段和稳定
    errors 的 contract test；
-3. Echo 领域中的英文检索精度/召回评估。中文场景只能在另行冻结本地 zh→en normalizer Build、
+3. Echo 领域中的英文检索精度/召回评估。中文场景只能在已冻结的本地 zh→en normalizer Build、
    明示其 source/target language 与 Build/version provenance 后走受控查询规范化；不得静默翻译、
    不得开放通用翻译能力，也不得宣称 CLAP 原生支持中文；
 4. 明确的最小 App Intent ACL、真实 local-only/offline/no-fallback HTTP E2E，以及 payload-free
