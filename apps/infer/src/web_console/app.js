@@ -10,13 +10,13 @@ const state = {
 };
 
 const viewCopy = {
-  overview: ["运行总览", "查看 inferd、执行资源和近期任务的运行状态。"],
-  statistics: ["运行统计", "观察近 24 小时吞吐、并发、准入与已结算用量。"],
-  jobs: ["任务记录", "查看每个 Job 的路由、执行状态与耗时。"],
-  models: ["能力与资源", "按 Intent 浏览可用 Deployment，并检查本地驻留与资源压力。"],
-  access: ["Apps 与访问", "创建接入应用身份，管理权限边界、令牌轮换与撤销。"],
-  logs: ["进程日志", "筛选并跟踪由此 Console 托管的 inferd 输出。"],
-  config: ["Runtime 配置", "校验配置并通过一次显式重启应用变更。"],
+  overview: ["运行总览", "inferd、资源与近期任务。"],
+  statistics: ["运行统计", "吞吐、并发与已结算用量。"],
+  jobs: ["任务记录", "路由、状态与耗时。"],
+  models: ["能力与资源", "按 Intent 查看模型与资源。"],
+  access: ["Apps 与访问", "管理接入应用与权限。"],
+  logs: ["进程日志", "当前 Console 管理的 inferd 输出。"],
+  config: ["Runtime 配置", "保存后重启 inferd 生效。"],
 };
 
 async function api(path, options = {}) {
@@ -596,8 +596,7 @@ async function saveConfig() {
 async function showJob(jobId) {
   try {
     const payload = await api(`/api/jobs/${encodeURIComponent(jobId)}/explain`);
-    document.querySelector("#detail-dialog .eyebrow").textContent = "JOB EXPLAIN";
-    document.getElementById("dialog-title").textContent = shortId(jobId);
+    document.getElementById("dialog-title").textContent = `任务详情 · ${shortId(jobId)}`;
     document.getElementById("dialog-content").textContent = JSON.stringify(payload.result, null, 2);
     document.getElementById("detail-dialog").showModal();
   } catch (error) { toast(error.message, true); }
@@ -608,7 +607,6 @@ async function showProviderModels(provider) {
     const payload = await api(`/api/providers/${encodeURIComponent(provider)}/models`);
     const models = payload.result?.models || [];
     const admitted = models.filter(model => model.admitted).length;
-    document.querySelector("#detail-dialog .eyebrow").textContent = "PROVIDER MODELS";
     document.getElementById("dialog-title").textContent = `${provider} · ${admitted}/${models.length} 已准入`;
     document.getElementById("dialog-content").textContent = models.map(model => {
       const efforts = (model.supported_reasoning_efforts || []).join(", ") || "—";

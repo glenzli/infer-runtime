@@ -41,6 +41,9 @@ async fn ordinary_consumer_cannot_read_or_mutate_operator_resources() {
         ("GET", "/infer/v1/providers"),
         ("GET", "/infer/v1/resources"),
         ("GET", "/infer/v1/budget"),
+        ("GET", "/infer/v1/operator/jobs"),
+        ("GET", "/infer/v1/operator/jobs/resp_any/explain"),
+        ("POST", "/infer/v1/operator/jobs/resp_any/cancel"),
         ("POST", "/infer/v1/resources"),
     ] {
         let response = observer_router()
@@ -57,6 +60,44 @@ async fn ordinary_consumer_cannot_read_or_mutate_operator_resources() {
             "resource_admin_required",
             "{method} {path}"
         );
+    }
+}
+
+#[tokio::test]
+async fn resource_admin_can_read_operator_job_metadata_without_a_consumer_contract() {
+    let response = observer_router()
+        .oneshot(
+            authenticated(
+                Request::builder().uri("/infer/v1/operator/jobs?limit=50"),
+                OPERATOR_TOKEN,
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let page = body_json(response).await;
+    assert!(page["jobs"].is_array());
+    assert!(page.get("next_cursor").is_none());
+}
+
+#[tokio::test]
+async fn resource_admin_operator_job_detail_routes_are_authenticated_operator_surfaces() {
+    for (method, path) in [
+        ("GET", "/infer/v1/operator/jobs/resp_missing/explain"),
+        ("POST", "/infer/v1/operator/jobs/resp_missing/cancel"),
+    ] {
+        let response = observer_router()
+            .oneshot(
+                authenticated(Request::builder().method(method).uri(path), OPERATOR_TOKEN)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {path}");
+        assert_eq!(body_json(response).await["error"]["code"], "not_found");
     }
 }
 
@@ -165,6 +206,9 @@ async fn observer_credential_is_rejected_from_every_existing_surface_class() {
         ("GET", "/infer/v1/resources", ""),
         ("GET", "/infer/v1/budget", ""),
         ("GET", "/infer/v1/jobs", ""),
+        ("GET", "/infer/v1/operator/jobs", ""),
+        ("GET", "/infer/v1/operator/jobs/resp_any/explain", ""),
+        ("POST", "/infer/v1/operator/jobs/resp_any/cancel", ""),
         ("POST", "/infer/v1/resources", ""),
         (
             "POST",

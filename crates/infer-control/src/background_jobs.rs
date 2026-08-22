@@ -274,7 +274,7 @@ impl Runtime {
         let Some(payload) = store.background_job_payload(app_id, job_id)? else {
             return Ok(None);
         };
-        let cancelled = self.cancel_for_app(app_id, job_id).await;
+        let cancelled = self.cancel_for_app(app_id, job_id).await?;
         let Some(snapshot) = self.snapshot_for_app(app_id, job_id).await? else {
             return Ok(None);
         };
@@ -352,6 +352,7 @@ impl Runtime {
                 snapshot: record.snapshot.clone(),
                 cancellation: cancellation.clone(),
                 admission_permit: Some(app_permit),
+                estimated_cost_usd: candidate.estimated_cost_usd,
             },
         );
         self.metrics.submitted();

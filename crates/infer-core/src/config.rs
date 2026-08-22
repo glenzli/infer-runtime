@@ -3004,12 +3004,15 @@ mod tests {
         app.routing = Some(crate::AppRoutingConfig {
             deployment_ids: BTreeSet::from(["ollama_qwen3_5_2b".into()]),
             model_profile_ids: BTreeSet::new(),
+            named_deployment_ids: BTreeSet::new(),
+            named_model_profile_ids: BTreeSet::new(),
             intents: BTreeMap::from([
                 (
                     "text.summarize".into(),
                     crate::RoutingGrantConfig {
                         deployment_ids: BTreeSet::from(["ollama_qwen3_5_4b".into()]),
                         model_profile_ids: BTreeSet::new(),
+                        ..Default::default()
                     },
                 ),
                 ("audio.align".into(), crate::RoutingGrantConfig::default()),

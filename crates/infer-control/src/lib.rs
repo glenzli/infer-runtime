@@ -290,8 +290,10 @@ struct JobEntry {
     snapshot: JobSnapshot,
     cancellation: CancellationToken,
     admission_permit: Option<AppAdmissionPermit>,
+    estimated_cost_usd: f64,
 }
 
+#[derive(Clone)]
 struct PreparedRun {
     job_id: String,
     app_id: String,
@@ -715,6 +717,7 @@ impl Runtime {
                 },
             )
             .await?;
+        self.arm_response_deadline_watchdog(&prepared);
         self.execute_prepared(request, prepared, CompletionMode::Immediate)
             .await
     }
@@ -734,6 +737,9 @@ impl Runtime {
                 if attempts >= attempt_policy::MAX_ATTEMPTS {
                     break 'targets;
                 }
+                if prepared.cancellation.is_cancelled() {
+                    return Err(self.terminal_error_for(&prepared.job_id).await);
+                }
                 let _resource_reservation = self.reserve_resource(&prepared).await?;
                 let _permit = self.acquire(&prepared).await?;
                 self.mark(&prepared.job_id, JobState::Running, None).await?;
@@ -749,35 +755,29 @@ impl Runtime {
                 let attempt_number = self.begin_attempt(&prepared, trigger).await?;
                 attempts += 1;
                 if prepared.cancellation.is_cancelled() {
-                    self.finish_attempt(
-                        &prepared,
-                        attempt_number,
-                        AttemptOutcome::Failed,
-                        Some("cancelled".into()),
-                        Some("response was cancelled".into()),
-                        None,
-                    )
-                    .await?;
-                    self.mark(&prepared.job_id, JobState::Cancelled, None)
-                        .await?;
-                    self.metrics.cancelled();
-                    return Err(RuntimeError::Cancelled);
+                    return Err(self.terminal_error_for(&prepared.job_id).await);
                 }
                 let provider = self.provider(&prepared.provider_id)?;
                 let upstream =
                     provider.execute(request.for_provider(prepared.physical_model.clone()));
                 let result = match prepared.deadline {
                     Some(deadline) => tokio::select! {
-                        _ = prepared.cancellation.cancelled() => Err(RuntimeError::Cancelled),
+                        _ = prepared.cancellation.cancelled() => Err(self.terminal_error_for(&prepared.job_id).await),
                         result = timeout_at(deadline, upstream) => result.map_err(|_| RuntimeError::DeadlineExpired),
                     },
                     None => tokio::select! {
-                        _ = prepared.cancellation.cancelled() => Err(RuntimeError::Cancelled),
+                        _ = prepared.cancellation.cancelled() => Err(self.terminal_error_for(&prepared.job_id).await),
                         result = upstream => Ok(result),
                     },
                 };
                 match result {
                     Ok(Ok(value)) => {
+                        // A late upstream success must never publish a result
+                        // after the control plane has durably cancelled or
+                        // expired this Job.
+                        if prepared.cancellation.is_cancelled() {
+                            return Err(RuntimeError::Cancelled);
+                        }
                         self.health.record_success(&prepared.provider_id);
                         self.finish_attempt(
                             &prepared,
@@ -833,42 +833,20 @@ impl Runtime {
                         break 'targets;
                     }
                     Err(RuntimeError::Cancelled) => {
-                        self.finish_attempt(
-                            &prepared,
-                            attempt_number,
-                            AttemptOutcome::Failed,
-                            Some("cancelled".into()),
-                            Some("response was cancelled".into()),
-                            None,
-                        )
-                        .await?;
-                        self.mark(&prepared.job_id, JobState::Cancelled, None)
-                            .await?;
-                        self.metrics.cancelled();
                         return Err(RuntimeError::Cancelled);
                     }
                     Err(RuntimeError::DeadlineExpired) => {
-                        self.finish_attempt(
-                            &prepared,
-                            attempt_number,
-                            AttemptOutcome::Failed,
-                            Some("deadline_exceeded".into()),
-                            Some("request deadline expired".into()),
-                            None,
-                        )
-                        .await?;
-                        self.mark(
-                            &prepared.job_id,
-                            JobState::Expired,
-                            Some("request deadline expired".into()),
-                        )
-                        .await?;
-                        self.metrics.expired();
+                        if self.expire_active_job(&prepared.job_id).await? {
+                            self.metrics.expired();
+                        }
                         return Err(RuntimeError::DeadlineExpired);
                     }
                     Err(error) => unreachable!("provider attempt returned {error}"),
                 }
             }
+        }
+        if prepared.cancellation.is_cancelled() {
+            return Err(self.terminal_error_for(&prepared.job_id).await);
         }
         let error = last_error.expect("an exhausted attempt plan has a provider error");
         self.mark(
@@ -1083,6 +1061,24 @@ impl Runtime {
         }
     }
 
+    /// Payload-free recent Job metadata for the local resource administrator.
+    /// The caller must enforce `resource_admin` before invoking this method.
+    pub fn operator_job_page(
+        &self,
+        priority: Option<Priority>,
+        state: Option<JobState>,
+        cursor: Option<&JobPageCursor>,
+        limit: usize,
+    ) -> Result<JobListPage, RuntimeError> {
+        match &self.store {
+            Some(store) => Ok(store.operator_job_page(priority, state, cursor, limit)?),
+            None => Ok(JobListPage {
+                jobs: Vec::new(),
+                next_cursor: None,
+            }),
+        }
+    }
+
     fn prepare_responses_request(
         &self,
         mut request: ResponsesRequest,
@@ -1105,31 +1101,166 @@ impl Runtime {
             .map_err(RuntimeError::from)
     }
 
-    pub async fn cancel(&self, response_id: &str) -> bool {
+    /// Durably terminates a non-terminal Job before acknowledging a caller's
+    /// cancellation request.  This is intentionally stronger than merely
+    /// signalling the provider token: callers must not observe a successful
+    /// cancellation response while the persisted Job remains `running`.
+    pub async fn cancel(&self, response_id: &str) -> Result<bool, RuntimeError> {
         self.cancel_if_owned(None, response_id).await
     }
 
-    pub async fn cancel_for_app(&self, app_id: &str, response_id: &str) -> bool {
+    pub async fn cancel_for_app(
+        &self,
+        app_id: &str,
+        response_id: &str,
+    ) -> Result<bool, RuntimeError> {
         self.cancel_if_owned(Some(app_id), response_id).await
     }
 
-    async fn cancel_if_owned(&self, app_id: Option<&str>, response_id: &str) -> bool {
-        let jobs = self.jobs.lock().await;
-        match jobs.get(response_id) {
-            Some(entry)
-                if app_id.is_none_or(|app_id| entry.snapshot.app_id == app_id)
-                    && !matches!(
-                        entry.snapshot.state,
-                        JobState::Succeeded
-                            | JobState::Failed
-                            | JobState::Cancelled
-                            | JobState::Expired
-                    ) =>
+    async fn cancel_if_owned(
+        &self,
+        app_id: Option<&str>,
+        response_id: &str,
+    ) -> Result<bool, RuntimeError> {
+        let cancelled = self
+            .terminalize_active_job(
+                app_id,
+                response_id,
+                JobState::Cancelled,
+                "cancelled",
+                "response was cancelled",
+                None,
+            )
+            .await?;
+        if cancelled {
+            self.metrics.cancelled();
+        }
+        Ok(cancelled)
+    }
+
+    async fn expire_active_job(&self, response_id: &str) -> Result<bool, RuntimeError> {
+        self.terminalize_active_job(
+            None,
+            response_id,
+            JobState::Expired,
+            "deadline_exceeded",
+            "request deadline expired",
+            Some("request deadline expired".into()),
+        )
+        .await
+    }
+
+    /// Mutates, settles, and audits a queued or running Job as one
+    /// control-plane operation. Provider futures may finish late, but the
+    /// terminal snapshot is monotonic and their result is discarded.
+    async fn terminalize_active_job(
+        &self,
+        app_id: Option<&str>,
+        response_id: &str,
+        state: JobState,
+        error_kind: &str,
+        attempt_error: &str,
+        job_error: Option<String>,
+    ) -> Result<bool, RuntimeError> {
+        let (snapshot, settlement) = {
+            let mut jobs = self.jobs.lock().await;
+            let Some(entry) = jobs.get_mut(response_id) else {
+                return Ok(false);
+            };
+            if app_id.is_some_and(|app_id| entry.snapshot.app_id != app_id)
+                || is_terminal_job_state(entry.snapshot.state)
             {
-                entry.cancellation.cancel();
-                true
+                return Ok(false);
             }
-            _ => false,
+
+            entry.cancellation.cancel();
+            let estimated_cost_usd = entry.estimated_cost_usd;
+            let settlement = entry
+                .snapshot
+                .attempts
+                .iter_mut()
+                .rev()
+                .find(|attempt| attempt.outcome == AttemptOutcome::Running)
+                .map(|attempt| {
+                    attempt.outcome = AttemptOutcome::Failed;
+                    attempt.error_kind = Some(error_kind.into());
+                    attempt.error = Some(attempt_error.into());
+                    (
+                        attempt.number,
+                        attempt.provider.clone(),
+                        attempt.deployment.clone(),
+                        estimated_cost_usd,
+                    )
+                });
+            entry.snapshot.state = state;
+            entry.snapshot.error = job_error;
+            entry.admission_permit.take();
+            (entry.snapshot.clone(), settlement)
+        };
+
+        if let Some(store) = &self.store {
+            if let Some((attempt_number, provider, deployment, amount_usd)) = settlement {
+                store.persist_job_and_settle_with_event(
+                    &snapshot,
+                    UsageLedgerEntry {
+                        job_id: snapshot.id.clone(),
+                        attempt_number,
+                        app_id: snapshot.app_id.clone(),
+                        provider: provider.clone(),
+                        deployment: deployment.clone(),
+                        execution_origin: execution_origin_for_provider(&self.config, &provider),
+                        outcome: attempt_outcome_code(AttemptOutcome::Failed).into(),
+                        amount_usd,
+                        estimated: true,
+                        input_tokens: None,
+                        output_tokens: None,
+                        total_tokens: None,
+                    },
+                    audit_event(
+                        "attempt.finished",
+                        json!({
+                            "number": attempt_number,
+                            "outcome": attempt_outcome_code(AttemptOutcome::Failed),
+                            "error_kind": error_kind,
+                        }),
+                    ),
+                )?;
+            }
+            store.persist_job_with_event(
+                &snapshot,
+                audit_event(
+                    "job.state_changed",
+                    json!({ "state": job_state_code(state) }),
+                ),
+            )?;
+        }
+        Ok(true)
+    }
+
+    fn arm_response_deadline_watchdog(self: &Arc<Self>, prepared: &PreparedRun) {
+        let Some(deadline) = prepared.deadline else {
+            return;
+        };
+        let runtime = Arc::clone(self);
+        let job_id = prepared.job_id.clone();
+        let cancellation = prepared.cancellation.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = cancellation.cancelled() => {}
+                _ = tokio::time::sleep_until(deadline) => {
+                    if let Ok(true) = runtime.expire_active_job(&job_id).await {
+                        runtime.metrics.expired();
+                    }
+                }
+            }
+        });
+    }
+
+    async fn terminal_error_for(&self, response_id: &str) -> RuntimeError {
+        let jobs = self.jobs.lock().await;
+        match jobs.get(response_id).map(|entry| entry.snapshot.state) {
+            Some(JobState::Expired) => RuntimeError::DeadlineExpired,
+            _ => RuntimeError::Cancelled,
         }
     }
 
@@ -1749,6 +1880,7 @@ impl Runtime {
                 snapshot,
                 cancellation: cancellation.clone(),
                 admission_permit: Some(admission_permit),
+                estimated_cost_usd: candidate.estimated_cost_usd,
             },
         );
         self.metrics.submitted();
@@ -2076,19 +2208,23 @@ impl Runtime {
         response_id: &str,
         state: JobState,
         error: Option<String>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<bool, RuntimeError> {
         let snapshot = {
             let mut jobs = self.jobs.lock().await;
             let Some(entry) = jobs.get_mut(response_id) else {
-                return Ok(());
+                return Ok(false);
             };
+            // Terminal state is monotonic. A provider may complete after an
+            // explicit cancellation or watchdog expiry, but it cannot revive
+            // the Job or overwrite its persisted terminal provenance.
+            if is_terminal_job_state(entry.snapshot.state) {
+                return Ok(false);
+            }
             entry.snapshot.state = state;
             entry.snapshot.error = error;
-            if matches!(
-                state,
-                JobState::Succeeded | JobState::Failed | JobState::Cancelled | JobState::Expired
-            ) {
+            if is_terminal_job_state(state) {
                 entry.admission_permit.take();
+                entry.cancellation.cancel();
             }
             entry.snapshot.clone()
         };
@@ -2098,7 +2234,8 @@ impl Runtime {
                 "job.state_changed",
                 json!({ "state": job_state_code(state) }),
             ),
-        )
+        )?;
+        Ok(true)
     }
 
     async fn start_attempt(
@@ -2111,6 +2248,13 @@ impl Runtime {
             let entry = jobs
                 .get_mut(&prepared.job_id)
                 .expect("prepared Job must remain registered");
+            if is_terminal_job_state(entry.snapshot.state) {
+                return Err(if entry.snapshot.state == JobState::Expired {
+                    RuntimeError::DeadlineExpired
+                } else {
+                    RuntimeError::Cancelled
+                });
+            }
             let number = entry.snapshot.attempts.len() + 1;
             entry.snapshot.attempts.push(AttemptSnapshot {
                 number,
@@ -2202,12 +2346,20 @@ impl Runtime {
             let entry = jobs
                 .get_mut(&prepared.job_id)
                 .expect("prepared Job must remain registered");
-            let attempt = entry
+            let Some(attempt) = entry
                 .snapshot
                 .attempts
-                .last_mut()
-                .expect("started Attempt must remain registered");
-            debug_assert_eq!(attempt.number, attempt_number);
+                .iter_mut()
+                .find(|attempt| attempt.number == attempt_number)
+            else {
+                return Ok(());
+            };
+            // A terminal cancellation/expiry can race a late provider
+            // completion. Settlement is idempotent and the first terminal
+            // Attempt outcome wins.
+            if attempt.outcome != AttemptOutcome::Running {
+                return Ok(());
+            }
             attempt.outcome = outcome;
             attempt.error_kind = error_kind;
             attempt.error = error;
@@ -2241,7 +2393,7 @@ impl Runtime {
                     json!({
                         "number": attempt_number,
                         "outcome": attempt_outcome_code(outcome),
-                        "error_kind": snapshot.attempts.last().and_then(|attempt| attempt.error_kind.as_deref()),
+                        "error_kind": snapshot.attempts.iter().find(|attempt| attempt.number == attempt_number).and_then(|attempt| attempt.error_kind.as_deref()),
                     }),
                 ),
             )?;
@@ -2272,6 +2424,7 @@ impl Runtime {
             entry.snapshot.capability_level = target.capability_level;
             entry.snapshot.evaluation_status = target.evaluation_status;
             entry.snapshot.resource_class = target.resource_class;
+            entry.estimated_cost_usd = target.estimated_cost_usd;
             entry.snapshot.clone()
         };
         self.persist_snapshot(
@@ -2581,6 +2734,13 @@ fn job_state_code(state: JobState) -> &'static str {
         JobState::Cancelled => "cancelled",
         JobState::Expired => "expired",
     }
+}
+
+fn is_terminal_job_state(state: JobState) -> bool {
+    matches!(
+        state,
+        JobState::Succeeded | JobState::Failed | JobState::Cancelled | JobState::Expired
+    )
 }
 
 fn audit_event(kind: &str, details: Value) -> AuditEventInput {
@@ -3356,11 +3516,10 @@ mod tests {
         assert_eq!(usage_daily["schema_version"], "20260813.3");
         assert_eq!(usage_daily["calendar"], "host_local");
         let days = usage_daily["days"].as_array().unwrap();
-        assert_eq!(days.len(), 1);
-        assert_eq!(days[0]["models"][0]["id"], "qwen");
-        assert_eq!(days[0]["models"][0]["execution_origin"], "other");
-        assert_eq!(days[0]["models"][0]["total_tokens"], 0);
-        assert_eq!(days[0]["models"][0]["cost_usd"], 0.0);
+        // The provider returned no text-token usage. It remains in the
+        // Runtime ledger but is intentionally excluded from the Token-panel
+        // observer projection.
+        assert!(days.is_empty());
         let audit = runtime.audit_events(job_id).unwrap();
         assert!(audit.iter().any(|event| event.kind == "job.admitted"));
         assert!(audit.iter().any(|event| event.kind == "attempt.opened"));
@@ -3894,8 +4053,16 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        assert!(!runtime.cancel_for_app("another_app", &job_id).await);
-        assert!(runtime.cancel_for_app("test-app", &job_id).await);
+        assert!(
+            !runtime
+                .cancel_for_app("another_app", &job_id)
+                .await
+                .unwrap()
+        );
+        assert!(runtime.cancel_for_app("test-app", &job_id).await.unwrap());
+        let snapshot = runtime.snapshot(&job_id).await.unwrap().unwrap();
+        assert_eq!(snapshot.state, JobState::Cancelled);
+        assert_eq!(snapshot.attempts[0].outcome, AttemptOutcome::Failed);
         assert!(matches!(task.await.unwrap(), Err(RuntimeError::Cancelled)));
         let snapshot = runtime.snapshot(&job_id).await.unwrap().unwrap();
         assert_eq!(snapshot.state, JobState::Cancelled);
@@ -3903,6 +4070,115 @@ mod tests {
         assert_eq!(
             snapshot.attempts[0].error_kind.as_deref(),
             Some("cancelled")
+        );
+    }
+
+    #[tokio::test]
+    async fn cancellation_persists_terminal_state_and_settles_the_active_attempt() {
+        let config = config();
+        let store = Arc::new(
+            Store::open_in_memory(ConfigSnapshot::from_serializable(&config).unwrap()).unwrap(),
+        );
+        let started = Arc::new(tokio::sync::Notify::new());
+        let ready = started.clone().notified_owned();
+        let provider = Arc::new(HangingProvider {
+            id: "local".into(),
+            started,
+        });
+        let runtime = Runtime::with_providers_and_store(
+            config,
+            BTreeMap::from([("local".into(), provider as DynProvider)]),
+            Some(store.clone()),
+            AppCredentials::empty(),
+        );
+        let task = tokio::spawn({
+            let runtime = runtime.clone();
+            async move { runtime.execute("test-app", summary_request()).await }
+        });
+        ready.await;
+        let job_id = runtime.jobs.lock().await.keys().next().unwrap().clone();
+        assert!(runtime.cancel(&job_id).await.unwrap());
+        assert!(matches!(task.await.unwrap(), Err(RuntimeError::Cancelled)));
+        let persisted = store.load_job(&job_id).unwrap().unwrap();
+        assert_eq!(persisted.state, JobState::Cancelled);
+        assert_eq!(persisted.attempts[0].outcome, AttemptOutcome::Failed);
+        assert_eq!(
+            persisted.attempts[0].error_kind.as_deref(),
+            Some("cancelled")
+        );
+        assert!(store.active_reservations().unwrap().is_empty());
+        assert_eq!(runtime.budget_snapshot().unwrap().usage_ledger.len(), 1);
+        let audit = store.audit_events(&job_id).unwrap();
+        assert!(audit.iter().any(|event| event.kind == "attempt.finished"));
+        assert!(audit.iter().any(|event| {
+            event.kind == "job.state_changed" && event.details["state"] == "cancelled"
+        }));
+    }
+
+    #[tokio::test]
+    async fn a_late_provider_success_cannot_revive_a_cancelled_job() {
+        let first_started = Arc::new(tokio::sync::Notify::new());
+        let ready = first_started.clone().notified_owned();
+        let release_first = Arc::new(tokio::sync::Notify::new());
+        let provider = Arc::new(GateProvider {
+            id: "local".into(),
+            calls: AtomicUsize::new(0),
+            first_started,
+            release_first: release_first.clone(),
+        });
+        let runtime = Runtime::with_providers(
+            config(),
+            BTreeMap::from([("local".into(), provider as DynProvider)]),
+        );
+        let task = tokio::spawn({
+            let runtime = runtime.clone();
+            async move { runtime.execute("test-app", summary_request()).await }
+        });
+        ready.await;
+        let job_id = runtime.jobs.lock().await.keys().next().unwrap().clone();
+        assert!(runtime.cancel(&job_id).await.unwrap());
+        release_first.notify_waiters();
+        assert!(matches!(task.await.unwrap(), Err(RuntimeError::Cancelled)));
+        let snapshot = runtime.snapshot(&job_id).await.unwrap().unwrap();
+        assert_eq!(snapshot.state, JobState::Cancelled);
+        assert_eq!(snapshot.attempts[0].outcome, AttemptOutcome::Failed);
+    }
+
+    #[tokio::test]
+    async fn deadline_watchdog_terminalizes_a_hung_response_attempt() {
+        let started = Arc::new(tokio::sync::Notify::new());
+        let ready = started.clone().notified_owned();
+        let provider = Arc::new(HangingProvider {
+            id: "local".into(),
+            started,
+        });
+        let runtime = Runtime::with_providers(
+            config(),
+            BTreeMap::from([("local".into(), provider as DynProvider)]),
+        );
+        let mut request = summary_request();
+        request
+            .metadata
+            .insert("infer.deadline_ms".into(), "20".into());
+        let task = tokio::spawn({
+            let runtime = runtime.clone();
+            async move { runtime.execute("test-app", request).await }
+        });
+        ready.await;
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(1), task)
+                .await
+                .unwrap()
+                .unwrap(),
+            Err(RuntimeError::DeadlineExpired)
+        ));
+        let job_id = runtime.jobs.lock().await.keys().next().unwrap().clone();
+        let snapshot = runtime.snapshot(&job_id).await.unwrap().unwrap();
+        assert_eq!(snapshot.state, JobState::Expired);
+        assert_eq!(snapshot.attempts[0].outcome, AttemptOutcome::Failed);
+        assert_eq!(
+            snapshot.attempts[0].error_kind.as_deref(),
+            Some("deadline_exceeded")
         );
     }
 
@@ -3932,7 +4208,7 @@ mod tests {
             .unwrap();
         assert_eq!(local.model_lifecycle[0].active_reservations, 1);
         let job_id = runtime.jobs.lock().await.keys().next().unwrap().clone();
-        assert!(runtime.cancel(&job_id).await);
+        assert!(runtime.cancel(&job_id).await.unwrap());
         assert!(matches!(task.await.unwrap(), Err(RuntimeError::Cancelled)));
         let snapshot = runtime.resource_snapshot().await;
         assert_eq!(
@@ -4032,7 +4308,7 @@ mod tests {
             })
             .map(|(id, _)| id.clone())
             .unwrap();
-        assert!(runtime.cancel(&first_job).await);
+        assert!(runtime.cancel(&first_job).await.unwrap());
         assert!(matches!(first.await.unwrap(), Err(RuntimeError::Cancelled)));
         let resumed = started.clone().notified_owned();
         let second = tokio::spawn({
@@ -4081,7 +4357,7 @@ mod tests {
             })
             .map(|(id, _)| id.clone())
             .unwrap();
-        assert!(runtime.cancel(&second_job).await);
+        assert!(runtime.cancel(&second_job).await.unwrap());
         assert!(matches!(
             second.await.unwrap(),
             Err(RuntimeError::Cancelled)
@@ -4116,6 +4392,8 @@ mod tests {
         config.apps.get_mut("test-app").unwrap().routing = Some(infer_core::AppRoutingConfig {
             deployment_ids: BTreeSet::from(["qwen_local".into()]),
             model_profile_ids: BTreeSet::new(),
+            named_deployment_ids: BTreeSet::new(),
+            named_model_profile_ids: BTreeSet::new(),
             intents: BTreeMap::new(),
         });
         let provider = Arc::new(UnavailableProvider {
@@ -4146,6 +4424,8 @@ mod tests {
         config.apps.get_mut("test-app").unwrap().routing = Some(infer_core::AppRoutingConfig {
             deployment_ids: BTreeSet::from(["qwen_local".into()]),
             model_profile_ids: BTreeSet::new(),
+            named_deployment_ids: BTreeSet::new(),
+            named_model_profile_ids: BTreeSet::new(),
             intents: BTreeMap::new(),
         });
         let provider = Arc::new(FakeProvider {

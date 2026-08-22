@@ -288,6 +288,7 @@
 - **全局安全硬上限**：App 的 `allowed_intents`、provider access class、cloud input modality、policy/placement/cost 和 request override grants 永远不可被 routing 或单次请求扩大。
 - **替换语义**：`apps.<id>.routing` 的 deployment/profile grant 只是没有 Intent 专属 rule 时的 routing default，并非全部 Intent rule 的超集。`apps.<id>.routing.intents."<intent>"` 一旦存在就完整替换 routing default；空 rule 表示 deny all，目标 unavailable 时不得退回 routing default。
 - **逐层收窄**：effective Intent routing grant 必须位于 App 全局安全硬上限内；单次具名列表又必须完全位于 effective grant 内。未授权在 Job/Provider/quota admission 前 fail closed；已授权但不可用返回稳定 `no_candidate`。有序列表只表达已授权的首选与备用，实际 fallback 仍受 `infer.fallback` 约束。
+- **显式升级**：`named_deployment_ids` 与 `named_model_profile_ids` 可授予额外的 Runtime-owned escalation target，但它们不属于 ordinary capability candidates；只有同一请求显式携带对应 `infer.deployment_ids` 或 `infer.model_profile_ids` 时才会进入规划。这样高档位不会因 Consumer 漏传具名路由而成为默认或 fallback。
 - **兼容性**：未配置 `routing` 的旧 App 继续 capability routing，但默认不能具名申请；operator/admin deployment override 不会因此成为 Consumer 权限。
 - **握手**：具名字段属于 `infer.responses@20260812.1`；每个请求同时携带日期化 Core 与 Responses capability identity。缺失或错误身份统一 426 fail closed。Job/Explain 固定持久化实际 Core/Capability identities。
 - **owner**：`infer-core::routing` 拥有 ACL/请求收窄语义，config owner 负责交叉校验，control/registry owner 负责 admission、Candidate reasons 与 provenance，API/OpenAPI owner 负责 Responses capability wire 和错误码。

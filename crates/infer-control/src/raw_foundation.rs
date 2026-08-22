@@ -330,15 +330,12 @@ impl RawFoundationControl {
         app_id: &str,
         job_id: &str,
     ) -> Result<RawFoundationCancellation, RawFoundationControlError> {
-        if !self.runtime.cancel_for_app(app_id, job_id).await {
+        if !self.runtime.cancel_for_app(app_id, job_id).await? {
             return Err(RawFoundationControlError::UnknownJob);
         }
         self.registry
             .revoke_scope(app_id, job_id, self.registry.daemon_generation())?;
-        if self.pending.lock().await.remove(job_id).is_some() {
-            self.runtime.mark(job_id, JobState::Cancelled, None).await?;
-            self.runtime.metrics.cancelled();
-        }
+        self.pending.lock().await.remove(job_id);
         Ok(RawFoundationCancellation {
             id: job_id.into(),
             object: "raw.foundation.cancellation",

@@ -51,7 +51,7 @@ use infer_control::{
 };
 use infer_core::{
     AlignmentRequest, AudioEmbeddingRequest, AudioExecutionRequest, AudioFile,
-    AudioTextEmbeddingRequest, EventDetectionRequest, JobPageCursor, JobState,
+    AudioTextEmbeddingRequest, EventDetectionRequest, JobPageCursor, JobSnapshot, JobState,
     MAX_AUDIO_UPLOAD_BYTES, Priority, ResponsesRequest, SpeechFormat, SpeechRequest,
     TranscriptionFormat, TranscriptionRequest, VoiceCloneRequest,
 };
@@ -153,6 +153,15 @@ fn base_router(runtime: Arc<Runtime>) -> Router {
         .route("/infer/v1/text/rerank", post(retrieval::create_rerank))
         .route("/infer/v1/documents/ocr", post(ocr::create_document_ocr))
         .route("/infer/v1/jobs", get(get_jobs))
+        .route("/infer/v1/operator/jobs", get(get_operator_jobs))
+        .route(
+            "/infer/v1/operator/jobs/{response_id}/explain",
+            get(explain_operator_job),
+        )
+        .route(
+            "/infer/v1/operator/jobs/{response_id}/cancel",
+            post(cancel_operator_job),
+        )
         .route("/infer/v1/jobs/{response_id}", get(get_job))
         .route("/infer/v1/jobs/{response_id}/cancel", post(cancel_job))
         .route("/infer/v1/explain/{response_id}", get(explain_job))
@@ -331,6 +340,7 @@ fn is_polling_endpoint(path: &str) -> bool {
             | "/infer/v1/metrics"
             | "/infer/v1/telemetry"
             | "/infer/v1/jobs"
+            | "/infer/v1/operator/jobs"
             | "/infer/v1/providers"
             | "/infer/v1/resources"
             | "/infer/v1/budget"
@@ -965,6 +975,39 @@ async fn get_jobs(
     ))
 }
 
+/// Console-only, cross-App view. This deliberately does not reuse the
+/// consumer-scoped `/infer/v1/jobs` route: a normal App can never widen its
+/// own Job visibility with query parameters.
+async fn get_operator_jobs(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    query: Result<Query<JobListQuery>, QueryRejection>,
+) -> Result<Json<Value>, ApiError> {
+    let actor = authenticate(&state, &headers)?;
+    state.runtime.authorize_resource_admin(&actor)?;
+    let query = strict_query(query)?;
+    let limit = query.limit.unwrap_or(100);
+    if !(1..=1_000).contains(&limit) {
+        return Err(ApiError::bad_request("limit must be between 1 and 1000"));
+    }
+    let cursor = query
+        .cursor
+        .map(|cursor| {
+            cursor
+                .parse::<JobPageCursor>()
+                .map_err(ApiError::bad_request)
+        })
+        .transpose()?;
+    let priority = parse_job_filter::<Priority>(query.priority, "priority")?;
+    let job_state = parse_job_filter::<JobState>(query.state, "state")?;
+    let page = state
+        .runtime
+        .operator_job_page(priority, job_state, cursor.as_ref(), limit)?;
+    Ok(Json(
+        serde_json::to_value(page).expect("Job list page is serializable"),
+    ))
+}
+
 fn parse_job_filter<T: FromStr>(
     value: Option<String>,
     name: &'static str,
@@ -984,7 +1027,21 @@ async fn cancel_job(
     Path(response_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let app_id = authenticate(&state, &headers)?;
-    if state.runtime.cancel_for_app(&app_id, &response_id).await {
+    if state.runtime.cancel_for_app(&app_id, &response_id).await? {
+        Ok(Json(json!({"id":response_id, "cancelled":true})))
+    } else {
+        Err(ApiError::not_found("response is terminal or was not found"))
+    }
+}
+
+async fn cancel_operator_job(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(response_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let actor = authenticate(&state, &headers)?;
+    state.runtime.authorize_resource_admin(&actor)?;
+    if state.runtime.cancel(&response_id).await? {
         Ok(Json(json!({"id":response_id, "cancelled":true})))
     } else {
         Err(ApiError::not_found("response is terminal or was not found"))
@@ -1002,9 +1059,29 @@ async fn explain_job(
         .snapshot_for_app(&app_id, &response_id)
         .await?
         .ok_or_else(|| ApiError::not_found("response was not found"))?;
+    explain_job_response(&state, job)
+}
+
+async fn explain_operator_job(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Path(response_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let actor = authenticate(&state, &headers)?;
+    state.runtime.authorize_resource_admin(&actor)?;
+    let job = state
+        .runtime
+        .snapshot(&response_id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("response was not found"))?;
+    explain_job_response(&state, job)
+}
+
+fn explain_job_response(state: &ApiState, job: JobSnapshot) -> Result<Json<Value>, ApiError> {
+    let response_id = job.id.clone();
     let audit_events = state.runtime.audit_events(&response_id)?;
     Ok(Json(json!({
-        "response_id": job.id,
+        "response_id": response_id,
         "intent": job.intent,
         "consumer_core_contract": job.consumer_core_contract,
         "capability_contract": job.capability_contract,

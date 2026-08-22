@@ -25,7 +25,8 @@ same-origin/CSP 保护。显式创建/轮换的 Consumer token 是唯一例外�
 - **Overview**：连接状态、consumer contract、Job 总量、provider 队列与账本摘要；
 - **Statistics**：本次 Console 会话内有界采样的吞吐、失败、队列、活跃 Attempt
   和 free-memory 趋势，以及 daemon 累计成功率、队列等待与 SQLite usage ledger 汇总；
-- **Jobs**：最近 50 条当前 App 可见的无 payload Job 元数据；可搜索和筛选，打开
+- **Jobs**：最近 50 条所有 App 的无 payload Job 元数据（Console 的
+  `resource_admin` 身份专用）；可搜索和筛选，打开
   routing/Attempt/error explain，并显式取消非终态 Job；
 - **Resources**：Responses 与 MLX `audio_worker` provider、容量/熔断、本地 inventory、模型
   lifecycle 和系统压力；提供显式 load/unload、Responses provider compatibility probe
@@ -604,6 +605,15 @@ opaque token，不应自行计算。单 Job 查询、解释和取消也执行相
 
 分页路径仍不读取 payload。durable local text Job 的输入/结果位于独立加密 spool；
 数据库继续不保存 prompt、Responses input 或上传音频。
+
+Console 使用独立的 operator experimental read-only 路由
+`GET /infer/v1/operator/jobs` 来显示近期所有 App 的同一轻量投影。该路由要求
+`resource_admin=true`，支持相同的 `limit`、`cursor`、`priority` 与 `state` 过滤，且不会
+改变普通 Consumer 的 App ownership 隔离；它也不返回 Job input、output、完整 snapshot 或
+`explain` 内容。Console 对单条记录的诊断和取消分别使用
+`GET /infer/v1/operator/jobs/{response_id}/explain` 和
+`POST /infer/v1/operator/jobs/{response_id}/cancel`；二者同样仅限 resource admin，普通
+`/infer/v1/explain/{response_id}` 和 `/infer/v1/jobs/{response_id}/cancel` 继续按 App 隔离。
 
 ## 重启语义
 

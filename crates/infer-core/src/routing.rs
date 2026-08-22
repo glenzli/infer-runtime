@@ -13,10 +13,21 @@ use crate::{ContractError, RuntimeConfig};
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct RoutingGrantConfig {
+    /// Candidates admitted for ordinary capability routing. These are also
+    /// valid named targets, so a Consumer can always narrow to its default
+    /// execution surface.
     #[serde(default)]
     pub deployment_ids: BTreeSet<String>,
     #[serde(default)]
     pub model_profile_ids: BTreeSet<String>,
+    /// Additional Runtime-owned deployment identities that may be selected
+    /// only when the Consumer explicitly sends `infer.deployment_ids`.
+    /// They never become ordinary capability-routing candidates.
+    #[serde(default)]
+    pub named_deployment_ids: BTreeSet<String>,
+    /// The Model Profile counterpart of `named_deployment_ids`.
+    #[serde(default)]
+    pub named_model_profile_ids: BTreeSet<String>,
 }
 
 impl RoutingGrantConfig {
@@ -25,18 +36,26 @@ impl RoutingGrantConfig {
             || self.model_profile_ids.contains(model_profile_id)
     }
 
+    pub fn allows_named_deployment(&self, deployment_id: &str, model_profile_id: &str) -> bool {
+        self.allows_deployment(deployment_id, model_profile_id)
+            || self.named_deployment_ids.contains(deployment_id)
+            || self.named_model_profile_ids.contains(model_profile_id)
+    }
+
     pub fn allows_request(&self, request: &NamedRouteRequest, config: &RuntimeConfig) -> bool {
         match request {
             NamedRouteRequest::Deployments(ids) => ids.iter().all(|id| {
-                self.deployment_ids.contains(id)
+                self.named_deployment_ids.contains(id)
+                    || self.deployment_ids.contains(id)
                     || config.deployments.get(id).is_some_and(|deployment| {
                         let profile = &config.model_builds[&deployment.build].profile;
                         self.model_profile_ids.contains(profile)
+                            || self.named_model_profile_ids.contains(profile)
                     })
             }),
-            NamedRouteRequest::ModelProfiles(ids) => {
-                ids.iter().all(|id| self.model_profile_ids.contains(id))
-            }
+            NamedRouteRequest::ModelProfiles(ids) => ids.iter().all(|id| {
+                self.model_profile_ids.contains(id) || self.named_model_profile_ids.contains(id)
+            }),
         }
     }
 }
@@ -49,6 +68,10 @@ pub struct AppRoutingConfig {
     #[serde(default)]
     pub model_profile_ids: BTreeSet<String>,
     #[serde(default)]
+    pub named_deployment_ids: BTreeSet<String>,
+    #[serde(default)]
+    pub named_model_profile_ids: BTreeSet<String>,
+    #[serde(default)]
     pub intents: BTreeMap<String, RoutingGrantConfig>,
 }
 
@@ -57,6 +80,8 @@ impl AppRoutingConfig {
         RoutingGrantConfig {
             deployment_ids: self.deployment_ids.clone(),
             model_profile_ids: self.model_profile_ids.clone(),
+            named_deployment_ids: self.named_deployment_ids.clone(),
+            named_model_profile_ids: self.named_model_profile_ids.clone(),
         }
     }
 
@@ -82,7 +107,11 @@ impl AppRoutingConfig {
                 )));
             }
             validate_grant(app_id, intent, grant, config)?;
-            for deployment_id in &grant.deployment_ids {
+            for deployment_id in grant
+                .deployment_ids
+                .iter()
+                .chain(grant.named_deployment_ids.iter())
+            {
                 let deployment = &config.deployments[deployment_id];
                 let profile = &config.model_builds[&deployment.build].profile;
                 if !config.model_profiles[profile].ratings.contains_key(intent) {
@@ -91,7 +120,11 @@ impl AppRoutingConfig {
                     )));
                 }
             }
-            for profile_id in &grant.model_profile_ids {
+            for profile_id in grant
+                .model_profile_ids
+                .iter()
+                .chain(grant.named_model_profile_ids.iter())
+            {
                 if !config.model_profiles[profile_id]
                     .ratings
                     .contains_key(intent)
@@ -123,6 +156,20 @@ fn validate_grant(
         if !config.model_profiles.contains_key(profile) {
             return Err(configuration(format!(
                 "app {app_id} routing {scope} grants unknown model profile {profile}"
+            )));
+        }
+    }
+    for deployment in &grant.named_deployment_ids {
+        if !config.deployments.contains_key(deployment) {
+            return Err(configuration(format!(
+                "app {app_id} routing {scope} grants unknown named deployment {deployment}"
+            )));
+        }
+    }
+    for profile in &grant.named_model_profile_ids {
+        if !config.model_profiles.contains_key(profile) {
+            return Err(configuration(format!(
+                "app {app_id} routing {scope} grants unknown named model profile {profile}"
             )));
         }
     }
@@ -178,12 +225,15 @@ mod tests {
         let routing = AppRoutingConfig {
             deployment_ids: BTreeSet::from(["global-deployment".into()]),
             model_profile_ids: BTreeSet::from(["global-profile".into()]),
+            named_deployment_ids: BTreeSet::new(),
+            named_model_profile_ids: BTreeSet::new(),
             intents: BTreeMap::from([
                 (
                     "text.edit".into(),
                     RoutingGrantConfig {
                         deployment_ids: BTreeSet::from(["editor".into()]),
                         model_profile_ids: BTreeSet::new(),
+                        ..Default::default()
                     },
                 ),
                 ("text.deny".into(), RoutingGrantConfig::default()),
@@ -213,5 +263,17 @@ mod tests {
         for invalid in ["", "first,first", "first,,second", "bad/id"] {
             assert!(parse_ordered_ids(invalid).is_err());
         }
+    }
+
+    #[test]
+    fn named_only_grant_never_enters_ordinary_candidate_routing() {
+        let grant = RoutingGrantConfig {
+            deployment_ids: BTreeSet::from(["luna".into()]),
+            named_deployment_ids: BTreeSet::from(["terra".into()]),
+            ..Default::default()
+        };
+        assert!(grant.allows_deployment("luna", "luna-profile"));
+        assert!(!grant.allows_deployment("terra", "terra-profile"));
+        assert!(grant.allows_named_deployment("terra", "terra-profile"));
     }
 }

@@ -129,9 +129,16 @@ pub fn plan_candidates_with_queue(
             continue;
         };
         let mut reason_codes = Vec::new();
-        if routing_grant
-            .is_some_and(|grant| !grant.allows_deployment(deployment_id, &build.profile))
-        {
+        let named_target_is_explicitly_authorized = constraints
+            .named_route
+            .as_ref()
+            .is_some_and(|target| target.rank(deployment_id, &build.profile).is_some())
+            && routing_grant
+                .is_some_and(|grant| grant.allows_named_deployment(deployment_id, &build.profile));
+        if routing_grant.is_some_and(|grant| {
+            !grant.allows_deployment(deployment_id, &build.profile)
+                && !named_target_is_explicitly_authorized
+        }) {
             reason_codes.push(CandidateReasonCode::RoutingGrantExcluded);
         }
         if let Some(target) = constraints.named_route.as_ref() {
@@ -1573,6 +1580,7 @@ mod tests {
                 "ollama_qwen3_5_4b".into(),
             ]),
             model_profile_ids: BTreeSet::new(),
+            ..Default::default()
         };
         let empty = BTreeSet::new();
         let plan = plan_candidates(
@@ -1600,6 +1608,66 @@ mod tests {
                     "ollama_qwen3_5_4b" | "ollama_qwen3_5_2b"
                 )
         }));
+    }
+
+    #[test]
+    fn named_only_grant_is_excluded_by_default_but_admitted_when_explicitly_requested() {
+        let config: RuntimeConfig =
+            toml::from_str(include_str!("../../../config/infer.example.toml")).unwrap();
+        config.validate().unwrap();
+        let intent = config.intent("text.summarize").unwrap();
+        let empty = BTreeSet::new();
+        let grant = RoutingGrantConfig {
+            deployment_ids: BTreeSet::from(["ollama_qwen3_5_4b".into()]),
+            named_deployment_ids: BTreeSet::from(["ollama_qwen3_5_2b".into()]),
+            ..Default::default()
+        };
+
+        let ordinary = plan_candidates(
+            &config,
+            "text.summarize",
+            intent,
+            &config.profiles["cost-first"],
+            CandidatePlanningContext {
+                constraints: &RequestConstraints::default(),
+                execution_requirements: &ExecutionRequirements::default(),
+                reasoning_effort: None,
+                allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
+                allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: Some(&grant),
+                unavailable_providers: &empty,
+                unavailable_deployments: &empty,
+            },
+        );
+        assert_eq!(ordinary.candidates.len(), 1);
+        assert_eq!(ordinary.candidates[0].deployment_id, "ollama_qwen3_5_4b");
+
+        let requested = RequestConstraints {
+            named_route: Some(NamedRouteRequest::Deployments(vec![
+                "ollama_qwen3_5_2b".into(),
+            ])),
+            fallback: Some(Fallback::None),
+            ..Default::default()
+        };
+        assert!(grant.allows_request(requested.named_route.as_ref().unwrap(), &config));
+        let named = plan_candidates(
+            &config,
+            "text.summarize",
+            intent,
+            &config.profiles["cost-first"],
+            CandidatePlanningContext {
+                constraints: &requested,
+                execution_requirements: &ExecutionRequirements::default(),
+                reasoning_effort: None,
+                allowed_provider_access_classes: &BTreeSet::from([ProviderAccessClass::Standard]),
+                allowed_cloud_input_modalities: &BTreeSet::from([Modality::Text]),
+                routing_grant: Some(&grant),
+                unavailable_providers: &empty,
+                unavailable_deployments: &empty,
+            },
+        );
+        assert_eq!(named.candidates.len(), 1);
+        assert_eq!(named.candidates[0].deployment_id, "ollama_qwen3_5_2b");
     }
 
     #[test]
@@ -1661,6 +1729,7 @@ mod tests {
                 "ollama_qwen3_5_2b".into(),
             ]),
             model_profile_ids: BTreeSet::new(),
+            ..Default::default()
         };
         let empty = BTreeSet::new();
         let unavailable = BTreeSet::from(["ollama_qwen3_5_4b".into()]);

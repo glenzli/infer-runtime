@@ -92,7 +92,7 @@ impl OperatorClient {
             self.get_json("/infer/v1/contract", false),
             self.get_json("/infer/v1/metrics", true),
             self.get_json("/infer/v1/telemetry?window=24h", true),
-            self.get_json("/infer/v1/jobs?limit=50", true),
+            self.get_json("/infer/v1/operator/jobs?limit=50", true),
             self.get_json("/infer/v1/providers", true),
             self.get_json("/infer/v1/resources", true),
             self.get_json("/infer/v1/budget", true),
@@ -116,13 +116,19 @@ impl OperatorClient {
     }
 
     pub(crate) async fn cancel_job(&self, response_id: &str) -> Result<Value, String> {
-        self.post_json(&format!("/infer/v1/jobs/{response_id}/cancel"), None)
-            .await
+        self.post_json(
+            &format!("/infer/v1/operator/jobs/{response_id}/cancel"),
+            None,
+        )
+        .await
     }
 
     pub(crate) async fn explain_job(&self, response_id: &str) -> Result<Value, String> {
-        self.get_json(&format!("/infer/v1/explain/{response_id}"), true)
-            .await
+        self.get_json(
+            &format!("/infer/v1/operator/jobs/{response_id}/explain"),
+            true,
+        )
+        .await
     }
 
     pub(crate) async fn refresh_resources(&self) -> Result<Value, String> {

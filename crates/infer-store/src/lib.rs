@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 const RATE_WINDOW_MS: i64 = 60_000;
 
 #[derive(Debug, Error)]
@@ -506,13 +506,41 @@ impl Store {
         cursor: Option<&JobPageCursor>,
         limit: usize,
     ) -> Result<JobListPage, StoreError> {
+        self.job_page_impl(Some(app_id), priority, state, cursor, limit)
+    }
+
+    /// Operator-only keyset pagination across every App. This retains the
+    /// same payload-free projection and bounded query shape as `job_page`;
+    /// authorization belongs to the control/API owners above this store.
+    pub fn operator_job_page(
+        &self,
+        priority: Option<Priority>,
+        state: Option<JobState>,
+        cursor: Option<&JobPageCursor>,
+        limit: usize,
+    ) -> Result<JobListPage, StoreError> {
+        self.job_page_impl(None, priority, state, cursor, limit)
+    }
+
+    fn job_page_impl(
+        &self,
+        app_id: Option<&str>,
+        priority: Option<Priority>,
+        state: Option<JobState>,
+        cursor: Option<&JobPageCursor>,
+        limit: usize,
+    ) -> Result<JobListPage, StoreError> {
         let limit = limit.clamp(1, 1_000);
         let mut sql = String::from(
             "SELECT id, app_id, intent, provider, deployment, state, priority,
                     created_at_ms, updated_at_ms
-             FROM jobs WHERE app_id = ?",
+             FROM jobs WHERE 1 = 1",
         );
-        let mut parameters = vec![SqlValue::Text(app_id.into())];
+        let mut parameters = Vec::new();
+        if let Some(app_id) = app_id {
+            sql.push_str(" AND app_id = ?");
+            parameters.push(SqlValue::Text(app_id.into()));
+        }
         if let Some(priority) = priority {
             sql.push_str(" AND priority = ?");
             parameters.push(SqlValue::Text(enum_code(&priority)?));
@@ -1095,6 +1123,8 @@ impl Store {
                  ON jobs(app_id, created_at_ms DESC, id DESC);
              CREATE INDEX IF NOT EXISTS jobs_app_state_priority_created_id
                  ON jobs(app_id, state, priority, created_at_ms DESC, id DESC);
+             CREATE INDEX IF NOT EXISTS jobs_created_id
+                 ON jobs(created_at_ms DESC, id DESC);
              CREATE INDEX IF NOT EXISTS usage_ledger_usage_day_model_origin
                  ON usage_ledger(usage_day, execution_origin, model_id);",
         )?;
@@ -1460,6 +1490,18 @@ mod tests {
                 .jobs
                 .is_empty()
         );
+        let mut other_app = job(JobState::Succeeded, AttemptOutcome::Succeeded);
+        other_app.id = "resp_operator_other_app".into();
+        other_app.app_id = "another_app".into();
+        store.persist_job(&other_app).unwrap();
+        let operator_page = store.operator_job_page(None, None, None, 100).unwrap();
+        assert_eq!(operator_page.jobs.len(), 6);
+        assert!(
+            operator_page
+                .jobs
+                .iter()
+                .any(|job| job.id == "resp_operator_other_app" && job.app_id == "another_app")
+        );
         let connection = store.connection().unwrap();
         let filtered_plan = connection
             .query_row(
@@ -1472,6 +1514,16 @@ mod tests {
             )
             .unwrap();
         assert!(filtered_plan.contains("jobs_app_state_priority_created_id"));
+        let operator_plan = connection
+            .query_row(
+                "EXPLAIN QUERY PLAN
+                 SELECT id FROM jobs
+                 ORDER BY created_at_ms DESC, id DESC LIMIT ?1",
+                params![100],
+                |row| row.get::<_, String>(3),
+            )
+            .unwrap();
+        assert!(operator_plan.contains("jobs_created_id"));
     }
 
     #[test]

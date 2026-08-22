@@ -46,7 +46,6 @@
         </nav>
 
         <div class="sidebar-runtime">
-          <div class="eyebrow">RUNTIME</div>
           <div class="runtime-line">
             <span id="sidebar-status-dot" class="status-dot unknown"></span>
             <strong id="sidebar-runtime-state">正在连接</strong>
@@ -59,7 +58,6 @@
       <main class="workspace">
         <header class="topbar">
           <div>
-            <div class="eyebrow">LOCAL INFERENCE RUNTIME</div>
             <h1 id="view-title">运行总览</h1>
             <p id="view-description">查看 inferd、执行资源和近期任务的运行状态。</p>
           </div>
@@ -82,7 +80,6 @@
           <div class="hero-grid">
             <article class="hero-card panel">
               <div class="hero-copy">
-                <div class="eyebrow">RUNTIME STATUS</div>
                 <h2 id="hero-state">正在读取 inferd 状态</h2>
                 <p id="hero-summary">正在核对服务、执行资源和近期任务。</p>
                 <div class="hero-actions">
@@ -100,10 +97,7 @@
 
             <article class="panel pressure-card">
               <div class="panel-heading">
-                <div>
-                  <div class="eyebrow">HOST PRESSURE</div>
-                  <h3>主机资源余量</h3>
-                </div>
+                <div><h3>主机资源余量</h3></div>
                 <span id="pressure-badge" class="status-chip neutral">未知</span>
               </div>
               <div class="pressure-value">
@@ -129,7 +123,7 @@
           <div class="content-grid two-thirds">
             <article class="panel">
               <div class="panel-heading">
-                <div><div class="eyebrow">RECENT ACTIVITY</div><h3>近 24 小时执行</h3></div>
+                <div><h3>近 24 小时执行</h3></div>
                 <div class="panel-meta"><span class="muted small">每柱 1 小时 · 终态任务</span><div class="chart-legend"><span><i class="legend-dot success"></i>成功</span><span><i class="legend-dot failure"></i>失败、取消与超时</span></div></div>
               </div>
               <div id="overview-chart" class="bar-chart empty-chart" aria-label="近期任务活动图">
@@ -137,14 +131,14 @@
               </div>
               <div id="overview-chart-time" class="chart-time-axis" aria-live="polite"></div>
               <div class="panel-heading compact-heading">
-                <div><div class="eyebrow">RECENT JOBS</div><h3>最近任务</h3></div>
+                <div><h3>最近任务</h3></div>
                 <button class="text-button" data-view-link="jobs">查看全部 →</button>
               </div>
               <div id="overview-recent-jobs" class="stack-list"></div>
             </article>
             <article class="panel">
               <div class="panel-heading">
-                <div><div class="eyebrow">PROVIDERS</div><h3>Provider 状态</h3></div>
+                <div><h3>Provider 状态</h3></div>
                 <button class="text-button" data-view-link="models">查看能力与资源 →</button>
               </div>
               <div id="overview-providers" class="stack-list skeleton-lines">
@@ -163,17 +157,17 @@
           </div>
           <div class="content-grid half">
             <article class="panel">
-              <div class="panel-heading"><div><div class="eyebrow">THROUGHPUT</div><h3>近 24 小时完成情况</h3></div><div class="panel-meta"><span class="muted small">每柱 1 小时 · 持久化</span><div class="chart-legend"><span><i class="legend-dot success"></i>成功</span><span><i class="legend-dot failure"></i>失败、取消与超时</span></div></div></div>
+              <div class="panel-heading"><div><h3>近 24 小时完成情况</h3></div><div class="panel-meta"><span class="muted small">每柱 1 小时 · 持久化</span><div class="chart-legend"><span><i class="legend-dot success"></i>成功</span><span><i class="legend-dot failure"></i>失败、取消与超时</span></div></div></div>
               <div id="statistics-chart" class="bar-chart large empty-chart"><span>等待运行数据</span></div>
               <div id="statistics-chart-time" class="chart-time-axis" aria-live="polite"></div>
             </article>
             <article class="panel">
-              <div class="panel-heading"><div><div class="eyebrow">CONCURRENCY</div><h3>当前并发与排队</h3></div><span class="muted small">按 Provider 的独立并发槽位</span></div>
+              <div class="panel-heading"><div><h3>当前并发与排队</h3></div><span class="muted small">Provider 槽位与共享资源</span></div>
               <div id="queue-statistics" class="queue-list empty-state">暂无队列数据</div>
             </article>
           </div>
           <article class="panel table-panel">
-            <div class="panel-heading"><div><div class="eyebrow">ACCOUNTING</div><h3>已结算用量</h3></div><span class="muted small">按 App / Provider 汇总；不包含 payload</span></div>
+            <div class="panel-heading"><div><h3>已结算用量</h3></div><span class="muted small">按 App / Provider 汇总</span></div>
             <div id="budget-summary" class="summary-strip"></div>
             <div class="table-wrap"><table><thead><tr><th>App / Provider</th><th>请求</th><th>输入 Tokens</th><th>输出 Tokens</th><th>费用</th></tr></thead><tbody id="usage-table"></tbody></table></div>
           </article>
@@ -182,7 +176,7 @@
         <section class="view" data-view-panel="jobs">
           <article class="panel table-panel full-height-panel">
             <div class="panel-heading toolbar-heading">
-              <div><div class="eyebrow">JOB / ATTEMPT</div><h3>任务记录</h3></div>
+              <div><h3>任务记录</h3></div>
               <div class="filters">
                 <input id="job-search" class="input" type="search" placeholder="搜索 ID、Intent、Provider" aria-label="搜索任务">
                 <select id="job-filter" class="input" aria-label="筛选任务状态">
@@ -203,7 +197,7 @@
           </div>
           <article class="panel model-catalog-filter" aria-labelledby="model-filter-title">
             <div class="model-filter-heading">
-              <div><div class="eyebrow">CAPABILITY CATALOG</div><h3 id="model-filter-title">按 Intent 与能力查看 Deployment</h3></div>
+              <div><h3 id="model-filter-title">按 Intent 与能力查看 Deployment</h3></div>
               <span id="model-filter-count" class="muted" aria-live="polite">等待模型目录</span>
             </div>
             <div class="model-filter-grid" role="search" aria-label="筛选模型能力目录">
@@ -216,7 +210,7 @@
           </article>
           <div id="resource-providers" class="provider-grid"></div>
           <article class="panel table-panel">
-            <div class="panel-heading"><div><div class="eyebrow">EVICTION POLICY</div><h3>清退建议</h3></div><span id="eviction-mode" class="status-chip neutral">只读</span></div>
+            <div class="panel-heading"><div><h3>清退建议</h3></div><span id="eviction-mode" class="status-chip neutral">只读</span></div>
             <div id="eviction-panel" class="empty-state">当前没有可执行建议。</div>
           </article>
         </section>
@@ -230,39 +224,31 @@
             <button class="button primary" data-action="daemon-restart">重启并应用</button>
           </div>
           <div class="section-actions">
-            <div>
-              <strong>接入应用</strong>
-              <span class="muted">每个应用使用独立身份、权限边界和调用令牌。</span>
-            </div>
+            <div><strong>接入应用</strong></div>
             <button id="access-create" class="button primary">创建 Consumer</button>
           </div>
           <div class="metric-grid access-metrics">
-            <article class="metric-card"><span>已登记应用</span><strong id="access-total">—</strong><small>包含本机 operator</small></article>
-            <article class="metric-card"><span>托管令牌</span><strong id="access-managed">—</strong><small>由 runtime 安全保存</small></article>
-            <article class="metric-card"><span>外部凭据</span><strong id="access-external">—</strong><small>来自 daemon 环境</small></article>
+            <article class="metric-card"><span>已登记应用</span><strong id="access-total">—</strong><small>含本机管理身份</small></article>
+            <article class="metric-card"><span>托管令牌</span><strong id="access-managed">—</strong></article>
+            <article class="metric-card"><span>外部凭据</span><strong id="access-external">—</strong></article>
             <article class="metric-card"><span>等待重启</span><strong id="access-pending">—</strong><small>认证表尚未应用</small></article>
           </div>
           <div id="access-apps" class="access-grid">
             <article class="panel"><div class="empty-state">正在读取 App 身份与凭证状态…</div></article>
           </div>
-          <article class="panel access-safety-note">
-            <div class="eyebrow">SECURITY BOUNDARY</div>
-            <h3>Consumer token 与 Provider key 永远分离</h3>
-            <p>这里管理的是应用访问 infer-runtime 的 bearer token。DeepSeek 等云端 Provider key 只保留在 daemon 端，不会出现在本页面或 Consumer 配置中。</p>
-          </article>
         </section>
 
         <section class="view" data-view-panel="logs">
           <article class="panel log-panel">
             <div class="panel-heading toolbar-heading">
-              <div><div class="eyebrow">LIVE PROCESS OUTPUT</div><h3>inferd 进程日志</h3></div>
+              <div><h3>inferd 进程日志</h3></div>
               <div class="filters">
                 <input id="log-search" class="input" type="search" placeholder="搜索日志" aria-label="搜索日志">
                 <select id="log-filter" class="input" aria-label="筛选日志级别"><option value="all">全部级别</option><option value="info">Info</option><option value="warn">Warn</option><option value="error">Error</option></select>
                 <label class="toggle"><input id="log-follow" type="checkbox" checked><span></span>自动跟随</label>
               </div>
             </div>
-            <div class="log-summary"><span id="log-count">0 条日志</span><span id="log-warning-count">0 条警告</span><span id="log-error-count">0 条错误</span><span class="muted">仅包含由此 Console 托管的 inferd 输出</span></div>
+            <div class="log-summary"><span id="log-count">0 条日志</span><span id="log-warning-count">0 条警告</span><span id="log-error-count">0 条错误</span><span class="muted">仅此 Console 管理的 inferd</span></div>
             <div id="log-stream" class="log-stream" tabindex="0" aria-label="inferd 日志流"><div class="empty-state">启动 inferd 后，日志会实时显示在这里。</div></div>
           </article>
         </section>
@@ -271,18 +257,16 @@
           <div class="config-grid">
             <article class="panel config-editor-panel">
               <div class="panel-heading toolbar-heading">
-                <div><div class="eyebrow">RUNTIME CONFIGURATION</div><h3 id="config-filename">infer.toml</h3></div>
+                <div><h3 id="config-filename">infer.toml</h3></div>
                 <div class="button-row"><button id="config-reload" class="button ghost">放弃修改</button><button id="config-save" class="button primary">校验并保存</button></div>
               </div>
               <textarea id="config-editor" class="config-editor" spellcheck="false" aria-label="Runtime TOML 配置"></textarea>
             </article>
             <aside class="panel config-status-panel">
-              <div class="eyebrow">VALIDATION</div>
               <div class="config-validation"><span id="config-dot" class="status-dot unknown"></span><strong id="config-state">正在读取配置</strong></div>
-              <p id="config-message" class="muted">保存前会执行完整的 RuntimeConfig 校验。</p>
+              <p id="config-message" class="muted">保存前会校验配置。</p>
               <dl class="details-list">
                 <div><dt>配置路径</dt><dd id="config-path" class="mono">—</dd></div>
-                <div><dt>凭据</dt><dd>由 runtime 管理，不写入 TOML</dd></div>
                 <div><dt>应用方式</dt><dd>保存后重启 inferd 生效</dd></div>
               </dl>
               <button class="button full" data-action="daemon-restart">重启并应用配置</button>
@@ -293,14 +277,14 @@
     </div>
 
     <dialog id="detail-dialog" class="detail-dialog">
-      <div class="dialog-heading"><div><div class="eyebrow">JOB EXPLAIN</div><h3 id="dialog-title">任务详情</h3></div><button id="dialog-close" class="icon-button" aria-label="关闭">×</button></div>
+      <div class="dialog-heading"><div><h3 id="dialog-title">任务详情</h3></div><button id="dialog-close" class="icon-button" aria-label="关闭">×</button></div>
       <pre id="dialog-content"></pre>
     </dialog>
 
     <dialog id="access-dialog" class="detail-dialog access-dialog">
       <form id="access-form">
         <div class="dialog-heading">
-          <div><div class="eyebrow">APP IDENTITY & POLICY</div><h3 id="access-dialog-title">创建 Consumer</h3></div>
+          <div><h3 id="access-dialog-title">创建 Consumer</h3></div>
           <button id="access-dialog-close" class="icon-button" type="button" aria-label="关闭">×</button>
         </div>
         <div class="access-form-body">
@@ -308,7 +292,7 @@
             <label class="field"><span>App ID</span><input id="access-app-id" class="input mono" required maxlength="80" pattern="[A-Za-z0-9._-]+" placeholder="shadow"></label>
             <label class="field"><span>权限预设</span><select id="access-preset" class="input"><option value="local-private">本地私密</option><option value="local-preferred">本地优先</option><option value="hybrid">混合灵活</option><option value="custom">自定义</option></select></label>
             <label class="field"><span>默认策略</span><select id="access-default-policy" class="input"><option value="balanced">balanced</option><option value="local-first">local-first</option><option value="capability-first">capability-first</option><option value="latency-first">latency-first</option><option value="cost-first">cost-first</option></select></label>
-            <label class="field"><span>最大等待 Jobs</span><input id="access-max-pending" class="input" type="number" min="1" max="100000" value="16" required></label>
+            <label class="field"><span>最大排队任务数</span><input id="access-max-pending" class="input" type="number" min="1" max="100000" value="16" required></label>
           </div>
 
           <fieldset class="permission-group" data-permission="intents">
@@ -320,12 +304,12 @@
             <label><input type="checkbox" value="balanced"> balanced</label><label><input type="checkbox" value="local-first"> local-first</label><label><input type="checkbox" value="capability-first"> capability-first</label><label><input type="checkbox" value="latency-first"> latency-first</label><label><input type="checkbox" value="cost-first"> cost-first</label>
           </fieldset>
           <div class="permission-grid">
-            <fieldset class="permission-group" data-permission="priority"><legend>Priority</legend><label><input type="checkbox" value="interactive"> interactive</label><label><input type="checkbox" value="normal"> normal</label><label><input type="checkbox" value="background"> background</label></fieldset>
-            <fieldset class="permission-group" data-permission="placement"><legend>Placement</legend><label><input type="checkbox" value="local_only"> local_only</label><label><input type="checkbox" value="private"> private</label><label><input type="checkbox" value="anywhere"> anywhere</label><label><input type="checkbox" value="cloud_only"> cloud_only</label></fieldset>
-            <fieldset class="permission-group" data-permission="prefer"><legend>Preference</legend><label><input type="checkbox" value="local"> local</label><label><input type="checkbox" value="trusted_node"> trusted_node</label><label><input type="checkbox" value="cloud"> cloud</label></fieldset>
-            <fieldset class="permission-group" data-permission="capability_floor"><legend>Capability floor</legend><label><input type="checkbox" value="foundational"> foundational</label><label><input type="checkbox" value="capable"> capable</label><label><input type="checkbox" value="advanced"> advanced</label><label><input type="checkbox" value="expert"> expert</label><label><input type="checkbox" value="exceptional"> exceptional</label></fieldset>
-            <fieldset class="permission-group" data-permission="latency"><legend>Latency</legend><label><input type="checkbox" value="interactive"> interactive</label><label><input type="checkbox" value="balanced"> balanced</label><label><input type="checkbox" value="throughput"> throughput</label></fieldset>
-            <fieldset class="permission-group" data-permission="fallback"><legend>Fallback</legend><label><input type="checkbox" value="none"> none</label><label><input type="checkbox" value="equivalent"> equivalent</label><label><input type="checkbox" value="allow_lower_capability"> allow_lower_capability</label></fieldset>
+            <fieldset class="permission-group" data-permission="priority"><legend>优先级</legend><label><input type="checkbox" value="interactive"> interactive</label><label><input type="checkbox" value="normal"> normal</label><label><input type="checkbox" value="background"> background</label></fieldset>
+            <fieldset class="permission-group" data-permission="placement"><legend>执行位置</legend><label><input type="checkbox" value="local_only"> local_only</label><label><input type="checkbox" value="private"> private</label><label><input type="checkbox" value="anywhere"> anywhere</label><label><input type="checkbox" value="cloud_only"> cloud_only</label></fieldset>
+            <fieldset class="permission-group" data-permission="prefer"><legend>偏好</legend><label><input type="checkbox" value="local"> local</label><label><input type="checkbox" value="trusted_node"> trusted_node</label><label><input type="checkbox" value="cloud"> cloud</label></fieldset>
+            <fieldset class="permission-group" data-permission="capability_floor"><legend>能力下限</legend><label><input type="checkbox" value="foundational"> foundational</label><label><input type="checkbox" value="capable"> capable</label><label><input type="checkbox" value="advanced"> advanced</label><label><input type="checkbox" value="expert"> expert</label><label><input type="checkbox" value="exceptional"> exceptional</label></fieldset>
+            <fieldset class="permission-group" data-permission="latency"><legend>延迟目标</legend><label><input type="checkbox" value="interactive"> interactive</label><label><input type="checkbox" value="balanced"> balanced</label><label><input type="checkbox" value="throughput"> throughput</label></fieldset>
+            <fieldset class="permission-group" data-permission="fallback"><legend>回退</legend><label><input type="checkbox" value="none"> none</label><label><input type="checkbox" value="equivalent"> equivalent</label><label><input type="checkbox" value="allow_lower_capability"> allow_lower_capability</label></fieldset>
           </div>
           <div class="form-grid compact-form-grid">
             <label class="field field-checkbox"><input id="access-offline" type="checkbox"><span>允许请求要求离线可用</span></label>
@@ -337,7 +321,7 @@
     </dialog>
 
     <dialog id="credential-dialog" class="detail-dialog credential-dialog">
-      <div class="dialog-heading"><div><div class="eyebrow">DISPLAYED ONCE</div><h3>保存 Consumer token</h3></div></div>
+      <div class="dialog-heading"><div><h3>保存 Consumer token</h3></div></div>
       <div class="credential-body">
         <p>这是 <strong id="credential-app-id">—</strong> 的新令牌。关闭后管理面板不会再次显示明文。</p>
         <label class="field"><span>Bearer token</span><textarea id="credential-token" class="credential-token mono" readonly></textarea></label>

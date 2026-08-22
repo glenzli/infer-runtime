@@ -80,7 +80,7 @@
   }
 
   function renderAppCard(app) {
-    const source = app.credential_source === "managed" ? "Managed token" : "External secret";
+    const source = app.credential_source === "managed" ? "托管令牌" : "外部凭据";
     const credentialLabel = ({ ready: "凭证就绪", missing: "尚未生成", invalid: "凭证异常", external: "环境注入" })[app.credential_state] || app.credential_state;
     const credentialClass = app.credential_state === "ready" || app.credential_state === "external" ? "ready" : app.credential_state === "missing" ? "warning" : "error";
     const permission = summarizePermission(app.request_overrides || {});
@@ -95,13 +95,13 @@
       : "standard";
     const builtinTools = app.allowed_builtin_tools?.length
       ? app.allowed_builtin_tools.join(", ")
-      : "禁止 Hosted tools";
+      : "禁止托管工具";
     const cloudInputs = app.allowed_cloud_input_modalities?.length
       ? app.allowed_cloud_input_modalities.join(", ")
       : "禁止向云端发送 payload";
-    const identity = app.resource_admin ? "Operator" : "Consumer";
+    const identity = app.resource_admin ? "本机管理" : "应用";
     const pending = app.pending_restart ? `<span class="status-chip warning">等待重启</span>` : "";
-    const protectedBadge = app.protected ? `<span class="status-chip neutral">Protected</span>` : "";
+    const protectedBadge = app.protected ? `<span class="status-chip neutral">受保护</span>` : "";
     const tokenIdentity = app.fingerprint || app.environment_variable || "—";
     const message = app.credential_message ? `<p class="access-warning">${escapeHtml(app.credential_message)}</p>` : "";
     const actions = app.protected ? "" : `<div class="access-card-actions">
@@ -119,14 +119,14 @@
         <div><dt>凭证来源</dt><dd>${escapeHtml(source)}</dd></div>
         <div><dt>指纹 / 环境变量</dt><dd class="mono">${escapeHtml(tokenIdentity)}</dd></div>
         <div><dt>默认策略</dt><dd class="mono">${escapeHtml(app.default_policy || "—")}</dd></div>
-        <div><dt>最大等待</dt><dd>${escapeHtml(app.max_pending_jobs)} Jobs</dd></div>
+        <div><dt>最大排队任务数</dt><dd>${escapeHtml(app.max_pending_jobs)}</dd></div>
       </dl>
-      <div class="access-policy"><span>Allowed intents</span><code>${escapeHtml(intents)}</code></div>
-      <div class="access-policy"><span>Provider access</span><code>${escapeHtml(providerAccess)}</code></div>
-      <div class="access-policy"><span>Hosted tools</span><code>${escapeHtml(builtinTools)}</code></div>
-      <div class="access-policy"><span>Cloud input egress</span><code>${escapeHtml(cloudInputs)}</code></div>
-      <div class="access-policy"><span>Allowed policies</span><code>${escapeHtml(policy)}</code></div>
-      <div class="access-policy"><span>Request constraints</span><code>${escapeHtml(permission)}</code></div>
+      <div class="access-policy"><span>允许 Intent</span><code>${escapeHtml(intents)}</code></div>
+      <div class="access-policy"><span>Provider 访问</span><code>${escapeHtml(providerAccess)}</code></div>
+      <div class="access-policy"><span>托管工具</span><code>${escapeHtml(builtinTools)}</code></div>
+      <div class="access-policy"><span>云端输入</span><code>${escapeHtml(cloudInputs)}</code></div>
+      <div class="access-policy"><span>允许策略</span><code>${escapeHtml(policy)}</code></div>
+      <div class="access-policy"><span>请求约束</span><code>${escapeHtml(permission)}</code></div>
       ${message}${actions}
     </article>`;
   }
@@ -341,7 +341,7 @@
   document.getElementById("access-offline").closest(".form-grid").prepend(providerAccessControl);
   const webSearchControl = document.createElement("label");
   webSearchControl.className = "field field-checkbox";
-  webSearchControl.innerHTML = '<input id="access-web-search" type="checkbox"><span>允许 Hosted Web Search（独立于模型权限）</span>';
+  webSearchControl.innerHTML = '<input id="access-web-search" type="checkbox"><span>允许托管 Web Search</span>';
   providerAccessControl.after(webSearchControl);
   const cloudImageControl = document.createElement("label");
   cloudImageControl.className = "field field-checkbox";

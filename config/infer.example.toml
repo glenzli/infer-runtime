@@ -1896,13 +1896,20 @@ max_cost_usd = { min = 0.0, max = 0.0 }
 # [apps.example-local-consumer.routing]
 # deployment_ids = ["ollama_qwen3_5_2b"]
 # model_profile_ids = []
+# named_deployment_ids = []
+# named_model_profile_ids = []
 #
 # An Intent-specific rule replaces the routing default completely. Empty lists
 # deliberately mean deny all for that Intent; there is no fallback to the
 # routing default merely because an authorized target is unavailable.
+# `named_*` entries are an additional, explicit-only escalation surface: they
+# are accepted only when the Consumer names them in `infer.deployment_ids` or
+# `infer.model_profile_ids`; ordinary capability routing never selects them.
 # [apps.example-local-consumer.routing.intents."text.summarize"]
 # deployment_ids = ["ollama_qwen3_5_2b"]
 # model_profile_ids = []
+# named_deployment_ids = []
+# named_model_profile_ids = []
 
 # Tracked review fixture for Shape's least-privilege candidate.4 contract. It
 # does not activate or replace the ignored live `apps.shape` entry. The global
