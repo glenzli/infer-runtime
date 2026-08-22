@@ -311,7 +311,7 @@ macro_rules! capability_schema_digest {
         "a7179c88c03a768299835bd84c4c6f8d68e47f3c51a96ed4fe01387cf6fb8613"
     };
     ("infer.audio.embedding") => {
-        "757d8ca9f8ca1375f841a831e46036a2658b93e85ab28661c889f717907a1924"
+        "5cbb2e22487f98a68fef49b9a81f0a8cdb51f45c8c8fa77e78420c8122948c2c"
     };
     ("infer.audio.speech") => {
         "19d29d6799a6cee1a6d24a63f9a9aab73ab925dd2e79f7181fbfe922f6906c68"
