@@ -10,13 +10,13 @@ const state = {
 };
 
 const viewCopy = {
-  overview: ["运行总览", "查看本机推理设施的实时状态与重要变化。"],
-  statistics: ["统计与预算", "观察吞吐、队列、失败和资源使用趋势。"],
-  jobs: ["任务与执行", "检查 Job、Intent、物理 Deployment 与运行状态。"],
-  models: ["模型与资源", "按 Intent 与能力浏览模型，并管理驻留、Inventory 与压力策略。"],
-  access: ["Apps 与访问", "创建 Consumer 身份，管理调用权限、令牌轮换与撤销。"],
-  logs: ["实时日志", "筛选并跟踪由本控制台启动的 inferd 进程输出。"],
-  config: ["Runtime 配置", "在浏览器中校验配置，并通过显式重启应用变更。"],
+  overview: ["运行总览", "查看 inferd、执行资源和近期任务的运行状态。"],
+  statistics: ["运行统计", "观察近 24 小时吞吐、并发、准入与已结算用量。"],
+  jobs: ["任务记录", "查看每个 Job 的路由、执行状态与耗时。"],
+  models: ["能力与资源", "按 Intent 浏览可用 Deployment，并检查本地驻留与资源压力。"],
+  access: ["Apps 与访问", "创建接入应用身份，管理权限边界、令牌轮换与撤销。"],
+  logs: ["进程日志", "筛选并跟踪由此 Console 托管的 inferd 输出。"],
+  config: ["Runtime 配置", "校验配置并通过一次显式重启应用变更。"],
 };
 
 async function api(path, options = {}) {
@@ -72,6 +72,7 @@ function renderAll() {
   renderDaemon();
   renderMetrics();
   renderCharts();
+  renderOverviewJobs();
   renderProviders();
   renderJobs();
   renderResources();
@@ -96,22 +97,26 @@ function renderDaemon() {
     : ownership === "external" ? "已连接外部 daemon" : "没有运行中的 daemon";
 
   const chip = document.getElementById("header-status");
-  chip.textContent = online ? "Online" : "Offline";
+  chip.textContent = online ? "inferd 可用" : "inferd 离线";
   chip.className = `status-chip ${online ? "online" : "offline"}`;
   document.getElementById("offline-banner").classList.toggle("hidden", online);
-  document.getElementById("hero-state").textContent = online ? "控制平面正在稳定运行" : "推理服务尚未启动";
+  document.getElementById("hero-state").textContent = online ? "推理服务运行正常" : "inferd 尚未启动";
   document.getElementById("hero-summary").textContent = online
     ? ownership === "console"
-      ? "inferd 由当前 Web Console 管理。任务、Provider 和资源状态会持续刷新。"
-      : "已安全连接到一个外部 inferd；控制台不会停止或重启它。"
+      ? `inferd 由此 Console 管理 · PID ${daemon.pid || "—"} · 已运行 ${formatDuration(daemon.uptime_seconds)}。状态每 2 秒刷新。`
+      : "已连接到外部 inferd。此 Console 只读取状态，不会停止或重启该进程。"
     : daemon.config_valid
       ? unavailableDependencies.length
         ? `配置有效，但 ${unavailableDependencies.length} 个 Provider 缺少本机运行依赖；inferd 仍可启动，相关路由会保持不可用。`
         : "配置已通过校验，可以从这里启动一个由控制台管理的 inferd。"
       : "当前配置未通过校验，请先在配置页修正后再启动。";
 
-  document.querySelectorAll('[data-action="daemon-start"]').forEach(button => { button.disabled = online || !daemon.config_valid; });
+  document.querySelectorAll('[data-action="daemon-start"]').forEach(button => {
+    button.disabled = online || !daemon.config_valid;
+    button.classList.toggle("hidden", online);
+  });
   document.querySelectorAll('[data-action="daemon-stop"], [data-action="daemon-restart"]').forEach(button => { button.disabled = ownership !== "console"; });
+  document.querySelectorAll(".daemon-online-action").forEach(button => button.classList.toggle("hidden", !online));
 }
 
 function renderMetrics() {
@@ -138,8 +143,8 @@ function renderMetrics() {
 }
 
 function renderCharts() {
-  renderHistoryChart("overview-chart", 36);
-  renderHistoryChart("statistics-chart", 60);
+  renderHistoryChart("overview-chart", 24, "overview-chart-time");
+  renderHistoryChart("statistics-chart", 24, "statistics-chart-time");
   const metrics = endpoint("metrics") || {};
   const queues = Object.entries(metrics.provider_queues || {});
   const target = document.getElementById("queue-statistics");
@@ -156,15 +161,17 @@ function renderCharts() {
     capacity.accelerator_slots && `加速器 ${number(capacity.accelerator_slots.reserved)}/${number(capacity.accelerator_slots.limit)}`,
   ].filter(Boolean);
   const capacityRow = capacityDimensions.length
-    ? `<div class="queue-row"><div class="queue-row-header"><strong>共享本机容量</strong><span>${escapeHtml(capacityDimensions.join(" · "))} · ${number(capacity.pending)} 等待</span></div></div>`
-    : `<div class="queue-row"><div class="queue-row-header"><strong>共享本机容量</strong><span>未启用；各 Provider 仅受自身 slots 限制</span></div></div>`;
+    ? `<div class="queue-row queue-capacity"><div class="queue-row-header"><strong>共享资源池</strong><span>${escapeHtml(capacityDimensions.join(" · "))} · ${number(capacity.pending)} 等待</span></div></div>`
+    : `<div class="queue-row queue-capacity"><div class="queue-row-header"><strong>共享资源池</strong><span>未启用；各 Provider 仅受自身并发槽位限制</span></div></div>`;
   target.innerHTML = capacityRow + queues.map(([provider, queue]) => {
     const active = number(queue.active);
     const pending = number(queue.pending_interactive) + number(queue.pending_normal) + number(queue.pending_background);
     const capacity = Math.max(1, number(queue.max_concurrency) || 1);
     const visibleSlots = Math.min(10, capacity);
     const wait = queue.estimated_wait_ms;
-    const waitLabel = wait === null || wait === undefined
+    const waitLabel = !pending && (wait === null || wait === undefined || number(wait) <= 0)
+      ? "空闲"
+      : wait === null || wait === undefined
       ? (pending ? "等待估计积累中" : "空闲")
       : `预计等待 ${formatMilliseconds(wait)}`;
     const slots = [];
@@ -172,28 +179,39 @@ function renderCharts() {
       const className = index < Math.min(active, visibleSlots) ? "active" : index < Math.min(active + pending, visibleSlots) ? "pending" : "";
       slots.push(`<i class="${className}"></i>`);
     }
-    return `<div class="queue-row"><div class="queue-row-header"><strong>${escapeHtml(provider)}</strong><span>${active}/${capacity} active · ${pending} pending · ${escapeHtml(waitLabel)}</span></div><div class="queue-track">${slots.join("")}</div></div>`;
+    return `<div class="queue-row"><div class="queue-row-header"><strong>${escapeHtml(provider)}</strong><span>${active}/${capacity} 执行 · ${pending} 排队 · ${escapeHtml(waitLabel)}</span></div><div class="queue-track">${slots.join("")}</div></div>`;
   }).join("");
 }
 
-function renderHistoryChart(id, limit) {
+function renderHistoryChart(id, limit, axisId) {
   const target = document.getElementById(id);
   const telemetry = endpoint("telemetry");
   const history = (telemetry?.buckets || []).slice(-limit).map(bucket => ({
+    startedAt: number(bucket.started_at_ms),
+    width: number(telemetry?.bucket_width_ms),
     succeeded: number(bucket.succeeded),
     failed: number(bucket.failed) + number(bucket.cancelled) + number(bucket.expired),
   }));
-  const max = Math.max(0, ...history.flatMap(item => [item.succeeded, item.failed]));
+  const axis = document.getElementById(axisId);
+  const first = history[0];
+  const last = history.at(-1);
+  if (axis) axis.textContent = first && last
+    ? `${formatChartRange(first.startedAt)} — ${formatChartRange(last.startedAt + last.width)}`
+    : "";
+  const max = Math.max(0, ...history.map(item => item.succeeded + item.failed));
   if (!history.length || max === 0) {
     target.className = target.className.replace(/\s*empty-chart/g, "") + " empty-chart";
-    target.innerHTML = `<span>${escapeHtml(endpointError("telemetry") || "过去 24 小时暂无终态任务")}</span>`;
+    target.innerHTML = `<span>${escapeHtml(endpointError("telemetry") || "过去 24 小时没有完成、失败、取消或超时的任务")}</span>`;
     return;
   }
   target.classList.remove("empty-chart");
   target.innerHTML = history.map(item => {
-    const successLevel = Math.max(0, Math.min(10, Math.ceil((item.succeeded / max) * 10)));
-    const failureLevel = Math.max(0, Math.min(10, Math.ceil((item.failed / max) * 10)));
-    return `<span class="chart-column" title="成功 ${item.succeeded}，失败 ${item.failed}"><i class="chart-bar failure level-${failureLevel}"></i><i class="chart-bar success level-${successLevel}"></i></span>`;
+    const successHeight = item.succeeded ? Math.max(2, (item.succeeded / max) * 100) : 0;
+    const failureHeight = item.failed ? Math.max(2, (item.failed / max) * 100) : 0;
+    const label = `${formatDateTime(item.startedAt)} — ${formatDateTime(item.startedAt + item.width)}：成功 ${item.succeeded}，失败 ${item.failed}`;
+    const failureStyle = failureHeight ? `height:${failureHeight}%` : "display:none";
+    const successStyle = successHeight ? `height:${successHeight}%` : "display:none";
+    return `<span class="chart-column" title="${escapeAttribute(label)}" aria-label="${escapeAttribute(label)}"><i class="chart-bar failure" style="${failureStyle}"></i><i class="chart-bar success" style="${successStyle}"></i></span>`;
   }).join("");
 }
 
@@ -206,14 +224,37 @@ function renderProviders() {
     target.innerHTML = `<div class="empty-state">${escapeHtml(endpointError("providers") || "没有 Provider")}</div>`;
     return;
   }
-  target.innerHTML = providers.map(provider => {
+  const providerPriority = provider => provider.readiness?.status === "unavailable" || provider.circuit_open ? 0 : provider.configured ? 2 : 1;
+  const visibleProviders = [...providers].sort((left, right) => {
+    const leftQueue = queues[left.id] || {};
+    const rightQueue = queues[right.id] || {};
+    const priority = providerPriority(left) - providerPriority(right);
+    if (priority) return priority;
+    return (number(rightQueue.active) + number(rightQueue.pending_interactive) + number(rightQueue.pending_normal) + number(rightQueue.pending_background))
+      - (number(leftQueue.active) + number(leftQueue.pending_interactive) + number(leftQueue.pending_normal) + number(leftQueue.pending_background));
+  }).slice(0, 6);
+  const hiddenCount = providers.length - visibleProviders.length;
+  target.innerHTML = visibleProviders.map(provider => {
     const queue = queues[provider.id] || {};
     const pending = number(queue.pending_interactive) + number(queue.pending_normal) + number(queue.pending_background);
     const unavailable = provider.readiness?.status === "unavailable";
     const health = unavailable ? "依赖缺失" : provider.circuit_open ? "熔断" : provider.configured ? "可用" : "未配置";
     const healthClass = unavailable || provider.circuit_open ? "error" : provider.configured ? "healthy" : "neutral";
-    const modes = provider.execution_modes?.join(" / ") || "unary";
-    return `<div class="stack-row"><div><strong>${escapeHtml(provider.id)}</strong><small>${escapeHtml(provider.kind)} · ${escapeHtml(provider.placement)} · ${escapeHtml(modes)} · ${number(queue.active)} active / ${pending} pending</small></div><span class="status-chip ${healthClass}">${health}</span></div>`;
+    return `<div class="stack-row"><div><strong>${escapeHtml(provider.id)}</strong><small>${escapeHtml(provider.kind)} · ${escapeHtml(placementLabel(provider.placement))} · ${number(queue.active)} 执行 / ${pending} 排队</small></div><span class="status-chip ${healthClass}">${health}</span></div>`;
+  }).join("") + (hiddenCount ? `<div class="stack-more">另有 ${hiddenCount} 个 Provider，前往“能力与资源”查看全部。</div>` : "");
+}
+
+function renderOverviewJobs() {
+  const jobs = endpoint("jobs")?.jobs || [];
+  const target = document.getElementById("overview-recent-jobs");
+  if (!jobs.length) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(endpointError("jobs") || "暂无持久化任务记录")}</div>`;
+    return;
+  }
+  target.innerHTML = jobs.slice(0, 5).map(job => {
+    const time = formatDateTime(job.created_at_ms);
+    const detail = [job.app_id || "—", job.intent || "—", job.provider || "—"].join(" · ");
+    return `<div class="stack-row"><div><button class="table-action job-id mono" data-job-explain="${escapeAttribute(job.id)}" title="${escapeAttribute(job.id)}">${escapeHtml(shortId(job.id))}</button><small>${escapeHtml(detail)}</small><small class="muted">${escapeHtml(time)} · ${escapeHtml(formatJobElapsed(job))}</small></div><span class="status-chip ${statusClass(job.state)}">${escapeHtml(job.state || "unknown")}</span></div>`;
   }).join("");
 }
 
@@ -238,7 +279,7 @@ function renderJobs() {
       <td><span>${escapeHtml(job.provider || "—")}</span><br><small class="muted mono">${escapeHtml(job.deployment || "—")}</small></td>
       <td>${escapeHtml(job.priority || "—")}</td>
       <td><span class="status-chip ${statusClass(job.state)}">${escapeHtml(job.state || "unknown")}</span></td>
-      <td>${formatRelative(job.updated_at_ms)}</td>
+      <td><time datetime="${escapeAttribute(isoTimestamp(job.created_at_ms))}" title="提交：${escapeAttribute(formatDateTime(job.created_at_ms))}">${escapeHtml(formatDateTime(job.created_at_ms))}</time><small class="muted">更新 ${escapeHtml(formatRelative(job.updated_at_ms))} · ${escapeHtml(formatJobElapsed(job))}</small></td>
       <td>${terminal ? "" : `<button class="table-action danger" data-job-cancel="${escapeAttribute(job.id)}">取消</button>`}</td>
     </tr>`;
   }).join("");
@@ -346,20 +387,20 @@ function providerCard(provider, resource, deployments, totalDeployments, filters
     const canLoad = lifecycle && !["ready", "loading"].includes(lifecycle.state);
     const canUnload = lifecycle && ["ready", "draining"].includes(lifecycle.state) && number(lifecycle.active_reservations) === 0;
     const lifecycleDetail = lifecycle
-      ? ` · ${formatBytes(lifecycle.resident_memory_bytes)} · ${number(lifecycle.active_reservations)} reservations`
+      ? ` · ${formatBytes(lifecycle.resident_memory_bytes)} · ${number(lifecycle.active_reservations)} 个预约`
       : "";
     const actions = lifecycle ? `<button class="mini-button" data-resource-action="load" data-provider="${escapeAttribute(provider.id)}" data-deployment="${escapeAttribute(deployment.id)}" ${canLoad ? "" : "disabled"}>加载</button><button class="mini-button" data-resource-action="unload" data-provider="${escapeAttribute(provider.id)}" data-deployment="${escapeAttribute(deployment.id)}" ${canUnload ? "" : "disabled"}>卸载</button>` : "";
     return `<div class="model-row"><div class="model-main"><strong title="${escapeAttribute(deployment.id)}">${escapeHtml(deployment.id)}</strong><small title="${escapeAttribute(`${modelIdentity}${coverage ? ` · ${coverage}` : ""}`)}">${escapeHtml(details)}${escapeHtml(lifecycleDetail)}</small></div><div class="model-actions"><span class="status-chip ${statusClass(state)}">${escapeHtml(modelStateLabel(state))}</span>${actions}</div></div>`;
   }).join("") : `<div class="empty-state">该 Provider 当前没有已准入的 Deployment。</div>`;
   const probe = deployments.length && ["responses", "codex_app_server"].includes(provider.kind) ? `<button class="mini-button" data-provider-probe="${escapeAttribute(provider.id)}">兼容性 Probe</button>` : "";
-  const catalog = provider.kind === "codex_app_server" ? `<button class="mini-button" data-provider-models="${escapeAttribute(provider.id)}">动态 Inventory</button>` : "";
+  const catalog = provider.kind === "codex_app_server" ? `<button class="mini-button" data-provider-models="${escapeAttribute(provider.id)}">查看模型组</button>` : "";
   const access = provider.access_class && provider.access_class !== "standard" ? ` · ${provider.access_class}` : "";
-  const filtered = deployments.length !== totalDeployments ? `${deployments.length}/${totalDeployments} matched` : `${totalDeployments} admitted`;
+  const filtered = deployments.length !== totalDeployments ? `${deployments.length}/${totalDeployments} 个匹配` : `${totalDeployments} 个已准入`;
   const dependencySummary = readinessUnavailable ? ` · ${provider.readiness.summary || "本机运行依赖不可用"}` : "";
-  const availability = `${filtered}${lifecycleModels.length ? ` · ${available} available` : ""}${dependencySummary}`;
+  const availability = `${filtered}${lifecycleModels.length ? ` · ${available} 个可用` : ""}${dependencySummary}`;
   const modes = provider.execution_modes?.join(" / ") || "unary";
   const tools = catalog || probe ? `<div class="provider-tools">${catalog}${probe}</div>` : "";
-  return `<article class="panel provider-card"><div class="provider-card-header"><div><strong>${escapeHtml(provider.id)}</strong><small>${escapeHtml(provider.kind || "unknown")} · ${escapeHtml(provider.placement || "—")}${escapeHtml(access)} · ${escapeHtml(modes)} · ${escapeHtml(availability)}</small></div><span class="status-chip ${statusClass(providerState)}">${escapeHtml(providerState)}</span>${tools}</div>${rows}</article>`;
+  return `<article class="panel provider-card"><div class="provider-card-header"><div><strong>${escapeHtml(provider.id)}</strong><small>${escapeHtml(provider.kind || "unknown")} · ${escapeHtml(placementLabel(provider.placement))}${escapeHtml(access)} · ${escapeHtml(modes)} · ${escapeHtml(availability)}</small></div><span class="status-chip ${statusClass(providerState)}">${escapeHtml(providerStateLabel(providerState))}</span>${tools}</div>${rows}</article>`;
 }
 
 function deploymentCoverage(deployment, filters = { intent: "all", capability: "all" }) {
@@ -429,9 +470,15 @@ function modelFilterSummary(filters) {
 }
 
 function modelStateLabel(state) {
-  if (state === "admitted") return "ADMITTED";
-  if (state === "unavailable") return "UNAVAILABLE";
-  return state;
+  return ({
+    admitted: "已准入",
+    absent: "未加载",
+    ready: "已驻留",
+    loading: "加载中",
+    draining: "待释放",
+    unavailable: "不可用",
+    unknown: "待检测",
+  })[state] || state || "未知";
 }
 
 function compactModelIdentity(value) {
@@ -602,7 +649,7 @@ document.addEventListener("click", event => {
   const explain = event.target.closest("[data-job-explain]");
   if (explain) return showJob(explain.dataset.jobExplain);
   const cancel = event.target.closest("[data-job-cancel]");
-  if (cancel) return performAction(cancel, `/api/jobs/${encodeURIComponent(cancel.dataset.jobCancel)}/cancel`, "任务已取消", "确定取消这个任务？");
+  if (cancel) return performAction(cancel, `/api/jobs/${encodeURIComponent(cancel.dataset.jobCancel)}/cancel`, "任务已取消并已记录", "确定取消这个任务？");
   const resource = event.target.closest("[data-resource-action]");
   if (resource) {
     const action = resource.dataset.resourceAction;
@@ -658,9 +705,28 @@ function formatMilliseconds(value) { return value >= 1000 ? `${(value / 1000).to
 function formatDuration(seconds) { if (seconds === undefined || seconds === null) return "—"; const hours = Math.floor(seconds / 3600); const minutes = Math.floor((seconds % 3600) / 60); return hours ? `${hours}h ${minutes}m` : `${minutes}m`; }
 function formatBytes(value) { const bytes = number(value); if (!bytes) return "—"; const units = ["B", "KiB", "MiB", "GiB", "TiB"]; const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1); return `${(bytes / (1024 ** index)).toFixed(index > 2 ? 1 : 0)} ${units[index]}`; }
 function formatClock(value, milliseconds = false) { const date = new Date(number(value)); return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", ...(milliseconds ? { fractionalSecondDigits: 3 } : {}) }).format(date); }
+function formatDateTime(value) { if (!value) return "—"; return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(new Date(number(value))); }
+function formatChartRange(value) { if (!value) return "—"; return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(new Date(number(value))); }
+function isoTimestamp(value) { return value ? new Date(number(value)).toISOString() : ""; }
+function formatJobElapsed(job) {
+  if (!job?.created_at_ms) return "耗时 —";
+  const terminal = ["succeeded", "failed", "cancelled", "expired"].includes(job.state);
+  const end = terminal ? number(job.updated_at_ms) : Date.now();
+  const elapsed = Math.max(0, end - number(job.created_at_ms));
+  return `${terminal ? "耗时" : "已运行"} ${formatElapsedMilliseconds(elapsed)}`;
+}
+function formatElapsedMilliseconds(value) {
+  const seconds = Math.floor(Math.max(0, number(value)) / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
 function formatRelative(value) { if (!value) return "—"; const seconds = Math.max(0, Math.floor((Date.now() - number(value)) / 1000)); if (seconds < 60) return `${seconds}s 前`; if (seconds < 3600) return `${Math.floor(seconds / 60)}m 前`; if (seconds < 86400) return `${Math.floor(seconds / 3600)}h 前`; return new Date(number(value)).toLocaleDateString("zh-CN"); }
 function shortId(value) { if (!value) return "—"; return value.length > 22 ? `${value.slice(0, 9)}…${value.slice(-8)}` : value; }
 function statusClass(value) { const normalized = String(value || "neutral").toLowerCase(); return ["ready", "succeeded", "healthy", "normal", "configured"].includes(normalized) ? "ready" : ["failed", "error", "offline", "expired", "critical", "circuit_open"].includes(normalized) ? "error" : ["queued", "loading", "warn", "warning", "elevated", "draining"].includes(normalized) ? "warning" : normalized === "running" ? "running" : "neutral"; }
+function placementLabel(value) { return ({ local: "本地", cloud: "云端", trusted_node: "受信节点" })[value] || value || "—"; }
+function providerStateLabel(value) { return ({ configured: "已配置", unconfigured: "未配置", unavailable: "不可用", unknown: "待检测" })[value] || value || "未知"; }
 function pressureLabel(value) { return ({ normal: "正常", elevated: "偏高", critical: "严重", unknown: "未知" })[value] || value || "未知"; }
 function evictionStatusText(value) { return ({ disabled: "清退策略已关闭。", no_pressure_trigger: "当前没有资源压力触发。", no_target_configured: "当前压力等级没有配置释放目标。", insufficient_pressure_data: "主机压力数据不足，保持保守。", target_already_met: "可用内存已达到策略目标。" })[value?.status] || "当前没有可执行建议。"; }
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]); }

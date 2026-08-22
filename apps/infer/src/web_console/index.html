@@ -17,7 +17,7 @@
           <span class="brand-mark">IR</span>
           <span>
             <strong>infer</strong>
-            <small>runtime console</small>
+            <small>运行控制台</small>
           </span>
         </a>
 
@@ -59,9 +59,9 @@
       <main class="workspace">
         <header class="topbar">
           <div>
-            <div class="eyebrow">LOCAL INTELLIGENCE CONTROL PLANE</div>
+            <div class="eyebrow">LOCAL INFERENCE RUNTIME</div>
             <h1 id="view-title">运行总览</h1>
-            <p id="view-description">查看本机推理设施的实时状态与重要变化。</p>
+            <p id="view-description">查看 inferd、执行资源和近期任务的运行状态。</p>
           </div>
           <div class="topbar-actions">
             <span id="last-updated" class="muted small">等待首次刷新</span>
@@ -82,13 +82,13 @@
           <div class="hero-grid">
             <article class="hero-card panel">
               <div class="hero-copy">
-                <div class="eyebrow">SYSTEM PULSE</div>
-                <h2 id="hero-state">正在读取运行状态</h2>
-                <p id="hero-summary">控制台正在汇总 daemon、队列、模型和资源压力。</p>
+                <div class="eyebrow">RUNTIME STATUS</div>
+                <h2 id="hero-state">正在读取 inferd 状态</h2>
+                <p id="hero-summary">正在核对服务、执行资源和近期任务。</p>
                 <div class="hero-actions">
-                  <button class="button primary" data-action="daemon-start">启动</button>
-                  <button class="button" data-action="daemon-restart">重启</button>
-                  <button class="button danger-subtle" data-action="daemon-stop">停止</button>
+                  <button class="button primary daemon-start-action" data-action="daemon-start">启动 inferd</button>
+                  <button class="button daemon-online-action" data-action="daemon-restart">重启 inferd</button>
+                  <button class="button danger-subtle daemon-online-action" data-action="daemon-stop">停止 inferd</button>
                 </div>
               </div>
               <div class="pulse-orbit" aria-hidden="true">
@@ -102,7 +102,7 @@
               <div class="panel-heading">
                 <div>
                   <div class="eyebrow">HOST PRESSURE</div>
-                  <h3>资源余量</h3>
+                  <h3>主机资源余量</h3>
                 </div>
                 <span id="pressure-badge" class="status-chip neutral">未知</span>
               </div>
@@ -120,27 +120,32 @@
           </div>
 
           <div class="metric-grid">
-            <article class="metric-card"><span>已提交</span><strong id="metric-submitted">—</strong><small>本次 daemon 生命周期</small></article>
-            <article class="metric-card"><span>成功</span><strong id="metric-succeeded">—</strong><small id="metric-success-rate">成功率 —</small></article>
-            <article class="metric-card"><span>活跃执行</span><strong id="metric-active">—</strong><small id="metric-queued">队列中 —</small></article>
-            <article class="metric-card"><span>失败与拒绝</span><strong id="metric-failed">—</strong><small id="metric-expired">超时 —</small></article>
+            <article class="metric-card"><span>本次请求</span><strong id="metric-submitted">—</strong><small>自 inferd 本次启动起</small></article>
+            <article class="metric-card"><span>本次成功</span><strong id="metric-succeeded">—</strong><small id="metric-success-rate">成功率 —</small></article>
+            <article class="metric-card"><span>当前执行</span><strong id="metric-active">—</strong><small id="metric-queued">队列中 —</small></article>
+            <article class="metric-card"><span>异常终态</span><strong id="metric-failed">—</strong><small id="metric-expired">超时 —</small></article>
           </div>
 
           <div class="content-grid two-thirds">
             <article class="panel">
               <div class="panel-heading">
-                <div><div class="eyebrow">RECENT ACTIVITY</div><h3>任务活动</h3></div>
-                <span class="muted small">过去 24 小时（持久化）</span>
+                <div><div class="eyebrow">RECENT ACTIVITY</div><h3>近 24 小时执行</h3></div>
+                <div class="panel-meta"><span class="muted small">每柱 1 小时 · 终态任务</span><div class="chart-legend"><span><i class="legend-dot success"></i>成功</span><span><i class="legend-dot failure"></i>失败、取消与超时</span></div></div>
               </div>
               <div id="overview-chart" class="bar-chart empty-chart" aria-label="近期任务活动图">
                 <span>等待运行数据</span>
               </div>
-              <div class="chart-legend"><span><i class="legend-dot success"></i>完成</span><span><i class="legend-dot failure"></i>失败</span></div>
+              <div id="overview-chart-time" class="chart-time-axis" aria-live="polite"></div>
+              <div class="panel-heading compact-heading">
+                <div><div class="eyebrow">RECENT JOBS</div><h3>最近任务</h3></div>
+                <button class="text-button" data-view-link="jobs">查看全部 →</button>
+              </div>
+              <div id="overview-recent-jobs" class="stack-list"></div>
             </article>
             <article class="panel">
               <div class="panel-heading">
-                <div><div class="eyebrow">PROVIDERS</div><h3>执行节点</h3></div>
-                <button class="text-button" data-view-link="models">管理资源 →</button>
+                <div><div class="eyebrow">PROVIDERS</div><h3>Provider 状态</h3></div>
+                <button class="text-button" data-view-link="models">查看能力与资源 →</button>
               </div>
               <div id="overview-providers" class="stack-list skeleton-lines">
                 <span></span><span></span><span></span>
@@ -151,23 +156,24 @@
 
         <section class="view" data-view-panel="statistics">
           <div class="metric-grid wide">
-            <article class="metric-card"><span>平均队列等待</span><strong id="stat-wait">—</strong><small>本次 daemon 生命周期</small></article>
-            <article class="metric-card"><span>已派发</span><strong id="stat-dispatched">—</strong><small>本次 daemon 生命周期</small></article>
-            <article class="metric-card"><span>取消</span><strong id="stat-cancelled">—</strong><small>本次 daemon 生命周期</small></article>
-            <article class="metric-card"><span>队列拒绝</span><strong id="stat-rejected">—</strong><small>本次 daemon 生命周期</small></article>
+            <article class="metric-card"><span>平均排队等待</span><strong id="stat-wait">—</strong><small>本次 inferd 生命周期</small></article>
+            <article class="metric-card"><span>已进入 Provider</span><strong id="stat-dispatched">—</strong><small>本次 inferd 生命周期</small></article>
+            <article class="metric-card"><span>已取消</span><strong id="stat-cancelled">—</strong><small>本次 inferd 生命周期</small></article>
+            <article class="metric-card"><span>准入拒绝</span><strong id="stat-rejected">—</strong><small>本次 inferd 生命周期</small></article>
           </div>
           <div class="content-grid half">
             <article class="panel">
-              <div class="panel-heading"><div><div class="eyebrow">THROUGHPUT</div><h3>完成与失败趋势</h3></div><span class="muted small">过去 24 小时（持久化）</span></div>
+              <div class="panel-heading"><div><div class="eyebrow">THROUGHPUT</div><h3>近 24 小时完成情况</h3></div><div class="panel-meta"><span class="muted small">每柱 1 小时 · 持久化</span><div class="chart-legend"><span><i class="legend-dot success"></i>成功</span><span><i class="legend-dot failure"></i>失败、取消与超时</span></div></div></div>
               <div id="statistics-chart" class="bar-chart large empty-chart"><span>等待运行数据</span></div>
+              <div id="statistics-chart-time" class="chart-time-axis" aria-live="polite"></div>
             </article>
             <article class="panel">
-              <div class="panel-heading"><div><div class="eyebrow">QUEUE DEPTH</div><h3>Provider 队列</h3></div></div>
+              <div class="panel-heading"><div><div class="eyebrow">CONCURRENCY</div><h3>当前并发与排队</h3></div><span class="muted small">按 Provider 的独立并发槽位</span></div>
               <div id="queue-statistics" class="queue-list empty-state">暂无队列数据</div>
             </article>
           </div>
           <article class="panel table-panel">
-            <div class="panel-heading"><div><div class="eyebrow">ACCOUNTING</div><h3>预算与使用</h3></div></div>
+            <div class="panel-heading"><div><div class="eyebrow">ACCOUNTING</div><h3>已结算用量</h3></div><span class="muted small">按 App / Provider 汇总；不包含 payload</span></div>
             <div id="budget-summary" class="summary-strip"></div>
             <div class="table-wrap"><table><thead><tr><th>App / Provider</th><th>请求</th><th>输入 Tokens</th><th>输出 Tokens</th><th>费用</th></tr></thead><tbody id="usage-table"></tbody></table></div>
           </article>
@@ -185,19 +191,19 @@
               </div>
             </div>
             <div class="table-wrap jobs-table-wrap">
-              <table><thead><tr><th>任务</th><th>Intent</th><th>Provider / Deployment</th><th>优先级</th><th>状态</th><th>更新时间</th><th></th></tr></thead><tbody id="jobs-table"></tbody></table>
+              <table><thead><tr><th>任务 / App</th><th>Intent</th><th>Provider / Deployment</th><th>优先级</th><th>状态</th><th>提交与耗时</th><th></th></tr></thead><tbody id="jobs-table"></tbody></table>
             </div>
           </article>
         </section>
 
         <section class="view" data-view-panel="models">
           <div class="section-actions">
-            <div><strong id="resource-summary">正在读取本地资源</strong><span id="resource-detail" class="muted">模型 inventory 不会在刷新时自动装卸。</span></div>
+            <div><strong id="resource-summary">正在读取模型与资源</strong><span id="resource-detail" class="muted">刷新只更新发现状态，不会自动装卸模型。</span></div>
             <button class="button" data-action="resources-refresh">刷新本地 Inventory</button>
           </div>
           <article class="panel model-catalog-filter" aria-labelledby="model-filter-title">
             <div class="model-filter-heading">
-              <div><div class="eyebrow">CAPABILITY CATALOG</div><h3 id="model-filter-title">按 Intent 与能力查看模型</h3></div>
+              <div><div class="eyebrow">CAPABILITY CATALOG</div><h3 id="model-filter-title">按 Intent 与能力查看 Deployment</h3></div>
               <span id="model-filter-count" class="muted" aria-live="polite">等待模型目录</span>
             </div>
             <div class="model-filter-grid" role="search" aria-label="筛选模型能力目录">
@@ -225,15 +231,15 @@
           </div>
           <div class="section-actions">
             <div>
-              <strong>Consumer Apps</strong>
+              <strong>接入应用</strong>
               <span class="muted">每个应用使用独立身份、权限边界和调用令牌。</span>
             </div>
             <button id="access-create" class="button primary">创建 Consumer</button>
           </div>
           <div class="metric-grid access-metrics">
-            <article class="metric-card"><span>已登记 Apps</span><strong id="access-total">—</strong><small>包含本机 operator</small></article>
-            <article class="metric-card"><span>Managed tokens</span><strong id="access-managed">—</strong><small>由 runtime 安全保存</small></article>
-            <article class="metric-card"><span>External secrets</span><strong id="access-external">—</strong><small>来自 daemon 环境</small></article>
+            <article class="metric-card"><span>已登记应用</span><strong id="access-total">—</strong><small>包含本机 operator</small></article>
+            <article class="metric-card"><span>托管令牌</span><strong id="access-managed">—</strong><small>由 runtime 安全保存</small></article>
+            <article class="metric-card"><span>外部凭据</span><strong id="access-external">—</strong><small>来自 daemon 环境</small></article>
             <article class="metric-card"><span>等待重启</span><strong id="access-pending">—</strong><small>认证表尚未应用</small></article>
           </div>
           <div id="access-apps" class="access-grid">
@@ -249,14 +255,14 @@
         <section class="view" data-view-panel="logs">
           <article class="panel log-panel">
             <div class="panel-heading toolbar-heading">
-              <div><div class="eyebrow">LIVE PROCESS OUTPUT</div><h3>运行日志</h3></div>
+              <div><div class="eyebrow">LIVE PROCESS OUTPUT</div><h3>inferd 进程日志</h3></div>
               <div class="filters">
                 <input id="log-search" class="input" type="search" placeholder="搜索日志" aria-label="搜索日志">
                 <select id="log-filter" class="input" aria-label="筛选日志级别"><option value="all">全部级别</option><option value="info">Info</option><option value="warn">Warn</option><option value="error">Error</option></select>
                 <label class="toggle"><input id="log-follow" type="checkbox" checked><span></span>自动跟随</label>
               </div>
             </div>
-            <div class="log-summary"><span id="log-count">0 条日志</span><span id="log-warning-count">0 条警告</span><span id="log-error-count">0 条错误</span><span class="muted">仅包含本控制台启动的 inferd 输出</span></div>
+            <div class="log-summary"><span id="log-count">0 条日志</span><span id="log-warning-count">0 条警告</span><span id="log-error-count">0 条错误</span><span class="muted">仅包含由此 Console 托管的 inferd 输出</span></div>
             <div id="log-stream" class="log-stream" tabindex="0" aria-label="inferd 日志流"><div class="empty-state">启动 inferd 后，日志会实时显示在这里。</div></div>
           </article>
         </section>
