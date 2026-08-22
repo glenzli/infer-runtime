@@ -88,14 +88,7 @@ function renderDaemon() {
   const online = Boolean(daemon.reachable);
   const ownership = daemon.ownership || "none";
   const unavailableDependencies = (daemon.provider_readiness || []).filter(readiness => readiness.status === "unavailable");
-  setStatusDot("sidebar-status-dot", online ? "online" : "offline");
   setStatusDot("pulse-core", online ? "online" : "offline");
-  document.getElementById("sidebar-runtime-state").textContent = online ? "运行正常" : "服务离线";
-  document.getElementById("sidebar-runtime-url").textContent = daemon.runtime_url || "—";
-  document.getElementById("sidebar-ownership").textContent = ownership === "console"
-    ? `控制台管理 · PID ${daemon.pid || "—"} · ${formatDuration(daemon.uptime_seconds)}`
-    : ownership === "external" ? "已连接外部 daemon" : "没有运行中的 daemon";
-
   const chip = document.getElementById("header-status");
   chip.textContent = online ? "inferd 可用" : "inferd 离线";
   chip.className = `status-chip ${online ? "online" : "offline"}`;
