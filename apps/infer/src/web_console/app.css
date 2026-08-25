@@ -220,7 +220,7 @@ button { color: inherit; }
 }
 
 .brand { display: flex; align-items: center; gap: 12px; padding: 2px 8px 24px; color: var(--text); text-decoration: none; }
-.brand-mark { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--brand-border); border-radius: 11px; background: var(--brand-bg); color: var(--accent); font: 700 12px/1 ui-monospace, monospace; letter-spacing: .08em; box-shadow: inset 0 1px var(--brand-highlight); }
+.brand-mark { width: 38px; height: 38px; display: block; flex: 0 0 auto; }
 .brand strong { display: block; font-size: 18px; letter-spacing: -.02em; }
 .brand small { display: block; margin-top: 1px; color: var(--muted); font: 10px/1.2 ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; }
 

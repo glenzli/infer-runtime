@@ -48,6 +48,7 @@ const INDEX_HTML: &str = include_str!("index.html");
 const APP_CSS: &str = include_str!("app.css");
 const APP_JS: &str = include_str!("app.js");
 const ACCESS_JS: &str = include_str!("access.js");
+const CONSOLE_MARK: &str = include_str!("infer-console-mark.svg");
 
 #[derive(Debug, Clone)]
 pub(crate) struct WebConsoleOptions {
@@ -183,6 +184,7 @@ fn router(state: WebState) -> Router {
         .route("/app.css", get(styles))
         .route("/app.js", get(script))
         .route("/access.js", get(access_script))
+        .route("/infer-console-mark.svg", get(console_mark))
         .route("/api/status", get(status))
         .route("/api/snapshot", get(snapshot))
         .route("/api/logs", get(logs))
@@ -224,6 +226,10 @@ async fn access_script() -> impl IntoResponse {
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         ACCESS_JS,
     )
+}
+
+async fn console_mark() -> impl IntoResponse {
+    ([(header::CONTENT_TYPE, "image/svg+xml")], CONSOLE_MARK)
 }
 
 async fn status(State(state): State<WebState>) -> Json<Value> {
@@ -685,7 +691,25 @@ mod tests {
         assert!(body.contains("name=\"color-scheme\" content=\"light dark\""));
         assert!(body.contains("Apps 与访问"));
         assert!(body.contains("/access.js"));
+        assert!(body.contains("/infer-console-mark.svg"));
         assert!(!body.contains("__INFER_CSRF__"));
+    }
+
+    #[tokio::test]
+    async fn console_mark_is_served_as_svg() {
+        let response = router(test_state())
+            .oneshot(
+                Request::get("/infer-console-mark.svg")
+                    .header(header::HOST, "127.0.0.1:8790")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "image/svg+xml");
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert!(body.starts_with(b"<svg"));
     }
 
     #[test]
