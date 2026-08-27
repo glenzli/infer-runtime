@@ -2,6 +2,8 @@
 
 [中文](README.md) · [English](README.en.md)
 
+![infer-runtime 推理运行时](docs/images/infer-runtime-banner.png)
+
 `infer-runtime` 是一个面向本机应用的 AI 推理运行时。Consumer 提交 Intent、能力下限、
 延迟、位置、隐私和回退约束；Runtime 负责选择 Provider 与 Deployment，并处理排队、配额、
 模型驻留、取消、故障切换和执行记录。

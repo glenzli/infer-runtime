@@ -2,6 +2,8 @@
 
 [中文](README.md) · [English](README.en.md)
 
+![infer-runtime inference runtime](docs/images/infer-runtime-banner.png)
+
 `infer-runtime` is an AI inference runtime for local applications. A Consumer
 submits an Intent together with capability, latency, placement, privacy, and
 fallback constraints. Runtime selects a Provider and Deployment, then handles
