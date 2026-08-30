@@ -14,6 +14,7 @@ pub const SUBJECT_SEGMENTATION_SOFT_MASK_CAPABILITIES: &[&str] =
 pub const FACE_PARSING_CAPABILITIES: &[&str] = &["infer.vision.face-parsing@20260813.1"];
 pub const IMAGE_EMBEDDING_CAPABILITIES: &[&str] = &["infer.vision.image-embedding@20260811.1"];
 pub const TEXT_EMBEDDING_CAPABILITIES: &[&str] = &["infer.vision.text-embedding@20260811.1"];
+pub const IMAGE_EMBEDDING_INTENT: &str = "semantic.embed_image";
 pub const IMAGE_DESCRIPTION_CAPABILITIES: &[&str] = &["infer.vision.image-description@20260811.1"];
 pub const CLASSIFICATION_REVIEW_CAPABILITIES: &[&str] =
     &["infer.vision.classification-review@20260811.1"];
@@ -584,7 +585,7 @@ impl Client {
             image,
             content_type,
             vec![
-                ("model", "vision.embed_image".into()),
+                ("model", IMAGE_EMBEDDING_INTENT.into()),
                 ("source_revision", source_revision.into()),
                 (
                     "image_orientation",
@@ -823,5 +824,15 @@ impl Client {
             })
             .await?;
         decode(response).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::IMAGE_EMBEDDING_INTENT;
+
+    #[test]
+    fn image_embedding_uses_the_cross_modal_semantic_intent() {
+        assert_eq!(IMAGE_EMBEDDING_INTENT, "semantic.embed_image");
     }
 }
