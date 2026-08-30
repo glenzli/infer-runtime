@@ -468,6 +468,22 @@ required_features = ["prompted_binary_mask", "normalized_point_and_box_prompts"]
 default_capability_floor = "foundational"
 default_policy = "local-first"
 
+[intents."vision.ground_semantics"]
+data_plane = "vision.semantic_grounding"
+input_modalities = ["image"]
+output_modalities = ["json"]
+required_features = ["open_vocabulary_grounding", "normalized_region_candidates"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[intents."vision.complete_image"]
+data_plane = "vision.image_completion"
+input_modalities = ["image"]
+output_modalities = ["image"]
+required_features = ["masked_local_completion", "preserve_unselected_pixels"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
 [intents."vision.parse_face"]
 data_plane = "vision.face_parsing"
 input_modalities = ["image"]
@@ -850,6 +866,20 @@ status = "provisional"
 family = "sam2.1"
 
 [model_profiles.sam21_small_coreml.ratings."vision.segment_subject"]
+level = "foundational"
+status = "provisional"
+
+[model_profiles.grounding_dino_tiny]
+family = "grounding-dino"
+
+[model_profiles.grounding_dino_tiny.ratings."vision.ground_semantics"]
+level = "foundational"
+status = "provisional"
+
+[model_profiles.lama_inpainting]
+family = "lama"
+
+[model_profiles.lama_inpainting.ratings."vision.complete_image"]
 level = "foundational"
 status = "provisional"
 
@@ -1472,6 +1502,130 @@ postprocessing_identity = "best_iou_mask_bilinear_restore_logit_gt_zero_v1"
 requested_execution_provider = "coreml_cpu_and_gpu"
 actual_execution_provider = "coreml_cpu_and_gpu"
 
+[model_builds.grounding_dino_tiny_onnx_int8_v1]
+profile = "grounding_dino_tiny"
+model_id = "sha256:3bff430de583461ab3c1e8b99b19508f4fb238bf0fea0cde2c45f840a0082a26"
+variant = "onnx-opset16-int8-exact800"
+input_modalities = ["image"]
+output_modalities = ["json"]
+features = ["open_vocabulary_grounding", "normalized_region_candidates"]
+
+[model_builds.grounding_dino_tiny_onnx_int8_v1.provenance]
+source_kind = "user_managed"
+upstream = "onnx-community/grounding-dino-tiny-ONNX"
+source_revision = "ff690b0a8050566c290287545bd059350f3e9096"
+artifact_sha256 = "3bff430de583461ab3c1e8b99b19508f4fb238bf0fea0cde2c45f840a0082a26"
+
+[model_builds.grounding_dino_tiny_onnx_int8_v1.license]
+status = "declared"
+expression = "Apache-2.0"
+license_url = "https://huggingface.co/onnx-community/grounding-dino-tiny-ONNX/blob/ff690b0a8050566c290287545bd059350f3e9096/README.md"
+reviewed_at = "2026-08-30"
+
+[model_builds.grounding_dino_tiny_onnx_int8_v1.onnx]
+adapter = "grounding_dino_semantic_grounding"
+opset = 16
+inputs = [
+  { name = "pixel_values", dtype = "float32", shape = ["1", "3", "800", "800"] },
+  { name = "input_ids", dtype = "int64", shape = ["1", "sequence_length"] },
+  { name = "token_type_ids", dtype = "int64", shape = ["1", "sequence_length"] },
+  { name = "attention_mask", dtype = "int64", shape = ["1", "sequence_length"] },
+  { name = "pixel_mask", dtype = "int64", shape = ["1", "800", "800"] },
+]
+outputs = [
+  { name = "logits", dtype = "float32", shape = ["1", "900", "256"] },
+  { name = "pred_boxes", dtype = "float32", shape = ["1", "900", "4"] },
+]
+postprocessing_identity = "sigmoid_phrase_score_box_clip_nms_normalized_v1"
+postprocessing_parameters = { nms_threshold = 0.8 }
+allowed_execution_providers = ["cpu"]
+precision = "int8"
+
+[model_builds.grounding_dino_tiny_onnx_int8_v1.onnx.artifact]
+sha256 = "3bff430de583461ab3c1e8b99b19508f4fb238bf0fea0cde2c45f840a0082a26"
+size_bytes = 203824481
+source_url = "https://huggingface.co/onnx-community/grounding-dino-tiny-ONNX/resolve/ff690b0a8050566c290287545bd059350f3e9096/onnx/model_int8.onnx"
+source_revision = "onnx-community/grounding-dino-tiny-ONNX@ff690b0a8050566c290287545bd059350f3e9096"
+license_spdx = "Apache-2.0"
+
+[model_builds.grounding_dino_tiny_onnx_int8_v1.onnx.auxiliary_artifacts.tokenizer]
+sha256 = "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+size_bytes = 711396
+source_url = "https://huggingface.co/onnx-community/grounding-dino-tiny-ONNX/resolve/ff690b0a8050566c290287545bd059350f3e9096/tokenizer.json"
+source_revision = "onnx-community/grounding-dino-tiny-ONNX@ff690b0a8050566c290287545bd059350f3e9096"
+license_spdx = "Apache-2.0"
+
+[model_builds.grounding_dino_tiny_onnx_int8_v1.onnx.preprocessing]
+identity = "grounding_dino_exact_800_rgb_imagenet_v1"
+orientation = "display_pixels_orientation_normalized"
+resize = "exact_800x800_bilinear"
+color_space = "srgb"
+channel_order = "rgb"
+layout = "nchw"
+dtype = "float32"
+mean = [0.485, 0.456, 0.406]
+scale = [0.229, 0.224, 0.225]
+
+[model_builds.grounding_dino_tiny_onnx_int8_v1.onnx.text_preprocessing]
+identity = "grounding_dino_bert_uncased_period_truncate256_v1"
+tokenizer_artifact = "tokenizer"
+lowercase = true
+padding = "longest"
+truncation = true
+max_length = 256
+pad_token_id = 0
+eos_token_id = 102
+
+[model_builds.lama_inpainting_onnx_v1]
+profile = "lama_inpainting"
+model_id = "sha256:7df918ac3921d3daf0aae1d219776cf0dc4e4935f035af81841b40adcf74fdf2"
+variant = "opencv-onnx-opset21-fp32-exact512"
+input_modalities = ["image"]
+output_modalities = ["image"]
+features = ["masked_local_completion", "preserve_unselected_pixels"]
+
+[model_builds.lama_inpainting_onnx_v1.provenance]
+source_kind = "user_managed"
+upstream = "opencv/inpainting_lama"
+source_revision = "aee6d22f0a13e5e35af1c9a1c3afd62841fc6f3f"
+artifact_sha256 = "7df918ac3921d3daf0aae1d219776cf0dc4e4935f035af81841b40adcf74fdf2"
+
+[model_builds.lama_inpainting_onnx_v1.license]
+status = "declared"
+expression = "Apache-2.0"
+license_url = "https://huggingface.co/opencv/inpainting_lama/blob/aee6d22f0a13e5e35af1c9a1c3afd62841fc6f3f/README.md"
+reviewed_at = "2026-08-30"
+
+[model_builds.lama_inpainting_onnx_v1.onnx]
+adapter = "lama_image_completion"
+opset = 21
+inputs = [
+  { name = "image", dtype = "float32", shape = ["batch", "3", "512", "512"] },
+  { name = "mask", dtype = "float32", shape = ["batch", "1", "512", "512"] },
+]
+outputs = [{ name = "output", dtype = "float32", shape = ["batch", "3", "512", "512"] }]
+postprocessing_identity = "clamp_rgb8_compose_selected_pixels_png_v1"
+allowed_execution_providers = ["cpu"]
+precision = "fp32"
+
+[model_builds.lama_inpainting_onnx_v1.onnx.artifact]
+sha256 = "7df918ac3921d3daf0aae1d219776cf0dc4e4935f035af81841b40adcf74fdf2"
+size_bytes = 92591623
+source_url = "https://huggingface.co/opencv/inpainting_lama/resolve/aee6d22f0a13e5e35af1c9a1c3afd62841fc6f3f/inpainting_lama_2025jan.onnx"
+source_revision = "opencv/inpainting_lama@aee6d22f0a13e5e35af1c9a1c3afd62841fc6f3f"
+license_spdx = "Apache-2.0"
+
+[model_builds.lama_inpainting_onnx_v1.onnx.preprocessing]
+identity = "lama_exact_512_rgb_unit_mask_binary_v1"
+orientation = "display_pixels_orientation_normalized"
+resize = "exact_512x512_triangle_image_nearest_mask"
+color_space = "srgb"
+channel_order = "rgb"
+layout = "nchw"
+dtype = "float32"
+mean = [0.0, 0.0, 0.0]
+scale = [1.0, 1.0, 1.0]
+
 [model_builds.bisenet_resnet18_face_parsing_onnx_cpu_v1]
 profile = "bisenet_resnet18_face_parsing"
 model_id = "sha256:0d9bd318e46987c3bdbfacae9e2c0f461cae1c6ac6ea6d43bbe541a91727e33f"
@@ -1777,6 +1931,18 @@ build = "sam21_small_coreml_fp16"
 resource_class = "standard"
 estimated_cost_usd = 0.0
 
+[deployments.onnx_grounding_dino_tiny]
+provider = "onnx-local"
+build = "grounding_dino_tiny_onnx_int8_v1"
+resource_class = "heavy"
+estimated_cost_usd = 0.0
+
+[deployments.onnx_lama_inpainting]
+provider = "onnx-local"
+build = "lama_inpainting_onnx_v1"
+resource_class = "heavy"
+estimated_cost_usd = 0.0
+
 [deployments.onnx_bisenet_resnet18_face_parsing]
 provider = "onnx-local"
 build = "bisenet_resnet18_face_parsing_onnx_cpu_v1"
@@ -1919,7 +2085,7 @@ max_cost_usd = { min = 0.0, max = 0.0 }
 [apps.example-shadow-vision-consumer]
 credential = { source = "managed" }
 resource_admin = false
-allowed_intents = ["vision.segment_subject", "vision.parse_face"]
+allowed_intents = ["vision.segment_subject", "vision.ground_semantics", "vision.complete_image", "vision.parse_face"]
 allowed_provider_access_classes = ["standard"]
 allowed_cloud_input_modalities = []
 max_pending_jobs = 8

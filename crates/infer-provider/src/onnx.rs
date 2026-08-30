@@ -14,11 +14,12 @@ use async_trait::async_trait;
 use image::{ImageFormat, RgbImage};
 use infer_artifact::ArtifactStore;
 use infer_core::{
-    EncodedLabelMap, FaceDetection, FaceDetectionRequest, FaceEmbeddingEligibility,
-    FaceEmbeddingRequest, FaceEmbeddingVector, FaceParsingOntology, FaceParsingRegion,
-    FaceParsingRequest, ImageEmbeddingRequest, ImageGeometry, MAX_VISION_IMAGE_PIXELS,
-    ModelBuildConfig, OnnxAdapterKind, OnnxExecutionProvider, OnnxRuntimeConfig,
-    SemanticEmbeddingVector, TextEmbeddingRequest, VisionImage,
+    EncodedCompletedRaster, EncodedLabelMap, FaceDetection, FaceDetectionRequest,
+    FaceEmbeddingEligibility, FaceEmbeddingRequest, FaceEmbeddingVector, FaceParsingOntology,
+    FaceParsingRegion, FaceParsingRequest, ImageCompletionRequest, ImageEmbeddingRequest,
+    ImageGeometry, MAX_VISION_IMAGE_PIXELS, ModelBuildConfig, OnnxAdapterKind,
+    OnnxExecutionProvider, OnnxRuntimeConfig, SemanticEmbeddingVector, SemanticGroundingRegion,
+    SemanticGroundingRequest, TextEmbeddingRequest, VisionImage,
 };
 use infer_resource::{
     NativeControlError, NativeInventory, NativeModelController, NativeRunningModel,
@@ -34,6 +35,8 @@ use tokio_util::sync::CancellationToken;
 use crate::ProviderError;
 
 mod bisenet;
+mod grounding_dino;
+mod lama;
 mod sface;
 mod siglip;
 mod yunet;
@@ -74,6 +77,20 @@ pub struct FaceParsingExecutionOutput {
     pub label_map: EncodedLabelMap,
     pub ontology: FaceParsingOntology,
     pub regions: Vec<FaceParsingRegion>,
+    pub provenance: VisionExecutionProvenance,
+}
+
+#[derive(Debug)]
+pub struct SemanticGroundingExecutionOutput {
+    pub image: ImageGeometry,
+    pub regions: Vec<SemanticGroundingRegion>,
+    pub provenance: VisionExecutionProvenance,
+}
+
+#[derive(Debug)]
+pub struct ImageCompletionExecutionOutput {
+    pub input_coordinate_extent: ImageGeometry,
+    pub raster: EncodedCompletedRaster,
     pub provenance: VisionExecutionProvenance,
 }
 
@@ -165,6 +182,32 @@ pub trait TextEmbeddingExecutor: Send + Sync {
 }
 
 pub type DynTextEmbeddingExecutor = Arc<dyn TextEmbeddingExecutor>;
+
+#[async_trait]
+pub trait SemanticGroundingExecutor: Send + Sync {
+    fn id(&self) -> &str;
+    async fn ground_semantics(
+        &self,
+        physical_model: &str,
+        request: SemanticGroundingRequest,
+        cancellation: CancellationToken,
+    ) -> Result<SemanticGroundingExecutionOutput, ProviderError>;
+}
+
+pub type DynSemanticGroundingExecutor = Arc<dyn SemanticGroundingExecutor>;
+
+#[async_trait]
+pub trait ImageCompletionExecutor: Send + Sync {
+    fn id(&self) -> &str;
+    async fn complete_image(
+        &self,
+        physical_model: &str,
+        request: ImageCompletionRequest,
+        cancellation: CancellationToken,
+    ) -> Result<ImageCompletionExecutionOutput, ProviderError>;
+}
+
+pub type DynImageCompletionExecutor = Arc<dyn ImageCompletionExecutor>;
 
 #[derive(Clone)]
 pub struct OnnxProviderRuntime {
@@ -285,7 +328,15 @@ impl OnnxProviderRuntime {
             Err(error) => return Err(error),
         };
         validate_session_contract(&session, onnx)?;
-        let tokenizer = siglip::load_tokenizer(&self.store, &registered.build_id, onnx)?;
+        let tokenizer = match onnx.adapter {
+            OnnxAdapterKind::SiglipTextEmbedding => {
+                siglip::load_tokenizer(&self.store, &registered.build_id, onnx)?
+            }
+            OnnxAdapterKind::GroundingDinoSemanticGrounding => {
+                grounding_dino::load_tokenizer(&self.store, &registered.build_id, onnx)?
+            }
+            _ => None,
+        };
         let entry = Arc::new(SessionEntry {
             session: Mutex::new(session),
             tokenizer,
@@ -628,6 +679,114 @@ impl TextEmbeddingExecutor for OnnxProviderRuntime {
         let entry_for_run = Arc::clone(&entry);
         let mut task = tokio::task::spawn_blocking(move || {
             siglip::run_text(&entry_for_run, request, options_for_run.as_ref())
+        });
+        tokio::select! {
+            result = &mut task => result
+                .map_err(|error| ProviderError::NativeRuntime(error.to_string()))?,
+            _ = cancellation.cancelled() => {
+                let _ = run_options.terminate();
+                let _ = task.await;
+                Err(ProviderError::NativeRuntime("ONNX execution cancelled".into()))
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl SemanticGroundingExecutor for OnnxProviderRuntime {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    async fn ground_semantics(
+        &self,
+        physical_model: &str,
+        request: SemanticGroundingRequest,
+        cancellation: CancellationToken,
+    ) -> Result<SemanticGroundingExecutionOutput, ProviderError> {
+        if cancellation.is_cancelled() {
+            return Err(ProviderError::NativeRuntime(
+                "ONNX execution cancelled".into(),
+            ));
+        }
+        let entry = {
+            let this = self.clone();
+            let model = physical_model.to_owned();
+            tokio::task::spawn_blocking(move || this.load_sync(&model))
+                .await
+                .map_err(|error| ProviderError::NativeRuntime(error.to_string()))??
+        };
+        if entry
+            .build
+            .onnx
+            .as_ref()
+            .is_none_or(|onnx| onnx.adapter != OnnxAdapterKind::GroundingDinoSemanticGrounding)
+        {
+            return Err(ProviderError::Protocol(
+                "selected ONNX build is not a semantic grounding adapter".into(),
+            ));
+        }
+        let run_options = Arc::new(
+            RunOptions::new().map_err(|error| ProviderError::NativeRuntime(error.to_string()))?,
+        );
+        let options_for_run = Arc::clone(&run_options);
+        let entry_for_run = Arc::clone(&entry);
+        let mut task = tokio::task::spawn_blocking(move || {
+            grounding_dino::run(&entry_for_run, request, options_for_run.as_ref())
+        });
+        tokio::select! {
+            result = &mut task => result
+                .map_err(|error| ProviderError::NativeRuntime(error.to_string()))?,
+            _ = cancellation.cancelled() => {
+                let _ = run_options.terminate();
+                let _ = task.await;
+                Err(ProviderError::NativeRuntime("ONNX execution cancelled".into()))
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl ImageCompletionExecutor for OnnxProviderRuntime {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    async fn complete_image(
+        &self,
+        physical_model: &str,
+        request: ImageCompletionRequest,
+        cancellation: CancellationToken,
+    ) -> Result<ImageCompletionExecutionOutput, ProviderError> {
+        if cancellation.is_cancelled() {
+            return Err(ProviderError::NativeRuntime(
+                "ONNX execution cancelled".into(),
+            ));
+        }
+        let entry = {
+            let this = self.clone();
+            let model = physical_model.to_owned();
+            tokio::task::spawn_blocking(move || this.load_sync(&model))
+                .await
+                .map_err(|error| ProviderError::NativeRuntime(error.to_string()))??
+        };
+        if entry
+            .build
+            .onnx
+            .as_ref()
+            .is_none_or(|onnx| onnx.adapter != OnnxAdapterKind::LamaImageCompletion)
+        {
+            return Err(ProviderError::Protocol(
+                "selected ONNX build is not an image completion adapter".into(),
+            ));
+        }
+        let run_options = Arc::new(
+            RunOptions::new().map_err(|error| ProviderError::NativeRuntime(error.to_string()))?,
+        );
+        let options_for_run = Arc::clone(&run_options);
+        let entry_for_run = Arc::clone(&entry);
+        let mut task = tokio::task::spawn_blocking(move || {
+            lama::run(&entry_for_run, request, options_for_run.as_ref())
         });
         tokio::select! {
             result = &mut task => result

@@ -10,12 +10,113 @@ use axum::{
 };
 use infer_core::{
     BoundingBox, FaceDetectionRequest, FaceEmbeddingRequest, FaceParsingRequest,
-    FivePointLandmarks, ImageEmbeddingRequest, MAX_VISION_IMAGE_BYTES, NormalizedBoundingBox,
-    SegmentationPromptPoint, SubjectSegmentationRequest, TextEmbeddingRequest, VisionImage,
+    FivePointLandmarks, ImageCompletionRequest, ImageEmbeddingRequest, MAX_VISION_IMAGE_BYTES,
+    NormalizedBoundingBox, SegmentationPromptPoint, SemanticGroundingRequest,
+    SubjectSegmentationRequest, TextEmbeddingRequest, VisionImage,
 };
 use tokio_util::sync::CancellationToken;
 
 use crate::{ApiError, ApiState, authenticate, response, strict_json};
+
+pub(super) async fn create_semantic_grounding(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    multipart: Multipart,
+) -> Result<Response<axum::body::Body>, ApiError> {
+    let app_id = authenticate(&state, &headers)?;
+    let mut form = VisionMultipart::parse(
+        multipart,
+        &[
+            "model",
+            "source_revision",
+            "image_orientation",
+            "query",
+            "query_revision",
+            "maximum_regions",
+            "score_threshold",
+        ],
+    )
+    .await?;
+    let maximum_regions = form
+        .required_text("maximum_regions")?
+        .parse::<u8>()
+        .map_err(|_| ApiError::bad_request("maximum_regions must be an unsigned integer"))?;
+    let score_threshold = form
+        .required_text("score_threshold")?
+        .parse::<f32>()
+        .map_err(|_| ApiError::bad_request("score_threshold must be a number"))?;
+    let request = SemanticGroundingRequest {
+        model: form.required_text("model")?,
+        image: form
+            .image
+            .take()
+            .ok_or_else(|| ApiError::bad_request("missing image file"))?,
+        source_revision: form.required_text("source_revision")?,
+        image_orientation: form.required_text("image_orientation")?,
+        query: form.required_text("query")?,
+        query_revision: form.required_text("query_revision")?,
+        maximum_regions,
+        score_threshold,
+        metadata: fail_closed_metadata(form.metadata, "semantic grounding")?,
+    };
+    let cancellation = CancellationToken::new();
+    let request_guard = CancelOnDrop::new(cancellation.clone());
+    let result = state
+        .runtime
+        .execute_semantic_grounding_cancellable(&app_id, request, cancellation)
+        .await?;
+    request_guard.disarm();
+    response(
+        StatusCode::OK,
+        "application/json",
+        serde_json::to_vec(&result).expect("semantic grounding response is serializable"),
+    )
+}
+
+pub(super) async fn create_image_completion(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    multipart: Multipart,
+) -> Result<Response<axum::body::Body>, ApiError> {
+    let app_id = authenticate(&state, &headers)?;
+    let mut form = VisionMultipart::parse_with_mask(
+        multipart,
+        &[
+            "model",
+            "source_revision",
+            "mask_revision",
+            "image_orientation",
+        ],
+    )
+    .await?;
+    let request = ImageCompletionRequest {
+        model: form.required_text("model")?,
+        image: form
+            .image
+            .take()
+            .ok_or_else(|| ApiError::bad_request("missing image file"))?,
+        mask: form
+            .mask
+            .take()
+            .ok_or_else(|| ApiError::bad_request("missing mask file"))?,
+        source_revision: form.required_text("source_revision")?,
+        mask_revision: form.required_text("mask_revision")?,
+        image_orientation: form.required_text("image_orientation")?,
+        metadata: fail_closed_metadata(form.metadata, "image completion")?,
+    };
+    let cancellation = CancellationToken::new();
+    let request_guard = CancelOnDrop::new(cancellation.clone());
+    let result = state
+        .runtime
+        .execute_image_completion_cancellable(&app_id, request, cancellation)
+        .await?;
+    request_guard.disarm();
+    response(
+        StatusCode::OK,
+        "application/json",
+        serde_json::to_vec(&result).expect("image completion response is serializable"),
+    )
+}
 
 pub(super) async fn create_subject_segmentation(
     State(state): State<ApiState>,
@@ -320,12 +421,28 @@ pub(super) struct VisionMultipart {
     text: BTreeMap<String, String>,
     pub(super) metadata: BTreeMap<String, String>,
     pub(super) image: Option<VisionImage>,
+    pub(super) mask: Option<VisionImage>,
 }
 
 impl VisionMultipart {
     pub(super) async fn parse(
         mut multipart: Multipart,
         allowed_text_fields: &[&str],
+    ) -> Result<Self, ApiError> {
+        Self::parse_inner(&mut multipart, allowed_text_fields, false).await
+    }
+
+    pub(super) async fn parse_with_mask(
+        mut multipart: Multipart,
+        allowed_text_fields: &[&str],
+    ) -> Result<Self, ApiError> {
+        Self::parse_inner(&mut multipart, allowed_text_fields, true).await
+    }
+
+    async fn parse_inner(
+        multipart: &mut Multipart,
+        allowed_text_fields: &[&str],
+        allow_mask: bool,
     ) -> Result<Self, ApiError> {
         let mut form = Self::default();
         let mut seen = BTreeSet::new();
@@ -368,6 +485,32 @@ impl VisionMultipart {
                         });
                     }
                     form.image = Some(VisionImage {
+                        content_type,
+                        bytes: bytes.to_vec(),
+                    });
+                }
+                "mask" if allow_mask => {
+                    let content_type = field
+                        .content_type()
+                        .ok_or_else(|| ApiError::bad_request("mask content type is required"))?
+                        .to_owned();
+                    if content_type != "image/png" {
+                        return Err(ApiError::bad_request("mask content type must be image/png"));
+                    }
+                    let bytes = field
+                        .bytes()
+                        .await
+                        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+                    if bytes.is_empty() || bytes.len() > MAX_VISION_IMAGE_BYTES {
+                        return Err(ApiError {
+                            status: StatusCode::PAYLOAD_TOO_LARGE,
+                            code: "vision_payload_too_large",
+                            message: format!(
+                                "mask must contain between 1 byte and {MAX_VISION_IMAGE_BYTES} bytes"
+                            ),
+                        });
+                    }
+                    form.mask = Some(VisionImage {
                         content_type,
                         bytes: bytes.to_vec(),
                     });

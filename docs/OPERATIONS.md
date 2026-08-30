@@ -357,6 +357,18 @@ tensor、preprocess 或 ontology 变化都必须
 CelebAMask-HQ；其数据协议仅允许非商业研究并禁止再分发数据/derived data，因此 Build 记录为
 `restricted`。当前启用边界是用户自行下载、单机内部、非商业使用；infer-runtime 不分发权重。
 
+## Grounding DINO 与 LaMa Build
+
+语义定位使用 `grounding_dino_tiny_onnx_int8_v1`。Build 固定 800×800 RGB/ImageNet
+预处理、BERT uncased tokenizer、最多 256 tokens、900 个候选与归一化 box/NMS 后处理。
+模型 graph 和 tokenizer 必须分别通过 `infer import-onnx` 与
+`infer import-onnx-auxiliary` 导入；两项 SHA-256 或大小任一不符都会拒绝发布。Runtime 只返回
+有界候选框，最终蒙版仍由 Consumer 细化和组合。
+
+图像补全使用 `lama_inpainting_onnx_v1`。Build 固定 512×512 RGB 图和二值 mask 输入；adapter
+在返回 PNG 前逐像素合成，仅允许 mask 选中位置采用模型输出。请求图、mask 和完成栅格不进入
+Job metadata 或日志。该 route 不是文本引导生成，也不接受 Consumer 指定模型路径。
+
 ## CLAP 音频-文本 embedding Build（实验性，未激活）
 
 `infer.audio.embedding@20260815.2` 的首个 Build 使用本机下载、验证并发布到 ArtifactStore 的

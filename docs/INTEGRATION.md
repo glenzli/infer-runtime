@@ -423,11 +423,19 @@ retention 和删除语义。为对应 App 的 `allowed_intents` 显式加入 `vi
   原生 256×256 Gray8 sigmoid probability PNG；`input_coordinate_extent` 与
   `raster_extent.coordinate_mapping=linear_full_extent_pixel_centers_v1` 规定它如何映射回提交的
   display raster。Consumer 自己决定 feather、opacity 和持久化，Runtime 不保存像素或 mask。
+- `ground_semantics(...)` 对应 `vision.ground_semantics` 与
+  `infer.vision.semantic-grounding@20260830.1`。Consumer 提交 orientation-normalized display
+  raster、最多 256 bytes 的语义查询与查询 revision；Runtime 返回最多八个归一化候选框。
+  Runtime 不把候选框解释为最终蒙版，Consumer 可另用 SAM 细化、组合并持久化结果。
+- `complete_image(...)` 对应 `vision.complete_image` 与
+  `infer.vision.image-completion@20260830.1`。输入图和 PNG mask 必须同尺寸，并分别带稳定
+  source/mask revision；Runtime 在固定 512×512 工作栅格内生成并只合成选中像素，返回 PNG
+  与完整 provenance。Consumer 负责把结果绑定到自己的非破坏性节点和目标坐标。
 - `parse_face(...)` 对应 `vision.parse_face` 与 `infer.vision.face-parsing@20260813.1`。输入为
   orientation-normalized display raster 上的 YuNet face box；Runtime 固定扩张 1.8 倍上下文，
   返回全图尺寸的 19-class indexed PNG label map。结果标记为 `sensitive_biometric`。
 
-这些 route 只表示 YuNet/SFace、SAM 2.1 与 BiSeNet typed slice 可试用；它们不开放视觉
+这些 route 只表示 YuNet/SFace、SAM 2.1、Grounding DINO、LaMa 与 BiSeNet typed slice 可试用；它们不开放视觉
 background、cloud fallback、持久 artifact reference、任意模型路径或通用 tensor API。
 SigLIP 语义向量使用下面独立的数据合同。
 

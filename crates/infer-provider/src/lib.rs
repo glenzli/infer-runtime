@@ -45,10 +45,12 @@ pub use ollama_vision::{
 };
 pub use onnx::{
     DynFaceDetectionExecutor, DynFaceEmbeddingExecutor, DynFaceParsingExecutor,
-    DynImageEmbeddingExecutor, DynTextEmbeddingExecutor, FaceDetectionExecutionOutput,
-    FaceDetectionExecutor, FaceEmbeddingExecutionOutput, FaceEmbeddingExecutor,
-    FaceParsingExecutionOutput, FaceParsingExecutor, ImageEmbeddingExecutionOutput,
-    ImageEmbeddingExecutor, OnnxExecutionProvenance, OnnxProviderRuntime,
+    DynImageCompletionExecutor, DynImageEmbeddingExecutor, DynSemanticGroundingExecutor,
+    DynTextEmbeddingExecutor, FaceDetectionExecutionOutput, FaceDetectionExecutor,
+    FaceEmbeddingExecutionOutput, FaceEmbeddingExecutor, FaceParsingExecutionOutput,
+    FaceParsingExecutor, ImageCompletionExecutionOutput, ImageCompletionExecutor,
+    ImageEmbeddingExecutionOutput, ImageEmbeddingExecutor, OnnxExecutionProvenance,
+    OnnxProviderRuntime, SemanticGroundingExecutionOutput, SemanticGroundingExecutor,
     TextEmbeddingExecutionOutput, TextEmbeddingExecutor, VisionExecutionProvenance,
 };
 pub use probe::{

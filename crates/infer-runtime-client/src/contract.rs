@@ -64,6 +64,14 @@ pub(crate) fn expected_capability_schema(identity: &str) -> Option<(&'static str
             "/infer/v1/capability-schemas/infer.vision.subject-segmentation-soft-mask/20260814.1/openapi.json",
             "8ae50dcde6459072bc09a0f32b7a391df62cb0eae27d45879a3441aa203330d4",
         ),
+        "infer.vision.semantic-grounding@20260830.1" => (
+            "/infer/v1/capability-schemas/infer.vision.semantic-grounding/20260830.1/openapi.json",
+            "2f3ac7a05938c12fb5c21c87519f956a4af6df1b70b1c7a7ee7524923e142270",
+        ),
+        "infer.vision.image-completion@20260830.1" => (
+            "/infer/v1/capability-schemas/infer.vision.image-completion/20260830.1/openapi.json",
+            "4ce1eeefcc60a16201a2721be029b45c55ef4fd4abc44d363c033043a0798a2b",
+        ),
         "infer.vision.face-parsing@20260813.1" => (
             "/infer/v1/capability-schemas/infer.vision.face-parsing/20260813.1/openapi.json",
             "663e549c77528811a2c78406ef87b34b6d0add5c0702eec042a49bf7c8968b39",

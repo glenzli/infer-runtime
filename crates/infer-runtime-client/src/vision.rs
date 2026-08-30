@@ -17,6 +17,9 @@ pub const TEXT_EMBEDDING_CAPABILITIES: &[&str] = &["infer.vision.text-embedding@
 pub const IMAGE_DESCRIPTION_CAPABILITIES: &[&str] = &["infer.vision.image-description@20260811.1"];
 pub const CLASSIFICATION_REVIEW_CAPABILITIES: &[&str] =
     &["infer.vision.classification-review@20260811.1"];
+pub const SEMANTIC_GROUNDING_CAPABILITIES: &[&str] =
+    &["infer.vision.semantic-grounding@20260830.1"];
+pub const IMAGE_COMPLETION_CAPABILITIES: &[&str] = &["infer.vision.image-completion@20260830.1"];
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -327,6 +330,49 @@ pub struct ClassificationReviewResponse {
     pub provenance: ImageUnderstandingProvenance,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct SemanticGroundingRegion {
+    pub region_id: String,
+    pub score: f32,
+    pub bounding_box: NormalizedBoundingBox,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct SemanticGroundingResponse {
+    pub id: String,
+    pub object: String,
+    pub created_at: u64,
+    pub status: String,
+    pub source_revision: String,
+    pub query_revision: String,
+    pub image: ImageGeometry,
+    pub regions: Vec<SemanticGroundingRegion>,
+    pub provenance: VisionProvenance,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct EncodedCompletedRaster {
+    pub content_type: String,
+    pub encoding: String,
+    pub data_base64: String,
+    pub sha256: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+pub struct ImageCompletionResponse {
+    pub id: String,
+    pub object: String,
+    pub created_at: u64,
+    pub status: String,
+    pub source_revision: String,
+    pub mask_revision: String,
+    pub input_coordinate_extent: ImageGeometry,
+    pub raster: EncodedCompletedRaster,
+    pub provenance: VisionProvenance,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TextEmbeddingRequest {
@@ -610,12 +656,118 @@ impl Client {
         .await
     }
 
+    pub async fn ground_semantics(
+        &self,
+        image: &Path,
+        content_type: &'static str,
+        source_revision: &str,
+        query: &str,
+        query_revision: &str,
+        maximum_regions: u8,
+        score_threshold: f32,
+        metadata: &BTreeMap<String, String>,
+    ) -> Result<SemanticGroundingResponse> {
+        self.vision_multipart(
+            SEMANTIC_GROUNDING_CAPABILITIES,
+            "/infer/v1/vision/semantic-groundings",
+            image,
+            content_type,
+            vec![
+                ("model", "vision.ground_semantics".into()),
+                ("source_revision", source_revision.into()),
+                (
+                    "image_orientation",
+                    "display_pixels_orientation_normalized".into(),
+                ),
+                ("query", query.into()),
+                ("query_revision", query_revision.into()),
+                ("maximum_regions", maximum_regions.to_string()),
+                ("score_threshold", score_threshold.to_string()),
+            ],
+            metadata,
+        )
+        .await
+    }
+
+    pub async fn complete_image(
+        &self,
+        image: &Path,
+        content_type: &'static str,
+        mask: &Path,
+        source_revision: &str,
+        mask_revision: &str,
+        metadata: &BTreeMap<String, String>,
+    ) -> Result<ImageCompletionResponse> {
+        self.vision_multipart_with_mask(
+            IMAGE_COMPLETION_CAPABILITIES,
+            "/infer/v1/vision/image-completions",
+            image,
+            content_type,
+            mask,
+            vec![
+                ("model", "vision.complete_image".into()),
+                ("source_revision", source_revision.into()),
+                ("mask_revision", mask_revision.into()),
+                (
+                    "image_orientation",
+                    "display_pixels_orientation_normalized".into(),
+                ),
+            ],
+            metadata,
+        )
+        .await
+    }
+
     async fn vision_multipart<T: DeserializeOwned>(
         &self,
         supported_contracts: &'static [&'static str],
         route: &'static str,
         image: &Path,
         content_type: &'static str,
+        fields: Vec<(&'static str, String)>,
+        metadata: &BTreeMap<String, String>,
+    ) -> Result<T> {
+        self.vision_multipart_inner(
+            supported_contracts,
+            route,
+            image,
+            content_type,
+            None,
+            fields,
+            metadata,
+        )
+        .await
+    }
+
+    async fn vision_multipart_with_mask<T: DeserializeOwned>(
+        &self,
+        supported_contracts: &'static [&'static str],
+        route: &'static str,
+        image: &Path,
+        content_type: &'static str,
+        mask: &Path,
+        fields: Vec<(&'static str, String)>,
+        metadata: &BTreeMap<String, String>,
+    ) -> Result<T> {
+        self.vision_multipart_inner(
+            supported_contracts,
+            route,
+            image,
+            content_type,
+            Some(mask),
+            fields,
+            metadata,
+        )
+        .await
+    }
+
+    async fn vision_multipart_inner<T: DeserializeOwned>(
+        &self,
+        supported_contracts: &'static [&'static str],
+        route: &'static str,
+        image: &Path,
+        content_type: &'static str,
+        mask: Option<&Path>,
         fields: Vec<(&'static str, String)>,
         metadata: &BTreeMap<String, String>,
     ) -> Result<T> {
@@ -630,6 +782,22 @@ impl Client {
             .and_then(|name| name.to_str())
             .unwrap_or("image.bin")
             .to_owned();
+        let mask = if let Some(mask) = mask {
+            let bytes = crate::transport::read_bounded_file(
+                mask,
+                crate::transport::MAX_IMAGE_INPUT_BYTES,
+                "mask",
+            )
+            .await?;
+            let filename = mask
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("mask.png")
+                .to_owned();
+            Some((bytes, filename))
+        } else {
+            None
+        };
         let metadata = serde_json::to_string(metadata)
             .map_err(|error| Error::MalformedResponse(error.to_string()))?;
         let response = self
@@ -641,6 +809,13 @@ impl Client {
                 let mut form = Form::new()
                     .part("image", file)
                     .text("metadata", metadata.clone());
+                if let Some((mask_bytes, mask_filename)) = &mask {
+                    let mask = Part::bytes(mask_bytes.clone())
+                        .file_name(mask_filename.clone())
+                        .mime_str("image/png")
+                        .expect("static MIME type is valid");
+                    form = form.part("mask", mask);
+                }
                 for (name, value) in &fields {
                     form = form.text(*name, value.clone());
                 }

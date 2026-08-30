@@ -57,12 +57,14 @@ pub use retrieval::{
 pub use transport::{Client, ClientBuilder, CredentialSource};
 pub use vision::{
     BoundingBox, ClassificationCategory, ClassificationDisposition, ClassificationReviewResponse,
-    ClassificationSuggestion, EncodedLabelMap, EncodedSegmentationMask,
+    ClassificationSuggestion, EncodedCompletedRaster, EncodedLabelMap, EncodedSegmentationMask,
     EncodedSoftSegmentationMask, FaceDetection, FaceDetectionResponse, FaceEmbeddingEligibility,
     FaceEmbeddingResponse, FaceParsingOntology, FaceParsingRegion, FaceParsingResponse,
-    FivePointLandmarks, ImageDescriptionResponse, ImageDescriptionResult, ImageEmbeddingResponse,
-    ImageGeometry, ImageUnderstandingProvenance, NormalizedBoundingBox, Point,
+    FivePointLandmarks, IMAGE_COMPLETION_CAPABILITIES, ImageCompletionResponse,
+    ImageDescriptionResponse, ImageDescriptionResult, ImageEmbeddingResponse, ImageGeometry,
+    ImageUnderstandingProvenance, NormalizedBoundingBox, Point, SEMANTIC_GROUNDING_CAPABILITIES,
     SegmentationMaskRasterExtent, SegmentationPromptLabel, SegmentationPromptPoint,
-    SemanticEmbeddingVector, SubjectSegmentationResponse, SubjectSegmentationSoftMaskResponse,
-    TextEmbeddingRequest, TextEmbeddingResponse, VisionProvenance,
+    SemanticEmbeddingVector, SemanticGroundingRegion, SemanticGroundingResponse,
+    SubjectSegmentationResponse, SubjectSegmentationSoftMaskResponse, TextEmbeddingRequest,
+    TextEmbeddingResponse, VisionProvenance,
 };

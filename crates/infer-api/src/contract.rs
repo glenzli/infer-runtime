@@ -334,6 +334,12 @@ macro_rules! capability_schema_digest {
     ("infer.vision.subject-segmentation-soft-mask") => {
         "8ae50dcde6459072bc09a0f32b7a391df62cb0eae27d45879a3441aa203330d4"
     };
+    ("infer.vision.semantic-grounding") => {
+        "2f3ac7a05938c12fb5c21c87519f956a4af6df1b70b1c7a7ee7524923e142270"
+    };
+    ("infer.vision.image-completion") => {
+        "4ce1eeefcc60a16201a2721be029b45c55ef4fd4abc44d363c033043a0798a2b"
+    };
     ("infer.vision.face-parsing") => {
         "663e549c77528811a2c78406ef87b34b6d0add5c0702eec042a49bf7c8968b39"
     };
@@ -468,6 +474,26 @@ pub const CAPABILITIES: &[CapabilityEntry] = &[
         ),]
     ),
     capability!(
+        "infer.vision.semantic-grounding",
+        "20260830.1",
+        "experimental",
+        [route!(
+            "POST",
+            "/infer/v1/vision/semantic-groundings",
+            &["unary"]
+        ),]
+    ),
+    capability!(
+        "infer.vision.image-completion",
+        "20260830.1",
+        "experimental",
+        [route!(
+            "POST",
+            "/infer/v1/vision/image-completions",
+            &["unary"]
+        ),]
+    ),
+    capability!(
         "infer.vision.face-parsing",
         "20260813.1",
         "experimental",
@@ -571,6 +597,10 @@ pub fn required_capability_id(path: &str) -> Option<&'static str> {
         Some("infer.vision.subject-segmentation")
     } else if path == "/infer/v1/vision/subject-segmentations/soft-mask" {
         Some("infer.vision.subject-segmentation-soft-mask")
+    } else if path == "/infer/v1/vision/semantic-groundings" {
+        Some("infer.vision.semantic-grounding")
+    } else if path == "/infer/v1/vision/image-completions" {
+        Some("infer.vision.image-completion")
     } else if path == "/infer/v1/vision/face-parsings" {
         Some("infer.vision.face-parsing")
     } else if path == "/infer/v1/vision/image-embeddings" {

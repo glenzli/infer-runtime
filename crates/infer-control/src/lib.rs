@@ -43,10 +43,11 @@ use infer_core::{
 use infer_payload::PayloadError;
 use infer_provider::{
     DynAudioDuplexExecutor, DynAudioExecutor, DynAudioStreamExecutor, DynFaceDetectionExecutor,
-    DynFaceEmbeddingExecutor, DynFaceParsingExecutor, DynImageEmbeddingExecutor,
-    DynImageUnderstandingExecutor, DynOcrExecutor, DynProvider, DynRetrievalExecutor,
-    DynSubjectSegmentationExecutor, DynTextEmbeddingExecutor, ProviderError, ProviderModelCatalog,
-    probe_responses_provider, probe_responses_provider_with_effort,
+    DynFaceEmbeddingExecutor, DynFaceParsingExecutor, DynImageCompletionExecutor,
+    DynImageEmbeddingExecutor, DynImageUnderstandingExecutor, DynOcrExecutor, DynProvider,
+    DynRetrievalExecutor, DynSemanticGroundingExecutor, DynSubjectSegmentationExecutor,
+    DynTextEmbeddingExecutor, ProviderError, ProviderModelCatalog, probe_responses_provider,
+    probe_responses_provider_with_effort,
 };
 use infer_resource::{ModelReservation, ResourceError, ResourceManager};
 use infer_store::{
@@ -393,6 +394,8 @@ pub struct Runtime {
     face_embedding_executors: BTreeMap<String, DynFaceEmbeddingExecutor>,
     face_parsing_executors: BTreeMap<String, DynFaceParsingExecutor>,
     subject_segmentation_executors: BTreeMap<String, DynSubjectSegmentationExecutor>,
+    semantic_grounding_executors: BTreeMap<String, DynSemanticGroundingExecutor>,
+    image_completion_executors: BTreeMap<String, DynImageCompletionExecutor>,
     image_embedding_executors: BTreeMap<String, DynImageEmbeddingExecutor>,
     text_embedding_executors: BTreeMap<String, DynTextEmbeddingExecutor>,
     image_understanding_executors: BTreeMap<String, DynImageUnderstandingExecutor>,
@@ -507,6 +510,8 @@ impl Runtime {
             face_embedding_executors: assembly.face_embedding_executors,
             face_parsing_executors: assembly.face_parsing_executors,
             subject_segmentation_executors: assembly.subject_segmentation_executors,
+            semantic_grounding_executors: assembly.semantic_grounding_executors,
+            image_completion_executors: assembly.image_completion_executors,
             image_embedding_executors: assembly.image_embedding_executors,
             text_embedding_executors: assembly.text_embedding_executors,
             image_understanding_executors: assembly.image_understanding_executors,
@@ -601,6 +606,8 @@ impl Runtime {
             face_embedding_executors: BTreeMap::new(),
             face_parsing_executors: BTreeMap::new(),
             subject_segmentation_executors: BTreeMap::new(),
+            semantic_grounding_executors: BTreeMap::new(),
+            image_completion_executors: BTreeMap::new(),
             image_embedding_executors: BTreeMap::new(),
             text_embedding_executors: BTreeMap::new(),
             image_understanding_executors: BTreeMap::new(),

@@ -1009,7 +1009,9 @@ string_enum!(OnnxAdapterKind {
     SfaceEmbedding => "sface_embedding",
     BisenetFaceParsing => "bisenet_face_parsing",
     SiglipImageEmbedding => "siglip_image_embedding",
-    SiglipTextEmbedding => "siglip_text_embedding"
+    SiglipTextEmbedding => "siglip_text_embedding",
+    GroundingDinoSemanticGrounding => "grounding_dino_semantic_grounding",
+    LamaImageCompletion => "lama_image_completion"
 });
 string_enum!(OnnxExecutionProvider { Coreml => "coreml", Cpu => "cpu" });
 string_enum!(CoremlSamComputeUnits {
@@ -1698,6 +1700,8 @@ impl RuntimeConfig {
                         | "vision.face_detection"
                         | "vision.face_embedding"
                         | "vision.subject_segmentation"
+                        | "vision.semantic_grounding"
+                        | "vision.image_completion"
                         | "vision.face_parsing"
                         | "vision.image_embedding"
                         | "vision.text_embedding"
@@ -1852,24 +1856,39 @@ impl RuntimeConfig {
                     OnnxAdapterKind::YunetFaceDetection
                     | OnnxAdapterKind::SfaceEmbedding
                     | OnnxAdapterKind::BisenetFaceParsing
-                    | OnnxAdapterKind::SiglipImageEmbedding => {
+                    | OnnxAdapterKind::SiglipImageEmbedding
+                    | OnnxAdapterKind::LamaImageCompletion => {
                         onnx.preprocessing
                             .as_ref()
                             .is_some_and(|preprocess| !preprocess.identity.trim().is_empty())
                             && onnx.text_preprocessing.is_none()
                     }
-                    OnnxAdapterKind::SiglipTextEmbedding => {
+                    OnnxAdapterKind::SiglipTextEmbedding
+                    | OnnxAdapterKind::GroundingDinoSemanticGrounding => {
                         let Some(text) = onnx.text_preprocessing.as_ref() else {
                             return Err(configuration(format!(
                                 "ONNX text model build {id} needs a tokenizer preprocessing contract"
                             )));
                         };
-                        onnx.preprocessing.is_none()
+                        (onnx.adapter == OnnxAdapterKind::GroundingDinoSemanticGrounding
+                            || onnx.preprocessing.is_none())
+                            && (onnx.adapter != OnnxAdapterKind::GroundingDinoSemanticGrounding
+                                || onnx.preprocessing.as_ref().is_some_and(|preprocess| {
+                                    !preprocess.identity.trim().is_empty()
+                                }))
                             && !text.identity.trim().is_empty()
                             && !text.tokenizer_artifact.trim().is_empty()
                             && text.max_length > 0
-                            && text.padding == "max_length"
                             && text.truncation
+                            && match onnx.adapter {
+                                OnnxAdapterKind::SiglipTextEmbedding => {
+                                    text.padding == "max_length"
+                                }
+                                OnnxAdapterKind::GroundingDinoSemanticGrounding => {
+                                    text.padding == "longest"
+                                }
+                                _ => unreachable!("validated text ONNX adapter"),
+                            }
                             && onnx
                                 .auxiliary_artifacts
                                 .contains_key(&text.tokenizer_artifact)
@@ -1896,6 +1915,8 @@ impl RuntimeConfig {
                     OnnxAdapterKind::YunetFaceDetection | OnnxAdapterKind::BisenetFaceParsing => {
                         onnx.embedding_space.is_none()
                     }
+                    OnnxAdapterKind::GroundingDinoSemanticGrounding
+                    | OnnxAdapterKind::LamaImageCompletion => onnx.embedding_space.is_none(),
                 };
                 let valid_auxiliary_artifacts =
                     onnx.auxiliary_artifacts.iter().all(|(name, artifact)| {
@@ -2725,10 +2746,15 @@ mod tests {
         assert_eq!(
             app.allowed_intents,
             Some(
-                ["vision.segment_subject", "vision.parse_face"]
-                    .into_iter()
-                    .map(str::to_owned)
-                    .collect()
+                [
+                    "vision.segment_subject",
+                    "vision.ground_semantics",
+                    "vision.complete_image",
+                    "vision.parse_face",
+                ]
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
             )
         );
         assert_eq!(

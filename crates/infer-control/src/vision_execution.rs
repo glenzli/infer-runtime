@@ -9,17 +9,19 @@ use std::{collections::BTreeSet, future::Future, sync::Arc, time::Duration};
 use infer_core::{
     AttemptOutcome, AttemptTrigger, ExecutionMode, ExecutionRequirements, FaceDetectionRequest,
     FaceDetectionResponse, FaceEmbeddingRequest, FaceEmbeddingResponse, FaceParsingRequest,
-    FaceParsingResponse, ImageEmbeddingRequest, ImageEmbeddingResponse, JobState, Modality,
-    SENSITIVE_BIOMETRIC_CLASSIFICATION, SUBJECT_SEGMENTATION_SOFT_MASK_COORDINATE_MAPPING,
-    SUBJECT_SEGMENTATION_SOFT_MASK_HEIGHT, SUBJECT_SEGMENTATION_SOFT_MASK_WIDTH,
-    SegmentationMaskRasterExtent, SubjectSegmentationRequest, SubjectSegmentationResponse,
+    FaceParsingResponse, ImageCompletionRequest, ImageCompletionResponse, ImageEmbeddingRequest,
+    ImageEmbeddingResponse, JobState, Modality, SENSITIVE_BIOMETRIC_CLASSIFICATION,
+    SUBJECT_SEGMENTATION_SOFT_MASK_COORDINATE_MAPPING, SUBJECT_SEGMENTATION_SOFT_MASK_HEIGHT,
+    SUBJECT_SEGMENTATION_SOFT_MASK_WIDTH, SegmentationMaskRasterExtent, SemanticGroundingRequest,
+    SemanticGroundingResponse, SubjectSegmentationRequest, SubjectSegmentationResponse,
     SubjectSegmentationSoftMaskResponse, TextEmbeddingRequest, TextEmbeddingResponse,
     VisionProvenance, VisionTokenizerProvenance,
 };
 use infer_provider::{
     DynFaceDetectionExecutor, DynFaceEmbeddingExecutor, DynFaceParsingExecutor,
-    DynImageEmbeddingExecutor, DynSubjectSegmentationExecutor, DynTextEmbeddingExecutor,
-    ProviderError, VisionExecutionProvenance,
+    DynImageCompletionExecutor, DynImageEmbeddingExecutor, DynSemanticGroundingExecutor,
+    DynSubjectSegmentationExecutor, DynTextEmbeddingExecutor, ProviderError,
+    VisionExecutionProvenance,
 };
 use tokio::time::{sleep_until, timeout};
 use tokio_util::sync::CancellationToken;
@@ -27,6 +29,134 @@ use tokio_util::sync::CancellationToken;
 use super::{JobPreparation, PreparedRun, Runtime, RuntimeError, attempt_policy, unix_time_ms};
 
 impl Runtime {
+    pub async fn execute_semantic_grounding_cancellable(
+        self: &Arc<Self>,
+        app_id: &str,
+        request: SemanticGroundingRequest,
+        request_cancellation: CancellationToken,
+    ) -> Result<SemanticGroundingResponse, RuntimeError> {
+        request.validate()?;
+        let logical_model = request.model.clone();
+        let source_revision = request.source_revision.clone();
+        let query_revision = request.query_revision.clone();
+        let constraints = request.constraints()?;
+        let prepared = self
+            .prepare_vision_job(
+                app_id,
+                &logical_model,
+                constraints,
+                "vision.semantic_grounding",
+            )
+            .await?;
+        let _resource_reservation = self.reserve_resource(&prepared).await?;
+        let _permit = self.acquire(&prepared).await?;
+        let attempt_number = self.start_vision_attempt(&prepared).await?;
+        let executor = self.semantic_grounding_executor(&prepared.provider_id)?;
+        let prepared_cancellation = prepared.cancellation.clone();
+        let cancellation_forwarder = tokio::spawn(async move {
+            request_cancellation.cancelled().await;
+            prepared_cancellation.cancel();
+        });
+        let result = self
+            .await_vision(
+                &prepared,
+                executor.ground_semantics(
+                    &prepared.physical_model,
+                    request,
+                    prepared.cancellation.clone(),
+                ),
+            )
+            .await;
+        cancellation_forwarder.abort();
+        let output = match result {
+            Ok(output) => {
+                self.complete_vision_success(&prepared, attempt_number)
+                    .await?;
+                output
+            }
+            Err(error) => {
+                return Err(self
+                    .complete_vision_error(&prepared, attempt_number, error)
+                    .await?);
+            }
+        };
+        Ok(SemanticGroundingResponse {
+            id: prepared.job_id.clone(),
+            object: "vision.semantic_grounding".into(),
+            created_at: (unix_time_ms() / 1_000).try_into().unwrap_or_default(),
+            status: "completed".into(),
+            source_revision,
+            query_revision,
+            image: output.image,
+            regions: output.regions,
+            provenance: vision_provenance(&prepared, output.provenance),
+        })
+    }
+
+    pub async fn execute_image_completion_cancellable(
+        self: &Arc<Self>,
+        app_id: &str,
+        request: ImageCompletionRequest,
+        request_cancellation: CancellationToken,
+    ) -> Result<ImageCompletionResponse, RuntimeError> {
+        request.validate()?;
+        let logical_model = request.model.clone();
+        let source_revision = request.source_revision.clone();
+        let mask_revision = request.mask_revision.clone();
+        let constraints = request.constraints()?;
+        let prepared = self
+            .prepare_vision_job(
+                app_id,
+                &logical_model,
+                constraints,
+                "vision.image_completion",
+            )
+            .await?;
+        let _resource_reservation = self.reserve_resource(&prepared).await?;
+        let _permit = self.acquire(&prepared).await?;
+        let attempt_number = self.start_vision_attempt(&prepared).await?;
+        let executor = self.image_completion_executor(&prepared.provider_id)?;
+        let prepared_cancellation = prepared.cancellation.clone();
+        let cancellation_forwarder = tokio::spawn(async move {
+            request_cancellation.cancelled().await;
+            prepared_cancellation.cancel();
+        });
+        let result = self
+            .await_vision(
+                &prepared,
+                executor.complete_image(
+                    &prepared.physical_model,
+                    request,
+                    prepared.cancellation.clone(),
+                ),
+            )
+            .await;
+        cancellation_forwarder.abort();
+        let output = match result {
+            Ok(output) => {
+                self.complete_vision_success(&prepared, attempt_number)
+                    .await?;
+                output
+            }
+            Err(error) => {
+                return Err(self
+                    .complete_vision_error(&prepared, attempt_number, error)
+                    .await?);
+            }
+        };
+        Ok(ImageCompletionResponse {
+            id: prepared.job_id.clone(),
+            object: "vision.image_completion".into(),
+            created_at: (unix_time_ms() / 1_000).try_into().unwrap_or_default(),
+            status: "completed".into(),
+            source_revision,
+            mask_revision,
+            input_coordinate_extent: output.input_coordinate_extent,
+            raster: output.raster,
+            provenance: vision_provenance(&prepared, output.provenance),
+        })
+    }
+
     pub async fn execute_subject_segmentation(
         self: &Arc<Self>,
         app_id: &str,
@@ -452,6 +582,8 @@ impl Runtime {
                         "vision.face_parsing" => "infer.vision.face-parsing@20260813.1",
                         "vision.image_embedding" => "infer.vision.image-embedding@20260811.1",
                         "vision.text_embedding" => "infer.vision.text-embedding@20260811.1",
+                        "vision.semantic_grounding" => "infer.vision.semantic-grounding@20260830.1",
+                        "vision.image_completion" => "infer.vision.image-completion@20260830.1",
                         _ => unreachable!("validated vision data plane"),
                     },
                 ),
@@ -630,6 +762,26 @@ impl Runtime {
         id: &str,
     ) -> Result<DynImageEmbeddingExecutor, RuntimeError> {
         self.image_embedding_executors
+            .get(id)
+            .cloned()
+            .ok_or_else(|| RuntimeError::ProviderUnavailable(id.to_owned()))
+    }
+
+    fn semantic_grounding_executor(
+        &self,
+        id: &str,
+    ) -> Result<DynSemanticGroundingExecutor, RuntimeError> {
+        self.semantic_grounding_executors
+            .get(id)
+            .cloned()
+            .ok_or_else(|| RuntimeError::ProviderUnavailable(id.to_owned()))
+    }
+
+    fn image_completion_executor(
+        &self,
+        id: &str,
+    ) -> Result<DynImageCompletionExecutor, RuntimeError> {
+        self.image_completion_executors
             .get(id)
             .cloned()
             .ok_or_else(|| RuntimeError::ProviderUnavailable(id.to_owned()))

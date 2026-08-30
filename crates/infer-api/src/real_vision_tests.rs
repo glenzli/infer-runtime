@@ -2,6 +2,7 @@
 //! suite because they require this host's pinned ONNX Runtime and artifacts.
 
 use std::{
+    fs,
     io::Cursor,
     path::Path,
     time::{Duration, Instant},
@@ -12,7 +13,7 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use image::{ImageFormat, RgbImage};
+use image::{GrayImage, ImageFormat, Luma, RgbImage};
 use infer_auth::AppCredentials;
 use infer_control::Runtime;
 use infer_core::{OnnxExecutionProvider, RuntimeConfig};
@@ -163,6 +164,134 @@ async fn face_embedding_traverses_auth_acl_job_attempt_and_cpu_provider() {
     let denied = denied.into_body().collect().await.unwrap().to_bytes();
     let denied: serde_json::Value = serde_json::from_slice(&denied).unwrap();
     assert_eq!(denied["error"]["code"], "intent_forbidden");
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned Grounding DINO ONNX Build and tokenizer"]
+async fn semantic_grounding_traverses_auth_http_job_and_cpu_provider() {
+    let (service, token, _temporary) = real_service(&["vision.ground_semantics"]).await;
+    let external_fixture = std::env::var_os("INFER_REAL_VISION_IMAGE");
+    let (encoded, width, height) = if let Some(path) = external_fixture.as_ref() {
+        let encoded = fs::read(path).unwrap();
+        let image = image::load_from_memory(&encoded).unwrap();
+        (encoded, image.width(), image.height())
+    } else {
+        let image = RgbImage::from_fn(640, 480, |x, y| {
+            image::Rgb([
+                (x % 256) as u8,
+                (y % 256) as u8,
+                ((x.saturating_mul(3) + y.saturating_mul(5)) % 256) as u8,
+            ])
+        });
+        let mut encoded = Cursor::new(Vec::new());
+        image.write_to(&mut encoded, ImageFormat::Png).unwrap();
+        (encoded.into_inner(), 640, 480)
+    };
+    let response = service
+        .oneshot(
+            Request::post("/infer/v1/vision/semantic-groundings")
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .header(
+                    crate::contract::CAPABILITY_CONTRACT_HEADER,
+                    "infer.vision.semantic-grounding@20260830.1",
+                )
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(
+                    header::CONTENT_TYPE,
+                    "multipart/form-data; boundary=infer-boundary",
+                )
+                .body(Body::from(semantic_grounding_multipart(encoded)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["object"], "vision.semantic_grounding");
+    assert_eq!(body["source_revision"], "photo:test:grounding:1");
+    assert_eq!(body["query_revision"], "semantic-query:test:train:v1");
+    assert_eq!(body["image"]["width"], width);
+    assert_eq!(body["image"]["height"], height);
+    assert!(body["regions"].as_array().unwrap().len() <= 4);
+    if external_fixture.is_some() {
+        assert!(!body["regions"].as_array().unwrap().is_empty());
+    }
+    for region in body["regions"].as_array().unwrap() {
+        let bounds = &region["bounding_box"];
+        assert!(bounds["x"].as_f64().unwrap() >= 0.0);
+        assert!(bounds["y"].as_f64().unwrap() >= 0.0);
+        assert!(bounds["width"].as_f64().unwrap() > 0.0);
+        assert!(bounds["height"].as_f64().unwrap() > 0.0);
+        assert!(bounds["x"].as_f64().unwrap() + bounds["width"].as_f64().unwrap() <= 1.0);
+        assert!(bounds["y"].as_f64().unwrap() + bounds["height"].as_f64().unwrap() <= 1.0);
+    }
+    assert_eq!(body["provenance"]["actual_execution_provider"], "cpu");
+    assert_eq!(
+        body["provenance"]["model_build"],
+        "grounding_dino_tiny_onnx_int8_v1"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the pinned LaMa ONNX Build"]
+async fn image_completion_preserves_unselected_pixels_through_http() {
+    let (service, token, _temporary) = real_service(&["vision.complete_image"]).await;
+    let image = RgbImage::from_fn(512, 512, |x, y| {
+        image::Rgb([
+            (x % 256) as u8,
+            (y % 256) as u8,
+            ((x.saturating_mul(3) + y.saturating_mul(5)) % 256) as u8,
+        ])
+    });
+    let mask = GrayImage::from_fn(512, 512, |x, y| {
+        Luma([u8::from((192..320).contains(&x) && (192..320).contains(&y)) * 255])
+    });
+    let mut encoded_image = Cursor::new(Vec::new());
+    image
+        .write_to(&mut encoded_image, ImageFormat::Png)
+        .unwrap();
+    let mut encoded_mask = Cursor::new(Vec::new());
+    mask.write_to(&mut encoded_mask, ImageFormat::Png).unwrap();
+    let response = service
+        .oneshot(
+            Request::post("/infer/v1/vision/image-completions")
+                .header(
+                    crate::contract::CONSUMER_CORE_HEADER,
+                    crate::contract::CORE_CONTRACT,
+                )
+                .header(
+                    crate::contract::CAPABILITY_CONTRACT_HEADER,
+                    "infer.vision.image-completion@20260830.1",
+                )
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(
+                    header::CONTENT_TYPE,
+                    "multipart/form-data; boundary=infer-boundary",
+                )
+                .body(Body::from(image_completion_multipart(
+                    encoded_image.into_inner(),
+                    encoded_mask.into_inner(),
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["object"], "vision.image_completion");
+    assert_eq!(body["source_revision"], "photo:test:completion:1");
+    assert_eq!(body["mask_revision"], "mask:test:completion:1");
+    assert_eq!(body["raster"]["width"], 512);
+    assert_eq!(body["raster"]["height"], 512);
+    assert!(!body["raster"]["data_base64"].as_str().unwrap().is_empty());
+    assert_eq!(body["raster"]["sha256"].as_str().unwrap().len(), 64);
+    assert_eq!(body["provenance"]["actual_execution_provider"], "cpu");
+    assert_eq!(body["provenance"]["model_build"], "lama_inpainting_onnx_v1");
 }
 
 #[tokio::test]
@@ -643,6 +772,18 @@ fn restrict_new_segmentation_slice(config: &mut RuntimeConfig, allowed_intents: 
             "bisenet_resnet18_face_parsing_onnx_cpu_v1",
             "onnx_bisenet_resnet18_face_parsing",
         )),
+        ["vision.ground_semantics"] => Some((
+            "onnx-local",
+            "grounding_dino_tiny",
+            "grounding_dino_tiny_onnx_int8_v1",
+            "onnx_grounding_dino_tiny",
+        )),
+        ["vision.complete_image"] => Some((
+            "onnx-local",
+            "lama_inpainting",
+            "lama_inpainting_onnx_v1",
+            "onnx_lama_inpainting",
+        )),
         _ => None,
     };
     let Some((provider, profile, build, deployment)) = identities else {
@@ -669,6 +810,63 @@ fn image_embedding_multipart(image: Vec<u8>) -> Vec<u8> {
         b"--infer-boundary\r\nContent-Disposition: form-data; name=\"image\"; filename=\"semantic.png\"\r\nContent-Type: image/png\r\n\r\n",
     );
     body.extend_from_slice(&image);
+    body.extend_from_slice(b"\r\n--infer-boundary--\r\n");
+    body
+}
+
+fn semantic_grounding_multipart(image: Vec<u8>) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nvision.ground_semantics\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"source_revision\"\r\n\r\nphoto:test:grounding:1\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"image_orientation\"\r\n\r\ndisplay_pixels_orientation_normalized\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"query\"\r\n\r\ntrain\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"query_revision\"\r\n\r\nsemantic-query:test:train:v1\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"maximum_regions\"\r\n\r\n4\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"score_threshold\"\r\n\r\n0.25\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"image\"; filename=\"semantic.png\"\r\nContent-Type: image/png\r\n\r\n",
+    );
+    body.extend_from_slice(&image);
+    body.extend_from_slice(b"\r\n--infer-boundary--\r\n");
+    body
+}
+
+fn image_completion_multipart(image: Vec<u8>, mask: Vec<u8>) -> Vec<u8> {
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nvision.complete_image\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"source_revision\"\r\n\r\nphoto:test:completion:1\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"mask_revision\"\r\n\r\nmask:test:completion:1\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"image_orientation\"\r\n\r\ndisplay_pixels_orientation_normalized\r\n",
+    );
+    body.extend_from_slice(
+        b"--infer-boundary\r\nContent-Disposition: form-data; name=\"image\"; filename=\"completion.png\"\r\nContent-Type: image/png\r\n\r\n",
+    );
+    body.extend_from_slice(&image);
+    body.extend_from_slice(
+        b"\r\n--infer-boundary\r\nContent-Disposition: form-data; name=\"mask\"; filename=\"completion-mask.png\"\r\nContent-Type: image/png\r\n\r\n",
+    );
+    body.extend_from_slice(&mask);
     body.extend_from_slice(b"\r\n--infer-boundary--\r\n");
     body
 }

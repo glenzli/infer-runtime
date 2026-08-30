@@ -509,6 +509,32 @@
         }
       }
     },
+    "/infer/v1/vision/semantic-groundings": {
+      "post": {
+        "operationId": "createSemanticGrounding",
+        "x-infer-stability": "experimental",
+        "description": "Local-only open-vocabulary localization. Returns a bounded set of normalized candidate boxes for Consumer-owned mask refinement and composition.",
+        "parameters": [{ "$ref": "#/components/parameters/SemanticGroundingCapability" }],
+        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/SemanticGroundingForm" } } } },
+        "responses": {
+          "200": { "description": "Bounded normalized semantic region candidates", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SemanticGroundingResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/infer/v1/vision/image-completions": {
+      "post": {
+        "operationId": "createImageCompletion",
+        "x-infer-stability": "experimental",
+        "description": "Local-only masked image completion. Runtime preserves submitted image pixels outside the submitted mask and returns one bounded 512x512 working raster.",
+        "parameters": [{ "$ref": "#/components/parameters/ImageCompletionCapability" }],
+        "requestBody": { "required": true, "content": { "multipart/form-data": { "schema": { "$ref": "#/components/schemas/ImageCompletionForm" } } } },
+        "responses": {
+          "200": { "description": "Mask-bounded completed PNG raster", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ImageCompletionResponse" } } } },
+          "default": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
     "/infer/v1/vision/face-parsings": {
       "post": {
         "operationId": "createFaceParsing",
@@ -789,6 +815,14 @@
       "SubjectSegmentationSoftMaskCapability": {
         "name": "Infer-Capability-Contract", "in": "header", "required": true,
         "schema": { "const": "infer.vision.subject-segmentation-soft-mask@20260814.1" }
+      },
+      "SemanticGroundingCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.vision.semantic-grounding@20260830.1" }
+      },
+      "ImageCompletionCapability": {
+        "name": "Infer-Capability-Contract", "in": "header", "required": true,
+        "schema": { "const": "infer.vision.image-completion@20260830.1" }
       },
       "FaceParsingCapability": {
         "name": "Infer-Capability-Contract", "in": "header", "required": true,
@@ -1507,6 +1541,38 @@
           }
         ]
       },
+      "SemanticGroundingForm": {
+        "allOf": [
+          { "$ref": "#/components/schemas/VisionImageFormBase" },
+          {
+            "type": "object",
+            "required": ["image_orientation", "query", "query_revision", "maximum_regions", "score_threshold"],
+            "properties": {
+              "model": { "const": "vision.ground_semantics" },
+              "image_orientation": { "const": "display_pixels_orientation_normalized" },
+              "query": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "query_revision": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "maximum_regions": { "type": "integer", "minimum": 1, "maximum": 8 },
+              "score_threshold": { "type": "number", "minimum": 0.01, "maximum": 0.99 }
+            }
+          }
+        ]
+      },
+      "ImageCompletionForm": {
+        "allOf": [
+          { "$ref": "#/components/schemas/VisionImageFormBase" },
+          {
+            "type": "object",
+            "required": ["mask", "mask_revision", "image_orientation"],
+            "properties": {
+              "model": { "const": "vision.complete_image" },
+              "mask": { "type": "string", "format": "binary", "description": "PNG mask matching the submitted image extent; 1 byte through 16 MiB" },
+              "mask_revision": { "type": "string", "minLength": 1, "maxLength": 256 },
+              "image_orientation": { "const": "display_pixels_orientation_normalized" }
+            }
+          }
+        ]
+      },
       "FaceParsingForm": {
         "allOf": [
           { "$ref": "#/components/schemas/VisionImageFormBase" },
@@ -1651,6 +1717,34 @@
           "raster_extent": { "$ref": "#/components/schemas/SegmentationMaskRasterExtent" }, "mask": { "$ref": "#/components/schemas/EncodedSoftSegmentationMask" },
           "score": { "type": "number", "minimum": 0, "maximum": 1 }, "prompt_count": { "type": "integer", "minimum": 1, "maximum": 16 },
           "provenance": { "$ref": "#/components/schemas/VisionProvenance" }
+        }
+      },
+      "SemanticGroundingResponse": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "object", "created_at", "status", "source_revision", "query_revision", "image", "regions", "provenance"],
+        "properties": {
+          "id": { "type": "string" }, "object": { "const": "vision.semantic_grounding" }, "created_at": { "type": "integer", "minimum": 0 }, "status": { "const": "completed" },
+          "source_revision": { "type": "string" }, "query_revision": { "type": "string" }, "image": { "$ref": "#/components/schemas/ImageGeometry" },
+          "regions": { "type": "array", "maxItems": 8, "items": { "type": "object", "additionalProperties": false, "required": ["region_id", "score", "bounding_box"], "properties": { "region_id": { "type": "string" }, "score": { "type": "number", "minimum": 0, "maximum": 1 }, "bounding_box": { "type": "object", "additionalProperties": false, "required": ["x", "y", "width", "height"], "properties": { "x": { "type": "number", "minimum": 0, "maximum": 1 }, "y": { "type": "number", "minimum": 0, "maximum": 1 }, "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }, "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } } } } } },
+          "provenance": { "$ref": "#/components/schemas/VisionProvenance" }
+        }
+      },
+      "EncodedCompletedRaster": {
+        "type": "object", "additionalProperties": false,
+        "required": ["content_type", "encoding", "data_base64", "sha256", "width", "height"],
+        "properties": {
+          "content_type": { "const": "image/png" }, "encoding": { "const": "srgb_rgb8_png_mask_bounded_v1" },
+          "data_base64": { "type": "string", "contentEncoding": "base64", "maxLength": 22369624 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "width": { "const": 512 }, "height": { "const": 512 }
+        }
+      },
+      "ImageCompletionResponse": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "object", "created_at", "status", "source_revision", "mask_revision", "input_coordinate_extent", "raster", "provenance"],
+        "properties": {
+          "id": { "type": "string" }, "object": { "const": "vision.image_completion" }, "created_at": { "type": "integer", "minimum": 0 }, "status": { "const": "completed" },
+          "source_revision": { "type": "string" }, "mask_revision": { "type": "string" }, "input_coordinate_extent": { "$ref": "#/components/schemas/ImageGeometry" },
+          "raster": { "$ref": "#/components/schemas/EncodedCompletedRaster" }, "provenance": { "$ref": "#/components/schemas/VisionProvenance" }
         }
       },
       "EncodedFaceLabelMap": {

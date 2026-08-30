@@ -76,6 +76,14 @@ CAPABILITIES: dict[str, tuple[str, tuple[str, ...]]] = {
         "20260814.1",
         ("/infer/v1/vision/subject-segmentations/soft-mask",),
     ),
+    "infer.vision.semantic-grounding": (
+        "20260830.1",
+        ("/infer/v1/vision/semantic-groundings",),
+    ),
+    "infer.vision.image-completion": (
+        "20260830.1",
+        ("/infer/v1/vision/image-completions",),
+    ),
     "infer.vision.face-parsing": (
         "20260813.1",
         ("/infer/v1/vision/face-parsings",),
@@ -191,6 +199,8 @@ def write_json_atomic(destination: Path, document: dict[str, Any]) -> None:
     if CHECK_ONLY:
         if not destination.is_file() or destination.read_bytes() != encoded:
             raise SystemExit(f"generated contract is stale: {destination.relative_to(ROOT)}")
+        return
+    if destination.is_file() and destination.read_bytes() == encoded:
         return
     destination.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(

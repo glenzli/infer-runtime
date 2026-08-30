@@ -18,12 +18,16 @@ pub const VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS: &str =
 pub const MAX_VISION_TEXT_BYTES: usize = 4 * 1024;
 pub const MAX_SEGMENTATION_PROMPTS: usize = 16;
 pub const MAX_SEGMENTATION_MASK_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_SEMANTIC_QUERY_BYTES: usize = 256;
+pub const MAX_SEMANTIC_GROUNDING_REGIONS: u8 = 8;
+pub const MAX_IMAGE_COMPLETION_MASK_BYTES: usize = 16 * 1024 * 1024;
 /// SAM's selected low-resolution mask has this fixed raster extent.  Its
 /// pixels map linearly (by pixel centres) to the submitted display raster.
 pub const SUBJECT_SEGMENTATION_SOFT_MASK_WIDTH: u32 = 256;
 pub const SUBJECT_SEGMENTATION_SOFT_MASK_HEIGHT: u32 = 256;
 pub const SUBJECT_SEGMENTATION_SOFT_MASK_COORDINATE_MAPPING: &str =
     "linear_full_extent_pixel_centers_v1";
+pub const IMAGE_COMPLETION_EDGE: u32 = 512;
 pub const MAX_FACE_PARSING_PIXELS: u64 = 16_000_000;
 pub const SEGMENTATION_PROMPT_COORDINATE_SPACE: &str = "normalized_0_1";
 pub const FACE_PARSING_ONTOLOGY_ID: &str = "celebamask_hq_19";
@@ -39,6 +43,106 @@ pub struct SubjectSegmentationRequest {
     pub points: Vec<SegmentationPromptPoint>,
     pub box_prompt: Option<NormalizedBoundingBox>,
     pub metadata: BTreeMap<String, String>,
+}
+
+/// One local-only open-vocabulary localization request. The result is a
+/// bounded set of boxes; the Consumer retains semantic-mask composition and
+/// may refine those boxes through a separate segmentation capability.
+#[derive(Clone)]
+pub struct SemanticGroundingRequest {
+    pub model: String,
+    pub image: VisionImage,
+    pub source_revision: String,
+    pub image_orientation: String,
+    pub query: String,
+    pub query_revision: String,
+    pub maximum_regions: u8,
+    pub score_threshold: f32,
+    pub metadata: BTreeMap<String, String>,
+}
+
+impl SemanticGroundingRequest {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        validate_local_vision_request(
+            &self.model,
+            &self.image,
+            &self.source_revision,
+            &self.metadata,
+            "semantic grounding",
+        )?;
+        if self.image_orientation != VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS {
+            return Err(ContractError::InvalidVision(format!(
+                "semantic grounding requires image_orientation={VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS}"
+            )));
+        }
+        let query = self.query.trim();
+        if query.is_empty() || query.len() > MAX_SEMANTIC_QUERY_BYTES {
+            return Err(ContractError::InvalidVision(format!(
+                "semantic grounding query must contain between 1 and {MAX_SEMANTIC_QUERY_BYTES} UTF-8 bytes"
+            )));
+        }
+        validate_revision(&self.query_revision, "query_revision")?;
+        if !(1..=MAX_SEMANTIC_GROUNDING_REGIONS).contains(&self.maximum_regions) {
+            return Err(ContractError::InvalidVision(format!(
+                "semantic grounding maximum_regions must be between 1 and {MAX_SEMANTIC_GROUNDING_REGIONS}"
+            )));
+        }
+        if !self.score_threshold.is_finite() || !(0.01..=0.99).contains(&self.score_threshold) {
+            return Err(ContractError::InvalidVision(
+                "semantic grounding score_threshold must be finite and within 0.01..=0.99".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn constraints(&self) -> Result<RequestConstraints, ContractError> {
+        RequestConstraints::from_metadata(&self.metadata)
+    }
+}
+
+/// One local image-completion request. `mask` is an orientation-normalized
+/// Gray8/RGBA PNG whose non-zero alpha or luma samples identify pixels that
+/// may be synthesized. Runtime never changes pixels outside that selection.
+#[derive(Clone)]
+pub struct ImageCompletionRequest {
+    pub model: String,
+    pub image: VisionImage,
+    pub mask: VisionImage,
+    pub source_revision: String,
+    pub mask_revision: String,
+    pub image_orientation: String,
+    pub metadata: BTreeMap<String, String>,
+}
+
+impl ImageCompletionRequest {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        validate_local_vision_request(
+            &self.model,
+            &self.image,
+            &self.source_revision,
+            &self.metadata,
+            "image completion",
+        )?;
+        if self.image_orientation != VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS {
+            return Err(ContractError::InvalidVision(format!(
+                "image completion requires image_orientation={VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS}"
+            )));
+        }
+        validate_revision(&self.mask_revision, "mask_revision")?;
+        if self.mask.content_type != "image/png"
+            || self.mask.bytes.is_empty()
+            || self.mask.bytes.len() > MAX_IMAGE_COMPLETION_MASK_BYTES
+        {
+            return Err(ContractError::InvalidVision(format!(
+                "image completion mask must be a non-empty image/png no larger than {MAX_IMAGE_COMPLETION_MASK_BYTES} bytes"
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn constraints(&self) -> Result<RequestConstraints, ContractError> {
+        RequestConstraints::from_metadata(&self.metadata)
+    }
 }
 
 impl SubjectSegmentationRequest {
@@ -444,6 +548,49 @@ pub struct SubjectSegmentationSoftMaskResponse {
     pub score: f32,
     pub prompt_count: usize,
     pub provenance: VisionProvenance,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SemanticGroundingResponse {
+    pub id: String,
+    pub object: String,
+    pub created_at: u64,
+    pub status: String,
+    pub source_revision: String,
+    pub query_revision: String,
+    pub image: ImageGeometry,
+    pub regions: Vec<SemanticGroundingRegion>,
+    pub provenance: VisionProvenance,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SemanticGroundingRegion {
+    pub region_id: String,
+    pub score: f32,
+    pub bounding_box: NormalizedBoundingBox,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ImageCompletionResponse {
+    pub id: String,
+    pub object: String,
+    pub created_at: u64,
+    pub status: String,
+    pub source_revision: String,
+    pub mask_revision: String,
+    pub input_coordinate_extent: ImageGeometry,
+    pub raster: EncodedCompletedRaster,
+    pub provenance: VisionProvenance,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EncodedCompletedRaster {
+    pub content_type: String,
+    pub encoding: String,
+    pub data_base64: String,
+    pub sha256: String,
+    pub width: u32,
+    pub height: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

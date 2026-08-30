@@ -11,12 +11,13 @@ use infer_core::{LocalInventoryKind, LocalWorkerAdapterKind, ProviderKind, Runti
 use infer_provider::{
     AudioTextQueryNormalizer, AudioWorkerExecutor, CodexAppServerProvider, CoremlSamExecutor,
     DynAudioDuplexExecutor, DynAudioExecutor, DynAudioStreamExecutor, DynFaceDetectionExecutor,
-    DynFaceEmbeddingExecutor, DynFaceParsingExecutor, DynImageEmbeddingExecutor,
-    DynImageUnderstandingExecutor, DynOcrExecutor, DynProvider, DynRetrievalExecutor,
-    DynSubjectSegmentationExecutor, DynTextEmbeddingExecutor, OcrBuildContract, OcrWorkerExecutor,
-    OllamaVisionExecutor, OnnxProviderRuntime, ProviderRuntimeReadiness, ResponsesProvider,
-    RetrievalBuildContract, RetrievalWorkerExecutor, SamBuildContract, provider_requires_ffmpeg,
-    resolve_provider_process, verify_clap_worker, verify_coreml_sam_worker, verify_yamnet_worker,
+    DynFaceEmbeddingExecutor, DynFaceParsingExecutor, DynImageCompletionExecutor,
+    DynImageEmbeddingExecutor, DynImageUnderstandingExecutor, DynOcrExecutor, DynProvider,
+    DynRetrievalExecutor, DynSemanticGroundingExecutor, DynSubjectSegmentationExecutor,
+    DynTextEmbeddingExecutor, OcrBuildContract, OcrWorkerExecutor, OllamaVisionExecutor,
+    OnnxProviderRuntime, ProviderRuntimeReadiness, ResponsesProvider, RetrievalBuildContract,
+    RetrievalWorkerExecutor, SamBuildContract, provider_requires_ffmpeg, resolve_provider_process,
+    verify_clap_worker, verify_coreml_sam_worker, verify_yamnet_worker,
 };
 use infer_resource::{DynNativeModelController, NativeControllerMap};
 
@@ -31,6 +32,8 @@ pub(super) struct ProviderAssembly {
     pub face_embedding_executors: BTreeMap<String, DynFaceEmbeddingExecutor>,
     pub face_parsing_executors: BTreeMap<String, DynFaceParsingExecutor>,
     pub subject_segmentation_executors: BTreeMap<String, DynSubjectSegmentationExecutor>,
+    pub semantic_grounding_executors: BTreeMap<String, DynSemanticGroundingExecutor>,
+    pub image_completion_executors: BTreeMap<String, DynImageCompletionExecutor>,
     pub image_embedding_executors: BTreeMap<String, DynImageEmbeddingExecutor>,
     pub text_embedding_executors: BTreeMap<String, DynTextEmbeddingExecutor>,
     pub image_understanding_executors: BTreeMap<String, DynImageUnderstandingExecutor>,
@@ -551,6 +554,14 @@ impl ProviderAssembly {
                         id.clone(),
                         Arc::clone(&adapter) as DynImageEmbeddingExecutor,
                     );
+                    assembly.semantic_grounding_executors.insert(
+                        id.clone(),
+                        Arc::clone(&adapter) as DynSemanticGroundingExecutor,
+                    );
+                    assembly.image_completion_executors.insert(
+                        id.clone(),
+                        Arc::clone(&adapter) as DynImageCompletionExecutor,
+                    );
                     assembly
                         .text_embedding_executors
                         .insert(id.clone(), Arc::clone(&adapter) as DynTextEmbeddingExecutor);
@@ -576,6 +587,8 @@ impl ProviderAssembly {
             face_embedding_executors: BTreeMap::new(),
             face_parsing_executors: BTreeMap::new(),
             subject_segmentation_executors: BTreeMap::new(),
+            semantic_grounding_executors: BTreeMap::new(),
+            image_completion_executors: BTreeMap::new(),
             image_embedding_executors: BTreeMap::new(),
             text_embedding_executors: BTreeMap::new(),
             image_understanding_executors: BTreeMap::new(),
