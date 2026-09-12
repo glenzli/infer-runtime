@@ -52,6 +52,10 @@ pub enum DiscoveryError {
     InvalidManifest(PathBuf, String),
     #[error("publication authority for `{0}` is already held")]
     PublicationAuthorityHeld(String),
+    #[error(
+        "discovery publication authority or manifest changed at `{0}`; restart the owning daemon"
+    )]
+    PublicationChanged(PathBuf),
     #[error("Unix socket endpoint `{0}` is invalid")]
     InvalidSocketEndpoint(String),
     #[error("Unix socket path `{path}` is {actual} bytes; maximum is {maximum}")]
@@ -173,7 +177,8 @@ pub struct RegistrationSpec {
 
 pub struct RegistrationPublication {
     path: PathBuf,
-    _authority: PublicationAuthority,
+    authority: PublicationAuthority,
+    spec: RegistrationSpec,
 }
 
 impl RegistrationPublication {
@@ -193,7 +198,8 @@ impl RegistrationPublication {
         write_manifest(&path, &spec)?;
         Ok(Self {
             path,
-            _authority: authority,
+            authority,
+            spec,
         })
     }
 
@@ -201,16 +207,83 @@ impl RegistrationPublication {
         &self.path
     }
 
+    /// Restore a removed manifest without changing this generation or overwriting
+    /// another publisher. An intact declaration is checked but never rewritten.
+    pub fn ensure_published(&self) -> Result<bool, DiscoveryError> {
+        for directory in [&self.spec.runtime.root, &self.spec.runtime.registrations] {
+            validate_owned_directory(directory)?;
+        }
+        self.authority.ensure_current()?;
+        match fs::symlink_metadata(&self.path) {
+            Ok(_) => {
+                validate_manifest_file(&self.path)?;
+                let bytes = fs::read(&self.path).map_err(|source| DiscoveryError::Io {
+                    path: self.path.clone(),
+                    source,
+                })?;
+                let current: DiscoveryRegistration =
+                    serde_json::from_slice(&bytes).map_err(|error| {
+                        DiscoveryError::InvalidManifest(self.path.clone(), error.to_string())
+                    })?;
+                let expected = manifest(&self.spec);
+                if current.service != expected.service
+                    || current.offers != expected.offers
+                    || current.schema != expected.schema
+                    || current.schema_version != expected.schema_version
+                {
+                    return Err(DiscoveryError::PublicationChanged(self.path.clone()));
+                }
+                Ok(false)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                write_manifest_inner(&self.path, &self.spec, false)
+            }
+            Err(source) => Err(DiscoveryError::Io {
+                path: self.path.clone(),
+                source,
+            }),
+        }
+    }
+
     /// Releases publication authority without changing the stable manifest.
     pub fn shutdown(self) {}
 }
 
 struct PublicationAuthority {
+    path: PathBuf,
     #[cfg(unix)]
     file: fs::File,
 }
 
 impl PublicationAuthority {
+    fn ensure_current(&self) -> Result<(), DiscoveryError> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
+            let held = self.file.metadata().map_err(|source| DiscoveryError::Io {
+                path: self.path.clone(),
+                source,
+            })?;
+            let current =
+                fs::symlink_metadata(&self.path).map_err(|source| DiscoveryError::Io {
+                    path: self.path.clone(),
+                    source,
+                })?;
+            if !current.is_file()
+                || current.file_type().is_symlink()
+                || current.dev() != held.dev()
+                || current.ino() != held.ino()
+                || current.uid() != held.uid()
+                || current.permissions().mode() & 0o777 != 0o600
+            {
+                return Err(DiscoveryError::PublicationChanged(self.path.clone()));
+            }
+            Ok(())
+        }
+        #[cfg(not(unix))]
+        Err(DiscoveryError::RuntimeRootUnavailable)
+    }
+
     fn acquire(root: &Path, service: &DiscoveryService) -> Result<Self, DiscoveryError> {
         let path = root.join(format!(
             ".{}--{}.publisher.lock",
@@ -257,7 +330,7 @@ impl PublicationAuthority {
                     source: error,
                 });
             }
-            Ok(Self { file })
+            Ok(Self { file, path })
         }
         #[cfg(not(unix))]
         {
@@ -397,6 +470,14 @@ fn manifest(spec: &RegistrationSpec) -> DiscoveryRegistration {
 }
 
 fn write_manifest(path: &Path, spec: &RegistrationSpec) -> Result<(), DiscoveryError> {
+    write_manifest_inner(path, spec, true).map(|_| ())
+}
+
+fn write_manifest_inner(
+    path: &Path,
+    spec: &RegistrationSpec,
+    replace: bool,
+) -> Result<bool, DiscoveryError> {
     let mut bytes = serde_json::to_vec_pretty(&manifest(spec))?;
     bytes.push(b'\n');
     if bytes.len() > MAX_MANIFEST_BYTES {
@@ -429,17 +510,40 @@ fn write_manifest(path: &Path, spec: &RegistrationSpec) -> Result<(), DiscoveryE
                 source,
             }
         })?;
-        fs::rename(&temporary, path).map_err(|source| DiscoveryError::Io {
-            path: path.to_owned(),
-            source,
-        })?;
+        if replace {
+            fs::rename(&temporary, path).map_err(|source| DiscoveryError::Io {
+                path: path.to_owned(),
+                source,
+            })?;
+        } else {
+            // Publish the complete file only if the stable name is still absent.
+            // A concurrent declaration must never be overwritten by repair.
+            match fs::hard_link(&temporary, path) {
+                Ok(()) => {
+                    fs::remove_file(&temporary).map_err(|source| DiscoveryError::Io {
+                        path: temporary.clone(),
+                        source,
+                    })?;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let _ = fs::remove_file(&temporary);
+                    return Ok(false);
+                }
+                Err(source) => {
+                    return Err(DiscoveryError::Io {
+                        path: path.to_owned(),
+                        source,
+                    });
+                }
+            }
+        }
         validate_manifest_file(path)?;
         if let Some(directory) = path.parent()
             && let Ok(directory) = fs::File::open(directory)
         {
             let _ = directory.sync_all();
         }
-        Ok(())
+        Ok(true)
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
@@ -516,6 +620,39 @@ fn read_manifest(path: &Path) -> Result<Option<DiscoveryRegistration>, Discovery
     serde_json::from_slice(&bytes)
         .map(Some)
         .map_err(|error| DiscoveryError::InvalidManifest(path.to_owned(), error.to_string()))
+}
+
+fn validate_owned_directory(directory: &Path) -> Result<(), DiscoveryError> {
+    let metadata = fs::symlink_metadata(directory).map_err(|source| DiscoveryError::Io {
+        path: directory.to_owned(),
+        source,
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Err(DiscoveryError::SymlinkDirectory(directory.to_owned()));
+    }
+    if !metadata.is_dir() {
+        return Err(DiscoveryError::NotDirectory(directory.to_owned()));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        // SAFETY: geteuid has no preconditions.
+        let expected = unsafe { libc::geteuid() };
+        if metadata.uid() != expected {
+            return Err(DiscoveryError::WrongOwner {
+                path: directory.to_owned(),
+                actual: metadata.uid(),
+                expected,
+            });
+        }
+        if metadata.permissions().mode() & 0o777 != 0o700 {
+            return Err(DiscoveryError::UnsafeDirectoryMode {
+                path: directory.to_owned(),
+                actual: metadata.permissions().mode() & 0o777,
+            });
+        }
+    }
+    Ok(())
 }
 
 fn prepare_owned_directory(directory: &Path) -> Result<(), DiscoveryError> {
@@ -700,6 +837,98 @@ mod tests {
             },
             offers: vec![DiscoveryOffer::infer_status_unix(endpoint)],
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn missing_manifest_is_restored_without_rewriting_healthy_publication() {
+        use std::os::unix::fs::MetadataExt;
+        let temporary = tempdir().unwrap();
+        let runtime = DiscoveryRuntime::prepare(temporary.path().join("infra-protocol")).unwrap();
+        let publication = RegistrationPublication::publish(spec(runtime, "gen_first")).unwrap();
+        let before = fs::read(publication.path()).unwrap();
+        let original = fs::metadata(publication.path()).unwrap();
+        assert!(!publication.ensure_published().unwrap());
+        let unchanged = fs::metadata(publication.path()).unwrap();
+        assert_eq!(original.ino(), unchanged.ino());
+        assert_eq!(original.modified().unwrap(), unchanged.modified().unwrap());
+        fs::remove_file(publication.path()).unwrap();
+        assert!(publication.ensure_published().unwrap());
+        assert_eq!(fs::read(publication.path()).unwrap(), before);
+        validate_manifest_file(publication.path()).unwrap();
+        assert!(!publication.ensure_published().unwrap());
+    }
+
+    #[test]
+    fn replaced_publisher_lock_cannot_republish_an_old_generation() {
+        let temporary = tempdir().unwrap();
+        let runtime = DiscoveryRuntime::prepare(temporary.path().join("infra-protocol")).unwrap();
+        let publication =
+            RegistrationPublication::publish(spec(runtime.clone(), "gen_first")).unwrap();
+        fs::remove_file(&publication.authority.path).unwrap();
+        let successor = RegistrationPublication::publish(spec(runtime, "gen_second")).unwrap();
+        fs::remove_file(successor.path()).unwrap();
+        assert!(matches!(
+            publication.ensure_published(),
+            Err(DiscoveryError::PublicationChanged(_))
+        ));
+        assert!(!publication.path().exists());
+        assert!(successor.ensure_published().unwrap());
+        assert_eq!(
+            read_manifest(successor.path())
+                .unwrap()
+                .unwrap()
+                .service
+                .generation,
+            "gen_second"
+        );
+    }
+
+    #[test]
+    fn repair_preserves_foreign_or_concurrently_published_manifest() {
+        let temporary = tempdir().unwrap();
+        let runtime = DiscoveryRuntime::prepare(temporary.path().join("infra-protocol")).unwrap();
+        let publication =
+            RegistrationPublication::publish(spec(runtime.clone(), "gen_first")).unwrap();
+        let replacement = spec(runtime, "gen_second");
+        write_manifest(publication.path(), &replacement).unwrap();
+        let before = fs::read(publication.path()).unwrap();
+        assert!(matches!(
+            publication.ensure_published(),
+            Err(DiscoveryError::PublicationChanged(_))
+        ));
+        assert!(!write_manifest_inner(publication.path(), &publication.spec, false).unwrap());
+        assert_eq!(fs::read(publication.path()).unwrap(), before);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn repair_rejects_missing_authority_unsafe_directory_and_symlink() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        let temporary = tempdir().unwrap();
+        let runtime = DiscoveryRuntime::prepare(temporary.path().join("infra-protocol")).unwrap();
+        let publication =
+            RegistrationPublication::publish(spec(runtime.clone(), "gen_first")).unwrap();
+        fs::remove_file(publication.path()).unwrap();
+        fs::set_permissions(runtime.registrations(), fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(matches!(
+            publication.ensure_published(),
+            Err(DiscoveryError::UnsafeDirectoryMode { .. })
+        ));
+        assert!(!publication.path().exists());
+        fs::set_permissions(runtime.registrations(), fs::Permissions::from_mode(0o700)).unwrap();
+        let unrelated = temporary.path().join("unrelated");
+        fs::write(&unrelated, "retain").unwrap();
+        symlink(&unrelated, publication.path()).unwrap();
+        assert!(matches!(
+            publication.ensure_published(),
+            Err(DiscoveryError::UnsafeManifest(_))
+        ));
+        assert_eq!(fs::read_to_string(unrelated).unwrap(), "retain");
+        fs::remove_file(publication.path()).unwrap();
+        fs::remove_file(&publication.authority.path).unwrap();
+        assert!(publication.ensure_published().is_err());
+        assert!(!publication.path().exists());
     }
 
     #[test]

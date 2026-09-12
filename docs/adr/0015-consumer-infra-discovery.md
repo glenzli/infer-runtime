@@ -30,8 +30,11 @@ Infer Runtime 的 Consumer 目前普遍把 `127.0.0.1:8787` 当作默认地址�
 - Echo、Shadow、Symbiont-d 可共享发现合同，但继续拥有不同 App 身份、Intent ACL 和 secret。
 - `infer-runtime.status` 与 `infer-runtime.consumer-core` 共享 service generation，不共享 application
   framing、权限或数据面。
-- 当前 registration publisher 随 observer 开关启动；没有真实部署需求前不增加第二套 publisher
-  或新配置层。它在 endpoint 就绪后原子发布一次，退出保留稳定 manifest，不运行 heartbeat。
+- Registration publisher 属于 Consumer 数据面生命周期，独立于 observer 开关。它在 endpoint
+  就绪后原子发布，退出保留稳定 manifest；manifest 不携带 lease，也不作为心跳。
+- 2026-09-12 运维补充：daemon 每 30 秒检查自身声明。内容完整时不写文件；仅在声明缺失、
+  owner-only 目录仍有效且原 publisher lock 的文件身份不变时，原子补发同一 generation 和 offers。
+  补发不得覆盖并发出现的声明。锁丢失、被替换、声明冲突或不安全路径会报告错误，交由受管重启恢复。
 - Consumer 必须验证 registration owner/protocol/version/binding/endpoint，禁用 HTTP proxy 与
   redirect；连接失败先重读 manifest，并在 generation 或 offer 变化后重新选择。
 - Discovery 只做精确 Core 版本选择。HTTP 再通过 `Infer-Capability-Contract` 精确选择单项 typed

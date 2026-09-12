@@ -16,7 +16,7 @@ use infer_observer::{
     SnapshotProvider, UnixJsonObserverServer, consumer_http_offer,
 };
 use sha2::{Digest, Sha256};
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
@@ -128,9 +128,32 @@ async fn main() -> anyhow::Result<()> {
         || infer_api::router(Arc::clone(&runtime)),
         |raw| infer_api::router_with_raw(Arc::clone(&runtime), raw),
     );
-    let serve_result = axum::serve(listener, api)
-        .with_graceful_shutdown(shutdown_signal())
-        .await;
+    let serve = axum::serve(listener, api).with_graceful_shutdown(shutdown_signal());
+    let serve = std::future::IntoFuture::into_future(serve);
+    tokio::pin!(serve);
+    let mut discovery_check = tokio::time::interval(std::time::Duration::from_secs(30));
+    discovery_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut discovery_error = None;
+    let serve_result = loop {
+        tokio::select! {
+            result = &mut serve => break result,
+            _ = discovery_check.tick() => {
+                match registration.ensure_published() {
+                    Ok(repaired) => {
+                        if repaired { warn!("restored missing Infra Discovery registration"); }
+                        if discovery_error.take().is_some() { info!("Infra Discovery publication is healthy again"); }
+                    }
+                    Err(error) => {
+                        let message = error.to_string();
+                        if discovery_error.as_ref() != Some(&message) {
+                            warn!(error = %message, "Infra Discovery publication unavailable; serving endpoints remain active");
+                        }
+                        discovery_error = Some(message);
+                    }
+                }
+            }
+        }
+    };
     registration.shutdown();
     if let Some(observer_socket) = observer_socket {
         observer_socket

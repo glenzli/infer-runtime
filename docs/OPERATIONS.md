@@ -65,6 +65,18 @@ prompt、音频、response body 或 query string。Statistics 是有界的会话
 MLX provider 和队列已可见，但 worker 内部单模型 cache residency 尚未由 daemon 导出；
 在该原生合同存在前，Console 不制造一个推测状态。
 
+## 服务发现恢复
+
+`/health` 正常只证明 HTTP 服务可达，不证明 Consumer 能通过 Discovery 找到它。若客户端报告
+`Infer Runtime discovery failed`，应同时检查 `infra-protocol/registrations/infer-runtime--local.json`
+和实际服务端点。macOS 的默认注册目录位于用户临时目录，不能假定声明在长时间运行中始终存在。
+
+Daemon 每 30 秒只读检查其注册声明；文件单独丢失时，在确认仍持有原发布锁后补发相同内容。
+正常检查不更新文件时间，不引入 lease 或协议版本变更。补发成功和错误状态变化会写入 Console
+日志；重复错误不反复刷日志。目录或发布锁丢失/替换、声明内容冲突时不会接管，应通过拥有该
+进程的 Console 执行 Restart，再检查注册与一次真实 Consumer 请求。不要手写注册文件或加入
+固定端口 fallback。该恢复不重建被删除的 Unix socket；socket 丢失也需要受管重启。
+
 ## App credential 与本机 bootstrap
 
 loopback API 仍需要认证，因为同一用户会话中的其他本地进程也能访问它。默认配置不预置
