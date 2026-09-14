@@ -403,6 +403,16 @@ default_policy = "cost-first"
 default_max_output_tokens = 512
 default_reasoning_effort = "none"
 
+# Bounded ambiguity review after a Consumer has exhausted deterministic and
+# local duplicate checks. This separate Intent avoids relaxing the ordinary
+# text.deduplicate output contract for other Consumers or local Deployments.
+[intents."text.deduplicate.review"]
+input_modalities = ["text"]
+output_modalities = ["text"]
+default_capability_floor = "advanced"
+default_policy = "cost-first"
+default_reasoning_effort = "low"
+
 # Stateless image+text reasoning. Cloud image egress also requires the App's
 # independent allowed_cloud_input_modalities entitlement.
 [intents."multimodal.respond"]
@@ -741,6 +751,10 @@ status = "provisional"
 family = "gpt-5.6"
 
 [model_profiles.codex_gpt_5_6_luna.ratings."language.respond"]
+level = "advanced"
+status = "provisional"
+
+[model_profiles.codex_gpt_5_6_luna.ratings."text.deduplicate.review"]
 level = "advanced"
 status = "provisional"
 

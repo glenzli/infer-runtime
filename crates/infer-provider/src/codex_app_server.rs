@@ -573,9 +573,12 @@ fn observe_turn_message(
                 accumulator.usage.take(),
             )?))
         }
-        "error" => Err(ProviderError::Protocol(
-            "Codex App Server emitted an error notification".into(),
-        )),
+        // App Server owns retries inside this turn. Keep the same session alive;
+        // the caller's existing deadline still bounds the complete attempt.
+        "error" if params.get("willRetry").and_then(Value::as_bool) == Some(true) => {
+            Ok(TurnProgress::Continue)
+        }
+        "error" => Err(classify_turn_failure(params)),
         _ => Ok(TurnProgress::Continue),
     }
 }
@@ -697,19 +700,57 @@ fn record_completed_item(
 }
 
 fn classify_turn_failure(turn: &Value) -> ProviderError {
+    use ProviderFailureKind::*;
     let info = turn.pointer("/error/codexErrorInfo");
-    let name = info.and_then(Value::as_str).unwrap_or("other");
-    let kind = match name {
-        "unauthorized" => ProviderFailureKind::Authentication,
-        "usageLimitExceeded" | "sessionBudgetExceeded" => ProviderFailureKind::RateLimited,
-        "serverOverloaded" | "internalServerError" => ProviderFailureKind::Unavailable,
-        "badRequest" | "contextWindowExceeded" => ProviderFailureKind::InvalidRequest,
-        _ => ProviderFailureKind::Protocol,
+    let name = info
+        .and_then(Value::as_str)
+        .or_else(|| {
+            let object = info?.as_object()?;
+            (object.len() == 1).then(|| object.keys().next().unwrap().as_str())
+        })
+        .unwrap_or("other");
+    // Only known, payload-free codes enter persisted errors. Never use the
+    // upstream message, details, or an unknown object key as a diagnostic.
+    let (kind, code) = match name {
+        "unauthorized" => (Authentication, "Codex turn failed: unauthorized"),
+        "usageLimitExceeded" => (RateLimited, "Codex turn failed: usageLimitExceeded"),
+        "sessionBudgetExceeded" => (RateLimited, "Codex turn failed: sessionBudgetExceeded"),
+        "rateLimitExceeded" => (RateLimited, "Codex turn failed: rateLimitExceeded"),
+        "serverOverloaded" => (Unavailable, "Codex turn failed: serverOverloaded"),
+        "internalServerError" => (Unavailable, "Codex turn failed: internalServerError"),
+        "badRequest" => (InvalidRequest, "Codex turn failed: badRequest"),
+        "contextWindowExceeded" => (InvalidRequest, "Codex turn failed: contextWindowExceeded"),
+        "cyberPolicy" | "misalignmentPolicyViolation" => {
+            (InvalidRequest, "Codex turn failed: policy rejection")
+        }
+        "httpConnectionFailed"
+        | "responseStreamConnectionFailed"
+        | "responseStreamDisconnected"
+        | "responseTooManyFailedAttempts" => {
+            let status = info
+                .and_then(|i| i.get(name))
+                .and_then(|i| i.get("httpStatusCode"))
+                .and_then(Value::as_u64);
+            let kind = match status {
+                Some(401 | 403) => Authentication,
+                Some(408 | 504) => Timeout,
+                Some(429) => RateLimited,
+                Some(400..=499) => InvalidRequest,
+                _ => Unavailable,
+            };
+            let code = match name {
+                "httpConnectionFailed" => "Codex turn failed: httpConnectionFailed",
+                "responseStreamConnectionFailed" => {
+                    "Codex turn failed: responseStreamConnectionFailed"
+                }
+                "responseStreamDisconnected" => "Codex turn failed: responseStreamDisconnected",
+                _ => "Codex turn failed: responseTooManyFailedAttempts",
+            };
+            (kind, code)
+        }
+        _ => (Protocol, "Codex turn failed: unrecognized error"),
     };
-    ProviderError::Classified {
-        kind,
-        message: format!("Codex turn failed with {name}"),
-    }
+    ProviderError::CodexTurn { kind, code }
 }
 
 fn normalize_usage(value: &Value) -> Result<Value, ProviderError> {
@@ -1139,6 +1180,62 @@ mod tests {
         assert_eq!(interactive.kind(), ProviderFailureKind::Protocol);
     }
 
+    #[test]
+    fn terminal_codex_errors_keep_safe_codes_and_retry_semantics() {
+        use ProviderFailureKind::*;
+        for (info, expected) in [
+            (json!("rateLimitExceeded"), RateLimited),
+            (json!("unauthorized"), Authentication),
+            (json!("contextWindowExceeded"), InvalidRequest),
+            (
+                json!({"httpConnectionFailed": {"httpStatusCode": 401}}),
+                Authentication,
+            ),
+            (
+                json!({"responseStreamConnectionFailed": {"httpStatusCode": 429}}),
+                RateLimited,
+            ),
+            (
+                json!({"responseStreamDisconnected": {"httpStatusCode": 504}}),
+                Timeout,
+            ),
+            (
+                json!({"responseStreamDisconnected": {"httpStatusCode": 502}}),
+                Unavailable,
+            ),
+            (
+                json!({"responseTooManyFailedAttempts": {"httpStatusCode": null}}),
+                Unavailable,
+            ),
+            (
+                json!({"responseTooManyFailedAttempts": {"httpStatusCode": 400}}),
+                InvalidRequest,
+            ),
+            (json!({"PRIVATE_UNKNOWN": {}}), Protocol),
+        ] {
+            let notification = json!({"method":"error", "params":{
+                "threadId":"thread-1", "turnId":"turn-1", "willRetry":false,
+                "error":{"codexErrorInfo":info,"message":"PRIVATE_PROMPT", "additionalDetails":"PRIVATE_TOKEN"}
+            }});
+            let error = observe_turn_message(
+                &notification,
+                "model",
+                "thread-1",
+                "turn-1",
+                BridgeMode::Text,
+                &mut TurnAccumulator::default(),
+            )
+            .unwrap_err();
+            assert_eq!(error.kind(), expected);
+            assert!(error.public_message().starts_with("Codex turn failed:"));
+            assert!(!error.public_message().contains("PRIVATE"));
+            assert_eq!(
+                classify_turn_failure(&notification["params"]).kind(),
+                expected
+            );
+        }
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn fake_app_server_proves_catalog_unary_and_streaming_bridge() {
@@ -1158,6 +1255,7 @@ read thread
 echo '{"jsonrpc":"2.0","id":3,"result":{"thread":{"id":"thread-1"}}}'
 read turn
 echo '{"jsonrpc":"2.0","id":4,"result":{"turn":{"id":"turn-1"}}}'
+echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"thread-1","turnId":"turn-1","willRetry":true,"error":{"codexErrorInfo":{"responseStreamDisconnected":{"httpStatusCode":502}},"message":"upstream reconnecting"}}}'
 echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thread-1","turnId":"turn-1","itemId":"msg-1","delta":"hello "}}'
 echo '{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"thread-1","turnId":"turn-1","tokenUsage":{"last":{"inputTokens":3,"cachedInputTokens":1,"cacheWriteInputTokens":0,"outputTokens":2,"reasoningOutputTokens":0,"totalTokens":5},"total":{"inputTokens":3,"cachedInputTokens":1,"cacheWriteInputTokens":0,"outputTokens":2,"reasoningOutputTokens":0,"totalTokens":5},"modelContextWindow":100}}}'
 echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","completedAtMs":1,"item":{"id":"msg-1","type":"agentMessage","text":"hello back","phase":"final_answer"}}}'

@@ -132,6 +132,12 @@ pub enum ProviderError {
     InvalidInput(String),
     #[error("native runtime error: {0}")]
     NativeRuntime(String),
+    /// Whitelisted App Server stage/code; safe for public errors and audit.
+    #[error("{code}")]
+    CodexTurn {
+        kind: ProviderFailureKind,
+        code: &'static str,
+    },
     #[error("provider bridge error: {message}")]
     Classified {
         kind: ProviderFailureKind,
@@ -155,7 +161,7 @@ impl ProviderError {
             Self::Transport(error) if error.is_timeout() => ProviderFailureKind::Timeout,
             Self::Transport(_) | Self::Io(_) => ProviderFailureKind::Unavailable,
             Self::InvalidInput(_) => ProviderFailureKind::InvalidRequest,
-            Self::Classified { kind, .. } => *kind,
+            Self::Classified { kind, .. } | Self::CodexTurn { kind, .. } => *kind,
             Self::Malformed(_) | Self::Protocol(_) | Self::NativeRuntime(_) => {
                 ProviderFailureKind::Protocol
             }
@@ -172,6 +178,9 @@ impl ProviderError {
     /// Payload-free summary safe for public responses, Job snapshots, audit,
     /// and ordinary logs. `Display` remains an internal diagnostic surface.
     pub fn public_message(&self) -> &'static str {
+        if let Self::CodexTurn { code, .. } = self {
+            return code;
+        }
         match self.kind() {
             ProviderFailureKind::Authentication => "provider authentication failed",
             ProviderFailureKind::RateLimited => "provider rate limit exceeded",
