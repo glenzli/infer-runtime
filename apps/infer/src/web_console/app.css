@@ -323,7 +323,7 @@ button { color: inherit; }
 .stack-list { display: grid; gap: 10px; }
 .stack-row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--line-soft); }
 .stack-row:last-child { border-bottom: 0; }
-.stack-row strong, .stack-row span { display: block; }
+.stack-row strong { display: block; }
 .stack-row strong { font-size: 12px; }
 .stack-row small { color: var(--muted); }
 .stack-more { padding: 10px 0 2px; color: var(--faint); font-size: 10px; }

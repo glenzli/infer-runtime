@@ -742,6 +742,13 @@ mod tests {
         assert!(APP_JS.contains("searched_paths"));
     }
 
+    #[test]
+    fn stack_status_chips_keep_flex_centering() {
+        assert!(APP_CSS.contains(".status-chip { display: inline-flex; align-items: center;"));
+        assert!(APP_CSS.contains(".stack-row strong { display: block; }"));
+        assert!(!APP_CSS.contains(".stack-row strong, .stack-row span"));
+    }
+
     #[tokio::test]
     async fn mutating_routes_reject_cross_origin_requests_without_session_proof() {
         let response = router(test_state())
