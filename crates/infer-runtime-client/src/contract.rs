@@ -32,6 +32,10 @@ pub(crate) fn expected_capability_schema(identity: &str) -> Option<(&'static str
             "/infer/v1/capability-schemas/infer.audio.event-detection/20260813.2/openapi.json",
             "a7179c88c03a768299835bd84c4c6f8d68e47f3c51a96ed4fe01387cf6fb8613",
         ),
+        "infer.audio.embedding@20260815.2" => (
+            "/infer/v1/capability-schemas/infer.audio.embedding/20260815.2/openapi.json",
+            "5cbb2e22487f98a68fef49b9a81f0a8cdb51f45c8c8fa77e78420c8122948c2c",
+        ),
         "infer.audio.alignment@20260811.1" => (
             "/infer/v1/capability-schemas/infer.audio.alignment/20260811.1/openapi.json",
             "76c7f4ab7d5e6333808aceec558822d9deceb2918bc478e326593d302dcb96e8",
@@ -286,6 +290,47 @@ impl CapabilityCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clap_schema_is_registered_and_rejects_digest_drift() {
+        use sha2::{Digest, Sha256};
+        let identity = crate::audio::AUDIO_EMBEDDING_CAPABILITIES[0];
+        let (url, digest) =
+            expected_capability_schema(identity).expect("advertised CLAP contract registered");
+        let bytes = include_bytes!(
+            "../../../contracts/capabilities/infer.audio.embedding/20260815.2/openapi.json"
+        );
+        assert_eq!(format!("{:x}", Sha256::digest(bytes)), digest);
+        let mut catalog: CapabilityCatalog = serde_json::from_value(serde_json::json!({
+            "schema": CAPABILITY_CATALOG_SCHEMA, "schema_version": CAPABILITY_CATALOG_VERSION,
+            "core_contract": CONSUMER_CORE, "capabilities": [{
+                "id": "infer.audio.embedding", "schema_version": "20260815.2", "stability": "experimental",
+                "schema": {"format": "openapi-3.1", "url": url, "sha256": digest},
+                "routes": [{"method": "POST", "path": "/v1/audio/embeddings", "execution_modes": ["unary"]}]
+            }]
+        })).unwrap();
+        catalog.validate().unwrap();
+        catalog.require_exact(identity).unwrap();
+        assert_eq!(
+            catalog
+                .select_preferred(
+                    "infer.audio.embedding",
+                    crate::audio::AUDIO_EMBEDDING_CAPABILITIES
+                )
+                .unwrap(),
+            identity
+        );
+        catalog.capabilities[0].schema.sha256 = "0".repeat(64);
+        assert!(catalog.require_exact(identity).is_err());
+        assert!(
+            catalog
+                .select_preferred(
+                    "infer.audio.embedding",
+                    crate::audio::AUDIO_EMBEDDING_CAPABILITIES
+                )
+                .is_err()
+        );
+    }
 
     #[test]
     fn core_manifest_requires_exact_dated_identity() {
