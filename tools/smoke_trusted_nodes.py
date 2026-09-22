@@ -297,6 +297,11 @@ class Harness:
             "infer.placement": "private", "infer.fallback": "none", **{"infer." + key: value for key, value in metadata.items()}
         }})
 
+    def probe(self):
+        result = subprocess.run([self.binary, "--config", self.root / "a.toml", "--probe-nodes"],
+                                capture_output=True, text=True, check=False)
+        return result.returncode, json.loads(result.stdout)
+
     def rpc(self, name, command, generation=None, client="a", disconnect=False, protocol=PROTOCOL):
         context = ssl.create_default_context(cafile=str(self.root / "ca.pem"))
         context.load_cert_chain(self.root / f"{client}.pem", self.root / f"{client}.key")
@@ -340,6 +345,16 @@ def exercise(h):
     for name in ("a", "b", "c"):
         h.start(name)
     assert len({p.pid for p in h.processes.values()}) == 3
+    code, report = h.probe()
+    assert code == 0 and report["ready"]
+    assert {node["provider"] for node in report["nodes"]} == {"node_b", "node_c"}
+    assert all(node["status"] == "ready" and node["available_admissions"] == 2
+               and node["imports"] == [{"export": "shared", "present": True}]
+               for node in report["nodes"])
+    empty = subprocess.run([h.binary, "--config", h.root / "b.toml", "--probe-nodes"],
+                           capture_output=True, text=True, check=False)
+    assert empty.returncode != 0 and json.loads(empty.stdout) == {"ready": False, "nodes": []}
+    passed("operator probe authenticates both live nodes and matches approved imports")
     assert output(h.infer())[0] == "A"
     passed("three independent runtimes; overlapping capability defaults to local A")
     text, job = output(h.infer(deployment_ids="b_text"))
@@ -372,6 +387,11 @@ def exercise(h):
     assert len(h.backends['b'].calls) == before
     passed("local_only rejects same-host B without backend execution")
     h.stop("b")
+    code, report = h.probe()
+    assert code != 0 and not report["ready"]
+    assert {node["provider"]: node["status"] for node in report["nodes"]} == {
+        "node_b": "unavailable", "node_c": "ready"}
+    passed("operator probe reports B offline while C remains ready")
     assert output(h.infer(prefer="trusted_node"))[0] == "C"
     h.start("b")
     assert output(h.infer(deployment_ids="b_text"))[0] == "B"
@@ -402,6 +422,11 @@ def exercise(h):
         before = len(h.backends['b'].calls)
         assert h.infer(deployment_ids="b_text")[0] != 200, label
         assert len(h.backends['b'].calls) == before, label
+        code, report = h.probe()
+        assert code != 0 and not report["ready"], label
+        assert {node["provider"]: node["status"] for node in report["nodes"]} == {
+            "node_b": "contract_mismatch" if label == "contract digest" else "unavailable",
+            "node_c": "ready"}, label
     h.stop("a")
     legacy = original.replace('[apps.consumer.routing]\ndeployment_ids = ["local_text", "b_text", "c_text"]\n', '')
     assert legacy != original
@@ -430,6 +455,10 @@ def exercise(h):
     # Reserve-only leases compete across origin jobs and release on expiry.
     for i in range(2):
         assert h.rpc("b", {**reserve, "key": {"job_id": f"lease-{i}", "attempt": 1}}, generation)["reply"]["value"]["state"] == "reserved"
+    code, report = h.probe()
+    assert code != 0 and not report["ready"]
+    assert {node["provider"]: node["status"] for node in report["nodes"]} == {
+        "node_b": "busy", "node_c": "ready"}
     assert h.rpc("b", {**reserve, "key": {"job_id": "overflow", "attempt": 1}}, generation)["reply"] == {"kind": "error", "value": "busy"}
     wait_for(lambda: h.rpc("b", {"op": "catalog"})["reply"]["value"]["available_admissions"] == 2, 8)
     passed("atomic admission reservations and abandoned lease reclamation")

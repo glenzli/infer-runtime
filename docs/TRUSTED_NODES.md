@@ -32,13 +32,17 @@ automatic fallback to C. A machine allowing loopback TCP binds is required.
 
 ## Verified on 2026-09-23 (Asia/Shanghai)
 
-The final linked `inferd` passed all 14 same-host acceptance groups, including
+The final linked `inferd` passed all 16 same-host acceptance groups, including
 certificate/name/digest rejection, explicit App grants, running lease expiry,
-unknown-outcome replay suppression and authorized fallback after confirmed failure.
+unknown-outcome replay suppression, authenticated operator probes and authorized
+fallback after confirmed failure.
 The harness records the executable and script SHA-256 in its JSON report.
 
-- Executable SHA-256: `dc2d968a3d13b9ec1c50c9e6cd719c7ae55c3167d37784dd88a4ec456d8c0f15`
-- Harness SHA-256: `b650284f41b4481523076aa4011f3da681729dad73c974b4fc2edd07565ba524`
+- Executable SHA-256: `14a91aa7590f4311669fdf9e3efbd817e5dab3095b005650b1f5f579b076d1f3`
+- Harness SHA-256: `052fdff7af5a603422c9f1eb981b342deb20b6bac9898bb4a40b140903d20f4b`
+- `cargo build -p inferd --offline`: final probe binary linked successfully.
+- `cargo test -p inferd --offline`: 2 daemon tests passed.
+- `cargo clippy -p inferd --all-targets --no-deps --offline -- -D warnings`: passed.
 - `cargo test --workspace --offline -- --skip tests::migration_backfills_priority_for_existing_job_metadata`:
   435 passed, 24 ignored, one known baseline test filtered out.
 - After the final catalog capacity correction, `cargo test -p infer-node --offline`:
@@ -161,6 +165,17 @@ estimates at zero: B reserves its own physical resources. Configure a local Mode
 Profile/Intent assessment and grant `b_summary` to the appropriate App. Advertised
 capabilities never create an App grant automatically. Define C as a separate
 Provider and Deployment, even when it exports the same name/model.
+
+From A, probe every configured import through the real mutual-TLS Node connection:
+
+```sh
+target/debug/inferd --config /absolute/private/a.toml --probe-nodes
+```
+
+The command prints payload-free JSON with each Provider's import match and current
+admission slots. It exits nonzero if no trusted peers are configured, a peer is
+unreachable or unauthorized, an approved export digest is absent, or the peer has
+no free admission slot. The probe does not submit a Job or prove model execution.
 
 Applications still connect to A using their existing credentials. An authorized
 request can set:

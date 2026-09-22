@@ -1,4 +1,5 @@
 //! Composition root for the local infer-runtime daemon.
+mod node_probe;
 
 use std::{
     fs,
@@ -27,6 +28,9 @@ struct Args {
     /// Print payload-free exported node contract identities, without starting services.
     #[arg(long)]
     print_node_offers: bool,
+    /// Check configured node imports through authenticated live Catalog RPCs.
+    #[arg(long, conflicts_with = "print_node_offers")]
+    probe_nodes: bool,
 }
 
 #[tokio::main]
@@ -48,6 +52,9 @@ async fn main() -> anyhow::Result<()> {
             serde_json::to_string_pretty(&infer_control::node_offers(&config)?)?
         );
         return Ok(());
+    }
+    if args.probe_nodes {
+        return node_probe::run(&config).await;
     }
     let bind = config.server.bind.clone();
     let observer_config = config.observer.clone();
