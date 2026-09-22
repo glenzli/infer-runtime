@@ -147,6 +147,8 @@ pub enum ProviderError {
         kind: ProviderFailureKind,
         message: String,
     },
+    #[error("configured model {model} is absent from the provider inventory")]
+    ModelMissing { model: String },
 }
 
 impl ProviderError {
@@ -166,6 +168,7 @@ impl ProviderError {
             Self::Transport(_) | Self::Io(_) => ProviderFailureKind::Unavailable,
             Self::InvalidInput(_) => ProviderFailureKind::InvalidRequest,
             Self::Classified { kind, .. } | Self::CodexTurn { kind, .. } => *kind,
+            Self::ModelMissing { .. } => ProviderFailureKind::Unavailable,
             Self::RemoteOutcomeUnknown
             | Self::Malformed(_)
             | Self::Protocol(_)
@@ -186,12 +189,19 @@ impl ProviderError {
         !matches!(self, Self::RemoteOutcomeUnknown)
     }
 
+    pub fn model_missing(&self) -> bool {
+        matches!(self, Self::ModelMissing { .. })
+    }
+
     pub fn public_message(&self) -> &'static str {
         if matches!(self, Self::RemoteOutcomeUnknown) {
             return "remote node outcome unknown; automatic replay prohibited";
         }
         if let Self::CodexTurn { code, .. } = self {
             return code;
+        }
+        if self.model_missing() {
+            return "configured model is absent from provider inventory";
         }
         match self.kind() {
             ProviderFailureKind::Authentication => "provider authentication failed",

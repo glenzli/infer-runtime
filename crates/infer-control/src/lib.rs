@@ -20,6 +20,7 @@ mod resource_control;
 mod resource_monitor;
 mod retrieval_execution;
 mod scheduler;
+mod subscription_models;
 mod vision_execution;
 
 use std::{
@@ -48,7 +49,7 @@ use infer_provider::{
     DynFaceEmbeddingExecutor, DynFaceParsingExecutor, DynImageCompletionExecutor,
     DynImageEmbeddingExecutor, DynImageUnderstandingExecutor, DynOcrExecutor, DynProvider,
     DynRetrievalExecutor, DynSemanticGroundingExecutor, DynSubjectSegmentationExecutor,
-    DynTextEmbeddingExecutor, ProviderError, ProviderModelCatalog, probe_responses_provider,
+    DynTextEmbeddingExecutor, ProviderError, probe_responses_provider,
     probe_responses_provider_with_effort,
 };
 use infer_resource::{ModelReservation, ResourceError, ResourceManager};
@@ -77,6 +78,7 @@ use registry::{
 };
 use resource_monitor::EvictionMonitor;
 use scheduler::{ProviderScheduler, ScheduledPermit, SchedulerError};
+use subscription_models::SubscriptionModels;
 
 pub use audio_streaming::{
     RuntimeAudioByteStream, RuntimeTranscriptionSession, SpeechRuntimeStream,
@@ -95,6 +97,7 @@ pub use resource_monitor::{
     EvictionMonitorOutcome, EvictionMonitorSnapshot, MaintenanceLease, MaintenanceLeaseError,
     MaintenanceLeaseRequest, MaintenanceLeaseRevokeRequest,
 };
+pub use subscription_models::{ConfiguredModelStatus, ModelPresence, SubscriptionModelSnapshot};
 
 pub type RuntimeByteStream = Pin<Box<dyn Stream<Item = Bytes> + Send>>;
 
@@ -215,6 +218,8 @@ pub enum RuntimeError {
     ResourceAdminRequired(String),
     #[error("no deployment satisfies the intent, capability floor, and hard constraints")]
     NoCandidate,
+    #[error("named deployment {0} is absent from the last complete provider model catalog")]
+    NamedModelUnavailable(String),
     #[error("provider `{0}` is unavailable")]
     ProviderUnavailable(String),
     #[error(transparent)]
@@ -407,6 +412,7 @@ pub struct Runtime {
     jobs: Mutex<HashMap<String, JobEntry>>,
     metrics: RuntimeMetrics,
     health: ProviderHealth,
+    subscription_models: Arc<SubscriptionModels>,
     provider_readiness: BTreeMap<String, infer_provider::ProviderRuntimeReadiness>,
     resources: Arc<ResourceManager>,
     node_capacity: NodeCapacity,
@@ -489,6 +495,7 @@ impl Runtime {
         let app_admission = AppAdmission::new(&config.apps);
         let resource_monitor = EvictionMonitor::new(config.resources.eviction.monitor.clone());
         let assembly = ProviderAssembly::from_config(&config)?;
+        let subscription_models = SubscriptionModels::new(&config, &assembly.providers);
         let pressure_refresh_interval =
             Duration::from_millis(config.resources.pressure.refresh_interval_ms);
         let resources = Arc::new(ResourceManager::with_native_controllers(
@@ -523,6 +530,7 @@ impl Runtime {
             jobs: Mutex::new(HashMap::new()),
             metrics: RuntimeMetrics::default(),
             health: ProviderHealth::default(),
+            subscription_models: Arc::clone(&subscription_models),
             provider_readiness: assembly.readiness,
             resources,
             node_capacity,
@@ -535,6 +543,7 @@ impl Runtime {
         });
         runtime.restore_background(background_recovery).await;
         resource_monitor::spawn(&runtime);
+        subscription_models.spawn();
         Ok(runtime)
     }
 
@@ -583,6 +592,7 @@ impl Runtime {
         let resources = Arc::new(ResourceManager::from_config(&config));
         let node_capacity = NodeCapacity::from_config(&config.resources.admission_capacity);
         let resource_monitor = EvictionMonitor::new(config.resources.eviction.monitor.clone());
+        let subscription_models = SubscriptionModels::new(&config, &providers);
         let schedulers = config
             .providers
             .iter()
@@ -619,6 +629,7 @@ impl Runtime {
             jobs: Mutex::new(HashMap::new()),
             metrics: RuntimeMetrics::default(),
             health: ProviderHealth::default(),
+            subscription_models,
             provider_readiness: BTreeMap::new(),
             resources,
             node_capacity,
@@ -821,6 +832,11 @@ impl Runtime {
                     }
                     Ok(Err(error)) => {
                         let kind = error.kind();
+                        if error.model_missing() {
+                            self.subscription_models
+                                .invalidate(&prepared.provider_id)
+                                .await;
+                        }
                         self.health.record_failure(&prepared.provider_id, &error);
                         self.finish_attempt(
                             &prepared,
@@ -831,7 +847,8 @@ impl Runtime {
                             None,
                         )
                         .await?;
-                        let can_retry = error.replay_allowed()
+                        let can_retry = !error.model_missing()
+                            && error.replay_allowed()
                             && attempt_policy::retryable(kind)
                             && retry_index < attempt_policy::MAX_RETRIES_PER_CANDIDATE
                             && attempts < attempt_policy::MAX_ATTEMPTS;
@@ -957,6 +974,11 @@ impl Runtime {
                     }
                     Ok(Err(error)) => {
                         let kind = error.kind();
+                        if error.model_missing() {
+                            self.subscription_models
+                                .invalidate(&prepared.provider_id)
+                                .await;
+                        }
                         self.health.record_failure(&prepared.provider_id, &error);
                         self.finish_attempt(
                             &prepared,
@@ -967,7 +989,8 @@ impl Runtime {
                             None,
                         )
                         .await?;
-                        let can_retry = attempt_policy::retryable(kind)
+                        let can_retry = !error.model_missing()
+                            && attempt_policy::retryable(kind)
                             && retry_index < attempt_policy::MAX_RETRIES_PER_CANDIDATE
                             && attempts < attempt_policy::MAX_ATTEMPTS;
                         let can_fallback = attempt_policy::fallback_eligible(kind)
@@ -1500,12 +1523,27 @@ impl Runtime {
     pub async fn provider_model_catalog(
         &self,
         provider_id: &str,
-    ) -> Result<ProviderModelCatalog, RuntimeError> {
+    ) -> Result<SubscriptionModelSnapshot, RuntimeError> {
+        if self.subscription_models.contains(provider_id) {
+            self.subscription_models.refresh_if_due(provider_id).await;
+            return self
+                .subscription_models
+                .snapshot(provider_id)
+                .await
+                .ok_or_else(|| RuntimeError::ProviderProbeUnsupported(provider_id.into()));
+        }
         let provider = self.provider(provider_id)?;
-        provider
+        let catalog = provider
             .model_catalog()
             .await?
-            .ok_or_else(|| RuntimeError::ProviderProbeUnsupported(provider_id.into()))
+            .ok_or_else(|| RuntimeError::ProviderProbeUnsupported(provider_id.into()))?;
+        Ok(SubscriptionModelSnapshot {
+            provider: catalog.provider,
+            models: catalog.models,
+            configured_deployments: Vec::new(),
+            last_success_unix_ms: None,
+            observation_error: false,
+        })
     }
 
     pub async fn execute_audio(
@@ -1768,7 +1806,7 @@ impl Runtime {
         let submitted_at = Instant::now();
         let JobPreparation {
             logical_model,
-            constraints,
+            mut constraints,
             execution_requirements,
             reasoning_effort,
             estimated_tokens,
@@ -1831,6 +1869,44 @@ impl Runtime {
             .expect("validated profile");
         let mut unavailable_providers = self.unavailable_providers();
         let mut unavailable_deployments = self.resources.unavailable_deployments().await;
+        for (id, provider) in &self.config.providers {
+            let route_can_select_provider =
+                self.config
+                    .deployments
+                    .iter()
+                    .any(|(deployment_id, deployment)| {
+                        if &deployment.provider != id {
+                            return false;
+                        }
+                        let profile = &self.config.model_builds[&deployment.build].profile;
+                        if let Some(named) = constraints.named_route.as_ref() {
+                            named.rank(deployment_id, profile).is_some()
+                        } else {
+                            routing_grant
+                                .as_ref()
+                                .is_none_or(|grant| grant.allows_deployment(deployment_id, profile))
+                        }
+                    });
+            if provider.kind == ProviderKind::CodexAppServer
+                && route_can_select_provider
+                && app
+                    .allowed_provider_access_classes
+                    .contains(&provider.access_class)
+                && constraints
+                    .placement
+                    .is_none_or(|scope| scope.allows(provider.placement))
+                && constraints.offline_required != Some(true)
+            {
+                self.subscription_models.refresh_if_due(id).await;
+            }
+        }
+        let missing_subscription_models = self.subscription_models.unavailable_deployments().await;
+        unavailable_deployments.extend(missing_subscription_models.iter().cloned());
+        let named_missing = subscription_models::expand_named_successor(
+            &mut constraints,
+            routing_grant.as_ref(),
+            &missing_subscription_models,
+        );
         if !node_request_fits {
             unavailable_providers.extend(
                 self.config
@@ -1905,7 +1981,11 @@ impl Runtime {
         if fallback == Fallback::AllowLowerCapability {
             targets.extend(plan.lower_capability_candidates.iter().cloned());
         }
-        let candidate = targets.first().cloned().ok_or(RuntimeError::NoCandidate)?;
+        let candidate = targets.first().cloned().ok_or_else(|| {
+            named_missing
+                .map(RuntimeError::NamedModelUnavailable)
+                .unwrap_or(RuntimeError::NoCandidate)
+        })?;
         if fallback == Fallback::None {
             targets.truncate(1);
         }
@@ -3332,6 +3412,106 @@ mod tests {
         }
     }
 
+    struct SubscriptionRouteProvider {
+        seen_models: Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl Provider for SubscriptionRouteProvider {
+        fn id(&self) -> &str {
+            "local"
+        }
+
+        async fn execute(&self, request: ResponsesRequest) -> Result<Value, ProviderError> {
+            self.seen_models.lock().await.push(request.model);
+            Ok(json!({
+                "output": [{"type":"message","content":[{"type":"output_text","text":"ok"}]}]
+            }))
+        }
+
+        async fn execute_stream(
+            &self,
+            _: ResponsesRequest,
+        ) -> Result<infer_provider::ProviderByteStream, ProviderError> {
+            unreachable!("named successor test is unary")
+        }
+
+        async fn model_catalog(
+            &self,
+        ) -> Result<Option<infer_provider::ProviderModelCatalog>, ProviderError> {
+            Ok(Some(infer_provider::ProviderModelCatalog {
+                provider: "local".into(),
+                models: vec![infer_provider::ProviderModelInfo {
+                    id: "qwen-cloud".into(),
+                    model: "qwen-cloud".into(),
+                    display_name: String::new(),
+                    description: String::new(),
+                    input_modalities: vec!["text".into()],
+                    supported_reasoning_efforts: Vec::new(),
+                    default_reasoning_effort: String::new(),
+                    is_default: false,
+                    hidden: false,
+                    upgrade: None,
+                    admitted: true,
+                }],
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_named_subscription_model_uses_only_explicit_successor_and_fallback() {
+        let mut config = config();
+        let provider_config = config.providers.get_mut("local").unwrap();
+        provider_config.kind = ProviderKind::CodexAppServer;
+        provider_config.capability_profile.protocol = ProviderProtocol::CodexAppServer;
+        provider_config.command = Some("codex".into());
+        provider_config.placement = infer_core::Placement::Cloud;
+        provider_config.access_class = infer_core::ProviderAccessClass::Subscription;
+        config.deployments.get_mut("qwen_cloud").unwrap().provider = "local".into();
+        let app = config.apps.get_mut("test-app").unwrap();
+        app.allowed_provider_access_classes
+            .insert(infer_core::ProviderAccessClass::Subscription);
+        app.routing = Some(infer_core::AppRoutingConfig {
+            intents: BTreeMap::from([(
+                "text.summarize".into(),
+                infer_core::RoutingGrantConfig {
+                    named_deployment_ids: BTreeSet::from([
+                        "qwen_local".into(),
+                        "qwen_cloud".into(),
+                    ]),
+                    successor_deployments: BTreeMap::from([(
+                        "qwen_local".into(),
+                        "qwen_cloud".into(),
+                    )]),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        });
+        let provider = Arc::new(SubscriptionRouteProvider {
+            seen_models: Mutex::new(Vec::new()),
+        });
+        let runtime = Runtime::with_providers(
+            config,
+            BTreeMap::from([("local".into(), provider.clone() as DynProvider)]),
+        );
+        let mut request = summary_request();
+        request
+            .metadata
+            .insert("infer.deployment_ids".into(), "qwen_local".into());
+        assert!(matches!(
+            runtime.execute("test-app", request.clone()).await,
+            Err(RuntimeError::NamedModelUnavailable(id)) if id == "qwen_local"
+        ));
+        assert!(provider.seen_models.lock().await.is_empty());
+
+        request
+            .metadata
+            .insert("infer.fallback".into(), "equivalent".into());
+        runtime.execute("test-app", request).await.unwrap();
+        assert_eq!(*provider.seen_models.lock().await, vec!["qwen-cloud"]);
+    }
+
     #[test]
     fn symbiont_capability_override_shape_allows_through_expert() {
         let mut config = config();
@@ -4479,6 +4659,7 @@ mod tests {
             model_profile_ids: BTreeSet::new(),
             named_deployment_ids: BTreeSet::new(),
             named_model_profile_ids: BTreeSet::new(),
+            successor_deployments: BTreeMap::new(),
             intents: BTreeMap::new(),
         });
         let provider = Arc::new(UnavailableProvider {
@@ -4511,6 +4692,7 @@ mod tests {
             model_profile_ids: BTreeSet::new(),
             named_deployment_ids: BTreeSet::new(),
             named_model_profile_ids: BTreeSet::new(),
+            successor_deployments: BTreeMap::new(),
             intents: BTreeMap::new(),
         });
         let provider = Arc::new(FakeProvider {

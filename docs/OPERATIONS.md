@@ -153,6 +153,14 @@ deployment；刷新失败时该 inventory 的 deployment 会保守地暂时不�
 下一次刷新成功。每个 Candidate Plan 都用 `deployment_unavailable` 记录该
 决定，和 provider 熔断的 `provider_circuit_open` 区分开。
 
+Codex 订阅模型组另有只读观测：Console 的 Provider 卡片和“查看模型组”显示已配置
+Deployment 对当前完整 `model/list` 的可用、首次缺席、持续缺席状态以及最近一次观测
+失败。首次成功清单缺席就暂停该 Deployment 的新请求路由；两次间隔至少五分钟的缺席
+才升级提示。失败观测保留上次完整清单的路由结论，不把网络、认证或协议错误解释为
+模型退役。需要迁移时，先验证继任模型的能力、effort、费用和 App 授权，再为相关
+Intent 配置 `successor_deployments` 并允许请求级 fallback。清理旧 Deployment 和
+App 授权是单独的配置变更；清单恢复不会自动撤销这一变更。
+
 同一响应还包含 `system_pressure` 与每个 deployment 的 `model_lifecycle`。
 当前 macOS sampler 读取系统的空闲内存百分比；Ollama 的 `/api/ps` 提供已驻留
 模型的 RAM/VRAM 字节数。采样值与压力分类分开保存，分类阈值可按主机 headroom

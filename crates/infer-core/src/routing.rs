@@ -28,6 +28,10 @@ pub struct RoutingGrantConfig {
     /// The Model Profile counterpart of `named_deployment_ids`.
     #[serde(default)]
     pub named_model_profile_ids: BTreeSet<String>,
+    /// A named deployment may gain this single, explicitly granted next
+    /// choice only when it is absent and the request permits fallback.
+    #[serde(default)]
+    pub successor_deployments: BTreeMap<String, String>,
 }
 
 impl RoutingGrantConfig {
@@ -72,6 +76,8 @@ pub struct AppRoutingConfig {
     #[serde(default)]
     pub named_model_profile_ids: BTreeSet<String>,
     #[serde(default)]
+    pub successor_deployments: BTreeMap<String, String>,
+    #[serde(default)]
     pub intents: BTreeMap<String, RoutingGrantConfig>,
 }
 
@@ -82,6 +88,7 @@ impl AppRoutingConfig {
             model_profile_ids: self.model_profile_ids.clone(),
             named_deployment_ids: self.named_deployment_ids.clone(),
             named_model_profile_ids: self.named_model_profile_ids.clone(),
+            successor_deployments: self.successor_deployments.clone(),
         }
     }
 
@@ -173,6 +180,26 @@ fn validate_grant(
             )));
         }
     }
+    for (source, successor) in &grant.successor_deployments {
+        if source == successor {
+            return Err(configuration(format!(
+                "app {app_id} routing {scope} has a self-referencing successor {source}"
+            )));
+        }
+        for id in [source, successor] {
+            let Some(deployment) = config.deployments.get(id) else {
+                return Err(configuration(format!(
+                    "app {app_id} routing {scope} successor names unknown deployment {id}"
+                )));
+            };
+            let profile = &config.model_builds[&deployment.build].profile;
+            if !grant.allows_named_deployment(id, profile) {
+                return Err(configuration(format!(
+                    "app {app_id} routing {scope} successor deployment {id} is not granted"
+                )));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -227,6 +254,7 @@ mod tests {
             model_profile_ids: BTreeSet::from(["global-profile".into()]),
             named_deployment_ids: BTreeSet::new(),
             named_model_profile_ids: BTreeSet::new(),
+            successor_deployments: BTreeMap::new(),
             intents: BTreeMap::from([
                 (
                     "text.edit".into(),
@@ -275,5 +303,42 @@ mod tests {
         assert!(grant.allows_deployment("luna", "luna-profile"));
         assert!(!grant.allows_deployment("terra", "terra-profile"));
         assert!(grant.allows_named_deployment("terra", "terra-profile"));
+    }
+
+    #[test]
+    fn configured_successor_must_be_an_explicitly_granted_deployment() {
+        let mut config: RuntimeConfig =
+            toml::from_str(include_str!("../../../config/infer.example.toml")).unwrap();
+        config.apps.get_mut("local-operator").unwrap().routing = Some(AppRoutingConfig {
+            intents: BTreeMap::from([(
+                "reasoning.solve".into(),
+                RoutingGrantConfig {
+                    named_deployment_ids: BTreeSet::from([
+                        "codex_gpt_5_6_sol".into(),
+                        "codex_gpt_6_sol".into(),
+                    ]),
+                    successor_deployments: BTreeMap::from([(
+                        "codex_gpt_5_6_sol".into(),
+                        "codex_gpt_6_sol".into(),
+                    )]),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        });
+        config.validate().unwrap();
+        config
+            .apps
+            .get_mut("local-operator")
+            .unwrap()
+            .routing
+            .as_mut()
+            .unwrap()
+            .intents
+            .get_mut("reasoning.solve")
+            .unwrap()
+            .named_deployment_ids
+            .remove("codex_gpt_6_sol");
+        assert!(config.validate().is_err());
     }
 }

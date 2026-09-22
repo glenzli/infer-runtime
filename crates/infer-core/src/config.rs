@@ -3040,6 +3040,7 @@ mod tests {
             model_profile_ids: BTreeSet::new(),
             named_deployment_ids: BTreeSet::new(),
             named_model_profile_ids: BTreeSet::new(),
+            successor_deployments: BTreeMap::new(),
             intents: BTreeMap::from([
                 (
                     "text.summarize".into(),

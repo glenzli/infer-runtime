@@ -46,6 +46,9 @@ impl ProviderHealth {
             .remove(provider);
     }
     pub fn record_failure(&self, provider: &str, error: &ProviderError) {
+        if error.model_missing() {
+            return;
+        }
         if !matches!(
             error.kind(),
             ProviderFailureKind::Unavailable
@@ -82,5 +85,19 @@ mod tests {
         assert!(health.unavailable_providers().contains("cloud"));
         health.record_success("cloud");
         assert!(!health.unavailable_providers().contains("cloud"));
+    }
+
+    #[test]
+    fn a_missing_model_does_not_open_the_shared_provider_circuit() {
+        let health = ProviderHealth::default();
+        for _ in 0..3 {
+            health.record_failure(
+                "codex",
+                &ProviderError::ModelMissing {
+                    model: "old".into(),
+                },
+            );
+        }
+        assert!(health.unavailable_providers().is_empty());
     }
 }

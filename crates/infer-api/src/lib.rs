@@ -1478,6 +1478,10 @@ impl From<RuntimeError> for ApiError {
                 contract::error_code::RESOURCE_ADMIN_REQUIRED,
             ),
             RuntimeError::NoCandidate => (StatusCode::CONFLICT, contract::error_code::NO_CANDIDATE),
+            RuntimeError::NamedModelUnavailable(_) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                contract::error_code::UPSTREAM_UNAVAILABLE,
+            ),
             RuntimeError::Cancelled => (StatusCode::CONFLICT, contract::error_code::CANCELLED),
             RuntimeError::QueueFull => (
                 StatusCode::TOO_MANY_REQUESTS,

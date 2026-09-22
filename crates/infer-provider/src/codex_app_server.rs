@@ -248,9 +248,8 @@ impl CodexAppServerProvider {
             .models
             .iter()
             .find(|candidate| candidate.model == request.model)
-            .ok_or_else(|| ProviderError::Classified {
-                kind: ProviderFailureKind::Unavailable,
-                message: "configured Codex model is absent from current model/list".into(),
+            .ok_or_else(|| ProviderError::ModelMissing {
+                model: request.model.clone(),
             })?;
         if !model.admitted {
             return Err(ProviderError::InvalidInput(
@@ -1391,6 +1390,33 @@ echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1"
             Some(&json!("image_generation_call"))
         );
         assert_eq!(response.pointer("/output/0/result"), Some(&json!(encoded)));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_configured_model_missing_from_a_complete_catalog_fails_closed() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let script = temp.path().join("fake-codex");
+        std::fs::write(
+            &script,
+            "#!/bin/sh\nread initialize\necho '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}'\nread initialized\nread models\necho '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"data\":[],\"nextCursor\":null}}'\n",
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&script).unwrap().permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(&script, permissions).unwrap();
+        let provider = CodexAppServerProvider::new(
+            "codex-test",
+            script.display().to_string(),
+            vec![],
+            BTreeSet::from(["gpt-5.6-terra".into()]),
+        );
+        assert!(matches!(
+            provider.execute(request(json!("hello"))).await,
+            Err(ProviderError::ModelMissing { model }) if model == "gpt-5.6-terra"
+        ));
     }
 
     #[tokio::test]

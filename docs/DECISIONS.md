@@ -128,8 +128,10 @@
 - **决定**：一个已登录的订阅账号实例建模为一个 Provider 和一个共享 quota/concurrency pool；
   Codex `model/list` 返回的每个可路由模型分别映射为 Model Profile → Build → Deployment；
   reasoning effort 是 Deployment 参数，不拆成独立 Deployment。
-- **发现/准入**：动态发现只进入 operator inventory。当前只准入 Sol/Terra/Luna；新增、隐藏、
-  upgrade 或消失不会自动改路由。配置模型缺失时 Attempt fail closed，不暗中选择默认模型。
+- **发现/准入**：动态发现不修改版本化准入；新增和 `upgrade` 不会自动开放或迁移模型。
+  完整清单证实已配置模型缺席时，只暂停对应 Deployment 的新请求路由，并保留
+  operator 观测和明确错误；读取清单失败不是退役证据。执行前仍 fail closed，
+  不暗中选择默认模型。继任 Deployment 只通过 App 显式授权与请求级 fallback 加入候选。
 - **placement/授权**：即使 JSON-RPC transport 在本机，推理仍发生在云端，必须标记
   `placement=cloud` 和 `access_class=subscription`。App 默认只有 `standard`；只有显式加入
   subscription class 才能消费，缺失授权记录 `provider_access_not_allowed`。

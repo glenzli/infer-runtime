@@ -7,6 +7,9 @@ const state = {
   configLoaded: false,
   configDirty: false,
   refreshing: false,
+  subscriptionCatalogs: {},
+  subscriptionRefreshAt: 0,
+  lastDaemonPid: null,
 };
 
 const viewCopy = {
@@ -55,8 +58,15 @@ async function refreshAll({ quiet = false } = {}) {
       api("/api/logs"),
     ]);
     state.snapshot = snapshotPayload;
+    const daemonPid = snapshotPayload.daemon?.pid || null;
+    if (daemonPid !== state.lastDaemonPid) {
+      state.subscriptionCatalogs = {};
+      state.subscriptionRefreshAt = 0;
+      state.lastDaemonPid = daemonPid;
+    }
     state.logs = logPayload.logs || [];
     renderAll();
+    void refreshSubscriptionCatalogs();
     if (!state.configLoaded) await loadConfig();
   } catch (error) {
     renderConsoleDisconnected(error.message);
@@ -66,6 +76,24 @@ async function refreshAll({ quiet = false } = {}) {
     button.disabled = false;
     button.textContent = "立即刷新";
   }
+}
+
+async function refreshSubscriptionCatalogs() {
+  const providers = endpoint("providers")?.providers || endpoint("providers") || [];
+  if (!Array.isArray(providers) || !state.snapshot?.daemon?.reachable) return;
+  const now = Date.now();
+  if (now - state.subscriptionRefreshAt < 60_000) return;
+  state.subscriptionRefreshAt = now;
+  const codexProviders = providers.filter(provider => provider.kind === "codex_app_server");
+  const results = await Promise.allSettled(codexProviders.map(provider =>
+    api(`/api/providers/${encodeURIComponent(provider.id)}/models`)));
+  results.forEach((result, index) => {
+    if (result.status === "fulfilled") {
+      state.subscriptionCatalogs[codexProviders[index].id] = result.value.result;
+    }
+  });
+  renderProviders();
+  renderResources();
 }
 
 function renderAll() {
@@ -217,7 +245,9 @@ function renderProviders() {
     target.innerHTML = `<div class="empty-state">${escapeHtml(endpointError("providers") || "没有 Provider")}</div>`;
     return;
   }
-  const providerPriority = provider => provider.readiness?.status === "unavailable" || provider.circuit_open ? 0 : provider.configured ? 2 : 1;
+  const providerPriority = provider => provider.readiness?.status === "unavailable" || provider.circuit_open ? 0
+    : (state.subscriptionCatalogs[provider.id]?.configured_deployments || []).some(model => model.presence?.startsWith("missing_")) ? 1
+    : provider.configured ? 3 : 2;
   const visibleProviders = [...providers].sort((left, right) => {
     const leftQueue = queues[left.id] || {};
     const rightQueue = queues[right.id] || {};
@@ -231,8 +261,10 @@ function renderProviders() {
     const queue = queues[provider.id] || {};
     const pending = number(queue.pending_interactive) + number(queue.pending_normal) + number(queue.pending_background);
     const unavailable = provider.readiness?.status === "unavailable";
-    const health = unavailable ? "依赖缺失" : provider.circuit_open ? "熔断" : provider.configured ? "可用" : "未配置";
-    const healthClass = unavailable || provider.circuit_open ? "error" : provider.configured ? "healthy" : "neutral";
+    const missingCount = (state.subscriptionCatalogs[provider.id]?.configured_deployments || [])
+      .filter(model => model.presence?.startsWith("missing_")).length;
+    const health = unavailable ? "依赖缺失" : provider.circuit_open ? "熔断" : missingCount ? `${missingCount} 个模型缺席` : provider.configured ? "可用" : "未配置";
+    const healthClass = unavailable || provider.circuit_open ? "error" : missingCount ? "warning" : provider.configured ? "healthy" : "neutral";
     return `<div class="stack-row"><div><strong>${escapeHtml(provider.id)}</strong><small>${escapeHtml(provider.kind)} · ${escapeHtml(placementLabel(provider.placement))} · ${number(queue.active)} 执行 / ${pending} 排队</small></div><span class="status-chip ${healthClass}">${health}</span></div>`;
   }).join("") + (hiddenCount ? `<div class="stack-more">另有 ${hiddenCount} 个 Provider，前往“能力与资源”查看全部。</div>` : "");
 }
@@ -363,11 +395,15 @@ function providerDeployments(provider, resource) {
 function providerCard(provider, resource, deployments, totalDeployments, filters) {
   const lifecycleModels = resource?.model_lifecycle || [];
   const lifecycleByDeployment = new Map(lifecycleModels.map(model => [model.deployment, model]));
+  const subscription = state.subscriptionCatalogs[provider.id];
+  const subscriptionByDeployment = new Map((subscription?.configured_deployments || []).map(model => [model.deployment, model]));
+  const missingModels = (subscription?.configured_deployments || []).filter(model => model.presence?.startsWith("missing_"));
   const available = resource?.available_deployments?.length || 0;
   const readinessUnavailable = provider.readiness?.status === "unavailable";
-  const providerState = readinessUnavailable ? "unavailable" : provider.circuit_open ? "熔断" : resource?.state || (provider.configured ? "configured" : "unconfigured");
+  const providerState = readinessUnavailable ? "unavailable" : provider.circuit_open ? "熔断" : missingModels.length ? "warning" : resource?.state || (provider.configured ? "configured" : "unconfigured");
   const rows = deployments.length ? deployments.map(deployment => {
     const lifecycle = lifecycleByDeployment.get(deployment.id);
+    const subscriptionModel = subscriptionByDeployment.get(deployment.id);
     const modelIdentity = deployment.model || lifecycle?.model_id || "—";
     const coverage = deploymentCoverage(deployment, filters);
     const supply = deployment.source_kind
@@ -376,7 +412,9 @@ function providerCard(provider, resource, deployments, totalDeployments, filters
     const details = [compactModelIdentity(modelIdentity), deployment.model_profile, supply, coverage]
       .filter(Boolean)
       .join(" · ");
-    const state = lifecycle?.state || (readinessUnavailable || provider.circuit_open || !provider.configured ? "unavailable" : "admitted");
+    const state = subscriptionModel?.presence?.startsWith("missing_")
+      ? subscriptionModel.presence
+      : lifecycle?.state || (readinessUnavailable || provider.circuit_open || !provider.configured ? "unavailable" : "admitted");
     const canLoad = lifecycle && !["ready", "loading"].includes(lifecycle.state);
     const canUnload = lifecycle && ["ready", "draining"].includes(lifecycle.state) && number(lifecycle.active_reservations) === 0;
     const lifecycleDetail = lifecycle
@@ -390,7 +428,7 @@ function providerCard(provider, resource, deployments, totalDeployments, filters
   const access = provider.access_class && provider.access_class !== "standard" ? ` · ${provider.access_class}` : "";
   const filtered = deployments.length !== totalDeployments ? `${deployments.length}/${totalDeployments} 个匹配` : `${totalDeployments} 个已准入`;
   const dependencySummary = readinessUnavailable ? ` · ${provider.readiness.summary || "本机运行依赖不可用"}` : "";
-  const availability = `${filtered}${lifecycleModels.length ? ` · ${available} 个可用` : ""}${dependencySummary}`;
+  const availability = `${filtered}${lifecycleModels.length ? ` · ${available} 个可用` : ""}${missingModels.length ? ` · ${missingModels.length} 个上游缺席` : ""}${subscription?.observation_error ? " · 清单刷新失败" : ""}${dependencySummary}`;
   const modes = provider.execution_modes?.join(" / ") || "unary";
   const tools = catalog || probe ? `<div class="provider-tools">${catalog}${probe}</div>` : "";
   return `<article class="panel provider-card"><div class="provider-card-header"><div><strong>${escapeHtml(provider.id)}</strong><small>${escapeHtml(provider.kind || "unknown")} · ${escapeHtml(placementLabel(provider.placement))}${escapeHtml(access)} · ${escapeHtml(modes)} · ${escapeHtml(availability)}</small></div><span class="status-chip ${statusClass(providerState)}">${escapeHtml(providerStateLabel(providerState))}</span>${tools}</div>${rows}</article>`;
@@ -471,6 +509,8 @@ function modelStateLabel(state) {
     draining: "待释放",
     unavailable: "不可用",
     unknown: "待检测",
+    missing_suspected: "上游缺席，待复核",
+    missing_confirmed: "上游持续缺席",
   })[state] || state || "未知";
 }
 
@@ -599,14 +639,29 @@ async function showProviderModels(provider) {
   try {
     const payload = await api(`/api/providers/${encodeURIComponent(provider)}/models`);
     const models = payload.result?.models || [];
+    const configured = payload.result?.configured_deployments || [];
+    state.subscriptionCatalogs[provider] = payload.result;
     const admitted = models.filter(model => model.admitted).length;
-    document.getElementById("dialog-title").textContent = `${provider} · ${admitted}/${models.length} 已准入`;
-    document.getElementById("dialog-content").textContent = models.map(model => {
+    const missing = configured.filter(model => model.presence?.startsWith("missing_"));
+    document.getElementById("dialog-title").textContent = `${provider} · ${admitted}/${models.length} 已准入 · ${missing.length} 个配置模型缺席`;
+    const observedText = payload.result?.last_success_unix_ms
+      ? `上次完整清单：${formatClock(payload.result.last_success_unix_ms)}`
+      : "尚无完整清单";
+    const observationText = payload.result?.observation_error ? `${observedText} · 最近一次刷新失败` : observedText;
+    const configuredText = configured.map(model => {
+      const label = modelStateLabel(model.presence);
+      return `${label}  ${model.deployment} · ${model.model}`;
+    }).join("\n");
+    const discoveredText = models.map(model => {
       const efforts = (model.supported_reasoning_efforts || []).join(", ") || "—";
       const state = model.admitted ? "已准入" : "仅发现";
       const upgrade = model.upgrade ? `\n  建议升级：${model.upgrade}` : "";
       return `${state}  ${model.model}\n  ${model.display_name || model.id}\n  推理档位：${efforts}${upgrade}`;
-    }).join("\n\n") || "当前没有可见模型。";
+    }).join("\n\n") || (payload.result?.observation_error ? "清单暂不可用。" : "当前没有可见模型。");
+    document.getElementById("dialog-content").textContent =
+      `${observationText}\n\n已配置 Deployment\n${configuredText || "无"}\n\n当前上游清单\n${discoveredText}`;
+    renderProviders();
+    renderResources();
     document.getElementById("detail-dialog").showModal();
   } catch (error) { toast(error.message, true); }
 }
@@ -715,9 +770,9 @@ function formatElapsedMilliseconds(value) {
 }
 function formatRelative(value) { if (!value) return "—"; const seconds = Math.max(0, Math.floor((Date.now() - number(value)) / 1000)); if (seconds < 60) return `${seconds}s 前`; if (seconds < 3600) return `${Math.floor(seconds / 60)}m 前`; if (seconds < 86400) return `${Math.floor(seconds / 3600)}h 前`; return new Date(number(value)).toLocaleDateString("zh-CN"); }
 function shortId(value) { if (!value) return "—"; return value.length > 22 ? `${value.slice(0, 9)}…${value.slice(-8)}` : value; }
-function statusClass(value) { const normalized = String(value || "neutral").toLowerCase(); return ["ready", "succeeded", "healthy", "normal", "configured"].includes(normalized) ? "ready" : ["failed", "error", "offline", "expired", "critical", "circuit_open"].includes(normalized) ? "error" : ["queued", "loading", "warn", "warning", "elevated", "draining"].includes(normalized) ? "warning" : normalized === "running" ? "running" : "neutral"; }
+function statusClass(value) { const normalized = String(value || "neutral").toLowerCase(); return ["ready", "succeeded", "healthy", "normal", "configured"].includes(normalized) ? "ready" : ["failed", "error", "offline", "expired", "critical", "circuit_open", "missing_confirmed"].includes(normalized) ? "error" : ["queued", "loading", "warn", "warning", "elevated", "draining", "missing_suspected"].includes(normalized) ? "warning" : normalized === "running" ? "running" : "neutral"; }
 function placementLabel(value) { return ({ local: "本地", cloud: "云端", trusted_node: "受信节点" })[value] || value || "—"; }
-function providerStateLabel(value) { return ({ configured: "已配置", unconfigured: "未配置", unavailable: "不可用", unknown: "待检测" })[value] || value || "未知"; }
+function providerStateLabel(value) { return ({ configured: "已配置", unconfigured: "未配置", unavailable: "不可用", unknown: "待检测", warning: "模型缺席" })[value] || value || "未知"; }
 function pressureLabel(value) { return ({ normal: "正常", elevated: "偏高", critical: "严重", unknown: "未知" })[value] || value || "未知"; }
 function evictionStatusText(value) { return ({ disabled: "清退策略已关闭。", no_pressure_trigger: "当前没有资源压力触发。", no_target_configured: "当前压力等级没有配置释放目标。", insufficient_pressure_data: "主机压力数据不足，保持保守。", target_already_met: "可用内存已达到策略目标。" })[value?.status] || "当前没有可执行建议。"; }
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>'"]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]); }

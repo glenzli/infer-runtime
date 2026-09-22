@@ -597,6 +597,21 @@ Deployment 和 App 的显式路由授权。新模型的能力评级为 provision
 `model/list` 分别报告 Sol 支持 `low` 到 `ultra`、Luna 支持 `low` 到 `max`，均支持文本和
 图片输入。订阅桥接在执行前再次核对当前模型清单和 effort；模型缺席时不会自动替换成另一模型。
 
+Runtime 每五分钟读取一次完整的 Codex 模型清单；新请求遇到尚未观测的订阅 Provider 时也会
+尝试读取。一次成功清单中缺席的已配置 Deployment 会立即退出新请求候选，但不会改变静态
+准入配置，也不会使同一 Provider 下其他模型熔断。连续两次、相隔至少五分钟的完整清单缺席
+会在 Console 标为“上游持续缺席”；读取清单失败只标记观测错误，不构成退役证据。执行
+期间发现模型刚刚消失时，本次 Attempt 报明确的模型缺席错误，下一次路由立即重新观测。
+
+运营者可以在 App 的 Intent 路由授权中显式配置
+`successor_deployments = { codex_gpt_5_6_sol = "codex_gpt_6_sol" }`。源和继任
+Deployment 都必须已向该 App 授权；只有 Consumer 命名源 Deployment、源模型已被完整
+清单确认缺席，且该请求选择 `infer.fallback=equivalent` 或
+`allow_lower_capability` 时，Runtime 才把继任项加入命名候选。能力、effort、placement、
+费用、App ACL 等硬约束仍会逐项校验。未配置或未请求 fallback 时，命名缺席返回明确错误；
+上游 `upgrade` 仅作为 Console 建议，不会自动成为路由。实际选中的 Deployment 仍记录在
+Job/Attempt 中。当前示例和本机配置不预设 5.6 Sol 与 6 Sol 等价，也没有启用这条映射。
+
 普通 App 默认只有 `standard` access class。需要使用订阅 Provider 的 App 必须由 operator 在
 配置中显式授权，同时保留最小 Intent 与 cloud placement 上限：
 
