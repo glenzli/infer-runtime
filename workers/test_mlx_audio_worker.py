@@ -109,5 +109,32 @@ class AudioToolResolutionTests(unittest.TestCase):
         )
 
 
+class SpeechPaceTests(unittest.TestCase):
+    def test_default_speed_does_not_transcode(self):
+        with patch.object(worker.subprocess, "run") as run:
+            worker._apply_qwen_pace(Path("narration.wav"), 1.0)
+            run.assert_not_called()
+
+    def test_tempo_is_bounded_and_applied_before_atomic_replacement(self):
+        for speed in (0.25, 0.75, 1.25, 4.0):
+            with patch.object(worker.subprocess, "run") as run, patch.object(worker.os, "replace") as replace:
+                worker._apply_qwen_pace(Path("narration.wav"), speed)
+                command = run.call_args.args[0]
+                filters = command[command.index("-af") + 1].split(",")
+                product = 1.0
+                for item in filters:
+                    factor = float(item.split("=")[1])
+                    self.assertTrue(0.5 <= factor <= 2.0)
+                    product *= factor
+                self.assertAlmostEqual(product, speed)
+                replace.assert_called_once()
+
+    def test_failed_conversion_never_replaces_original(self):
+        with patch.object(worker.subprocess, "run", side_effect=RuntimeError("failed")), patch.object(worker.os, "replace") as replace:
+            with self.assertRaises(RuntimeError):
+                worker._apply_qwen_pace(Path("narration.wav"), 1.25)
+            replace.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

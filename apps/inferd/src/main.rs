@@ -131,7 +131,7 @@ async fn main() -> anyhow::Result<()> {
     let serve = axum::serve(listener, api).with_graceful_shutdown(shutdown_signal());
     let serve = std::future::IntoFuture::into_future(serve);
     tokio::pin!(serve);
-    let mut discovery_check = tokio::time::interval(std::time::Duration::from_secs(30));
+    let mut discovery_check = tokio::time::interval(std::time::Duration::from_secs(60));
     discovery_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut discovery_error = None;
     let serve_result = loop {

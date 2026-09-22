@@ -8,6 +8,8 @@ import base64
 import gc
 import json
 import os
+import math
+import subprocess
 import sys
 import traceback
 from collections import OrderedDict
@@ -197,6 +199,30 @@ def _align(request: dict[str, Any]) -> dict[str, Any]:
     return {"text": request["text"], "language": language, "items": items}
 
 
+def _apply_qwen_pace(output_path: Path, speed: float) -> None:
+    """Qwen MLX ignores speed; materialize pitch-preserving tempo in its adapter."""
+    if not math.isfinite(speed) or not 0.25 <= speed <= 4.0:
+        raise ValueError("invalid speech speed")
+    if speed == 1.0:
+        return
+    factors = []
+    while speed < 0.5:
+        factors.append(0.5)
+        speed /= 0.5
+    while speed > 2.0:
+        factors.append(2.0)
+        speed /= 2.0
+    factors.append(speed)
+    paced = output_path.with_name("paced-" + output_path.name)
+    command = ["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(output_path),
+               "-af", ",".join(f"atempo={factor}" for factor in factors)]
+    if output_path.suffix.lower() == ".wav":
+        command += ["-c:a", "pcm_s16le"]
+    subprocess.run(command + [str(paced)], check=True, timeout=60,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    os.replace(paced, output_path)
+
+
 def _speech(request: dict[str, Any], *, voice_clone: bool) -> dict[str, Any]:
     import mlx.core as mx
     from mlx_audio.audio_io import write as audio_write
@@ -229,6 +255,8 @@ def _speech(request: dict[str, Any], *, voice_clone: bool) -> dict[str, Any]:
     audio_format = request.get("format") or "wav"
     with contextlib.redirect_stdout(sys.stderr):
         audio_write(output_path, audio, results[0].sample_rate, format=audio_format)
+    if getattr(model, "model_type", "") == "qwen3_tts":
+        _apply_qwen_pace(output_path, float(request.get("speed") or 1.0))
     return {
         "sample_rate": results[0].sample_rate,
         "segments": len(results),

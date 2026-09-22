@@ -2126,7 +2126,17 @@ credential = { source = "managed" }
 resource_admin = false
 allowed_intents = ["text.edit", "speech.synthesize"]
 allowed_builtin_tools = []
-allowed_speech_voice_aliases = ["speech.voice.zh.bright_female.v1"]
+allowed_speech_voice_aliases = [
+    "speech.voice.zh.bright_female.v1",
+    "speech.voice.zh.warm_female.v1",
+    "speech.voice.zh.mature_male.v1",
+    "speech.voice.zh.beijing_male.v1",
+    "speech.voice.zh.sichuan_male.v1",
+    "speech.voice.en.dynamic_male.v1",
+    "speech.voice.en.warm_male.v1",
+    "speech.voice.ja.bright_female.v1",
+    "speech.voice.ko.warm_female.v1",
+]
 allowed_provider_access_classes = ["standard"]
 allowed_cloud_input_modalities = []
 max_pending_jobs = 8

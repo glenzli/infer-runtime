@@ -1,0 +1,57 @@
+{
+  "catalog_revision": "infer.speech.voice-aliases@20260922.1",
+  "capability": "infer.audio.speech@20260811.1",
+  "voices": [
+    {
+      "alias": "speech.voice.zh.bright_female.v1",
+      "language": "Chinese"
+    },
+    {
+      "alias": "speech.voice.zh.warm_female.v1",
+      "language": "Chinese"
+    },
+    {
+      "alias": "speech.voice.zh.mature_male.v1",
+      "language": "Chinese"
+    },
+    {
+      "alias": "speech.voice.zh.beijing_male.v1",
+      "language": "Chinese"
+    },
+    {
+      "alias": "speech.voice.zh.sichuan_male.v1",
+      "language": "Chinese"
+    },
+    {
+      "alias": "speech.voice.en.dynamic_male.v1",
+      "language": "English"
+    },
+    {
+      "alias": "speech.voice.en.warm_male.v1",
+      "language": "English"
+    },
+    {
+      "alias": "speech.voice.ja.bright_female.v1",
+      "language": "Japanese"
+    },
+    {
+      "alias": "speech.voice.ko.warm_female.v1",
+      "language": "Korean"
+    }
+  ],
+  "default_language": "auto",
+  "languages": [
+    "auto",
+    "Chinese",
+    "English",
+    "Japanese",
+    "Korean",
+    "German",
+    "French",
+    "Russian",
+    "Portuguese",
+    "Spanish",
+    "Italian"
+  ],
+  "language_note": "Voice language indicates its native character; every voice supports auto and every listed synthesis language."
+}

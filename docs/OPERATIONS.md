@@ -71,7 +71,7 @@ MLX provider 和队列已可见，但 worker 内部单模型 cache residency 尚
 `Infer Runtime discovery failed`，应同时检查 `infra-protocol/registrations/infer-runtime--local.json`
 和实际服务端点。macOS 的默认注册目录位于用户临时目录，不能假定声明在长时间运行中始终存在。
 
-Daemon 每 30 秒只读检查其注册声明；文件单独丢失时，在确认仍持有原发布锁后补发相同内容。
+Daemon 每 60 秒只读检查其注册声明；文件单独丢失时，在确认仍持有原发布锁后补发相同内容。
 正常检查不更新文件时间，不引入 lease 或协议版本变更。补发成功和错误状态变化会写入 Console
 日志；重复错误不反复刷日志。目录或发布锁丢失/替换、声明内容冲突时不会接管，应通过拥有该
 进程的 Console 执行 Restart，再检查注册与一次真实 Consumer 请求。不要手写注册文件或加入

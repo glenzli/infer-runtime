@@ -480,6 +480,15 @@ fn prepare_speech(
     // contract values.
     let provider_voice = match request.voice.as_deref() {
         Some(SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1) => Some("Vivian".to_owned()),
+        Some("speech.voice.zh.warm_female.v1") => Some("Serena".to_owned()),
+        Some("speech.voice.zh.mature_male.v1") => Some("Uncle_Fu".to_owned()),
+        Some("speech.voice.zh.beijing_male.v1") => Some("Dylan".to_owned()),
+        Some("speech.voice.zh.sichuan_male.v1") => Some("Eric".to_owned()),
+        Some("speech.voice.en.dynamic_male.v1") => Some("Ryan".to_owned()),
+        Some("speech.voice.en.warm_male.v1") => Some("Aiden".to_owned()),
+        Some("speech.voice.ja.bright_female.v1") => Some("Ono_Anna".to_owned()),
+        Some("speech.voice.ko.warm_female.v1") => Some("Sohee".to_owned()),
+
         _ => request.voice.clone(),
     };
     let output_path = temporary_files.path().join(format!(
@@ -641,6 +650,30 @@ mod tests {
         assert_eq!(safe_extension("../../voice.wav"), "wav");
         assert_eq!(safe_extension("voice.bad/path"), "wav");
         assert_eq!(safe_extension("voice.123456789"), "wav");
+    }
+
+    #[test]
+    fn every_published_voice_maps_to_a_private_speaker() {
+        let temporary_files = TempDir::new().unwrap();
+        let speakers = [
+            "Vivian", "Serena", "Uncle_Fu", "Dylan", "Eric", "Ryan", "Aiden", "Ono_Anna", "Sohee",
+        ];
+        for ((alias, language), speaker) in infer_core::SPEECH_VOICE_PRESETS.iter().zip(speakers) {
+            let request = SpeechRequest {
+                model: "speech.synthesize".into(),
+                input: "test".into(),
+                voice: Some((*alias).into()),
+                instructions: None,
+                language: Some((*language).into()),
+                speed: 1.0,
+                response_format: SpeechFormat::Wav,
+                execution_mode: ExecutionMode::Unary,
+                metadata: BTreeMap::new(),
+            };
+            request.validate().unwrap();
+            let (worker, _) = prepare_speech("test".into(), "model", request, &temporary_files);
+            assert_eq!(worker.voice.as_deref(), Some(speaker));
+        }
     }
 
     #[test]

@@ -2170,7 +2170,7 @@ impl RuntimeConfig {
             if let Some(aliases) = &app.allowed_speech_voice_aliases {
                 let mut unique = BTreeSet::new();
                 for alias in aliases {
-                    if alias != crate::audio::SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1 {
+                    if crate::audio::speech_voice_language(alias).is_none() {
                         return Err(configuration(format!(
                             "app {id} allowed_speech_voice_aliases names unknown Runtime voice alias {alias}"
                         )));

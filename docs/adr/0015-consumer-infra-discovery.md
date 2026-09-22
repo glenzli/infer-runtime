@@ -32,7 +32,7 @@ Infer Runtime 的 Consumer 目前普遍把 `127.0.0.1:8787` 当作默认地址�
   framing、权限或数据面。
 - Registration publisher 属于 Consumer 数据面生命周期，独立于 observer 开关。它在 endpoint
   就绪后原子发布，退出保留稳定 manifest；manifest 不携带 lease，也不作为心跳。
-- 2026-09-12 运维补充：daemon 每 30 秒检查自身声明。内容完整时不写文件；仅在声明缺失、
+- 2026-09-12 运维补充：daemon 每 60 秒检查自身声明。内容完整时不写文件；仅在声明缺失、
   owner-only 目录仍有效且原 publisher lock 的文件身份不变时，原子补发同一 generation 和 offers。
   补发不得覆盖并发出现的声明。锁丢失、被替换、声明冲突或不安全路径会报告错误，交由受管重启恢复。
 - Consumer 必须验证 registration owner/protocol/version/binding/endpoint，禁用 HTTP proxy 与

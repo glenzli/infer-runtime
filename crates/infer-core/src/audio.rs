@@ -15,12 +15,46 @@ pub const MAX_AUDIO_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
 
 /// Versioned catalog containing the Runtime-owned logical voices accepted by
 /// `speech.synthesize`.
-pub const SPEECH_VOICE_ALIAS_CATALOG_REVISION: &str = "infer.speech.voice-aliases@20260811.1";
+pub const SPEECH_VOICE_ALIAS_CATALOG_REVISION: &str = "infer.speech.voice-aliases@20260922.1";
 
 /// Bright, synthetic Mandarin voice intended for general narration and
 /// dialogue. This is a logical contract identity, not a provider speaker name.
 pub const SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1: &str = "speech.voice.zh.bright_female.v1";
 pub const SPEECH_VOICE_ZH_BRIGHT_FEMALE_LANGUAGE: &str = "Chinese";
+
+/// Published logical presets and their preferred synthesis languages.
+pub const SPEECH_VOICE_PRESETS: &[(&str, &str)] = &[
+    ("speech.voice.zh.bright_female.v1", "Chinese"),
+    ("speech.voice.zh.warm_female.v1", "Chinese"),
+    ("speech.voice.zh.mature_male.v1", "Chinese"),
+    ("speech.voice.zh.beijing_male.v1", "Chinese"),
+    ("speech.voice.zh.sichuan_male.v1", "Chinese"),
+    ("speech.voice.en.dynamic_male.v1", "English"),
+    ("speech.voice.en.warm_male.v1", "English"),
+    ("speech.voice.ja.bright_female.v1", "Japanese"),
+    ("speech.voice.ko.warm_female.v1", "Korean"),
+];
+
+pub const SPEECH_LANGUAGES: &[&str] = &[
+    "auto",
+    "Chinese",
+    "English",
+    "Japanese",
+    "Korean",
+    "German",
+    "French",
+    "Russian",
+    "Portuguese",
+    "Spanish",
+    "Italian",
+];
+
+pub fn speech_voice_language(alias: &str) -> Option<&'static str> {
+    SPEECH_VOICE_PRESETS
+        .iter()
+        .find(|(voice, _)| *voice == alias)
+        .map(|(_, language)| *language)
+}
 
 #[derive(Debug, Clone)]
 pub struct AudioFile {
@@ -150,12 +184,16 @@ impl SpeechRequest {
         // The versioned Runtime alias has a stricter semantic contract than
         // legacy provider speaker strings. Per-App allowlists decide whether
         // a Consumer may use only aliases without breaking existing callers.
-        if self.voice.as_deref() == Some(SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1)
-            && self.language.as_deref() != Some(SPEECH_VOICE_ZH_BRIGHT_FEMALE_LANGUAGE)
+        if self
+            .voice
+            .as_deref()
+            .and_then(speech_voice_language)
+            .is_some()
+            && !SPEECH_LANGUAGES.contains(&self.language.as_deref().unwrap_or("auto"))
         {
-            return Err(ContractError::InvalidAudio(format!(
-                "{SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1} requires language={SPEECH_VOICE_ZH_BRIGHT_FEMALE_LANGUAGE}"
-            )));
+            return Err(ContractError::InvalidAudio(
+                "unsupported speech language".into(),
+            ));
         }
         if self.model == "speech.design_voice"
             && self.instructions.as_deref().is_none_or(str::is_empty)
@@ -386,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn versioned_runtime_voice_alias_requires_its_contract_language() {
+    fn versioned_runtime_voices_support_auto_and_explicit_languages() {
         let mut request = SpeechRequest {
             model: "speech.synthesize".into(),
             input: "hello".into(),
@@ -400,6 +438,15 @@ mod tests {
         };
         assert!(request.validate().is_ok());
 
+        for (alias, language) in SPEECH_VOICE_PRESETS {
+            request.voice = Some((*alias).into());
+            request.language = Some((*language).into());
+            assert!(request.validate().is_ok(), "{alias}");
+            request.language = Some("invalid".into());
+            assert!(request.validate().is_err(), "{alias}");
+        }
+        request.language = Some(SPEECH_VOICE_ZH_BRIGHT_FEMALE_LANGUAGE.into());
+
         // Existing callers remain compatible until their App opts
         // into an alias-only allowlist.
         request.voice = Some("Vivian".into());
@@ -407,6 +454,11 @@ mod tests {
 
         request.voice = Some(SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1.into());
         request.language = Some("English".into());
-        assert!(request.validate().is_err());
+        assert!(request.validate().is_ok());
+        request.language = Some("auto".into());
+        request.input = "你好，welcome to Shape。".into();
+        assert!(request.validate().is_ok());
+        request.language = None;
+        assert!(request.validate().is_ok());
     }
 }
