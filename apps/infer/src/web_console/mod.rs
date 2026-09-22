@@ -8,7 +8,7 @@ mod access;
 mod config_file;
 
 use std::{
-    collections::{BTreeSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     net::{IpAddr, SocketAddr},
     path::PathBuf,
     sync::{
@@ -21,7 +21,7 @@ use anyhow::{Context, bail};
 use axum::{
     Json, Router,
     body::Body,
-    extract::{DefaultBodyLimit, Path as RoutePath, Request, State},
+    extract::{DefaultBodyLimit, Path as RoutePath, Query, Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::{self, Next},
     response::{Html, IntoResponse, Response},
@@ -411,8 +411,10 @@ async fn probe_provider(
 async fn provider_models(
     State(state): State<WebState>,
     RoutePath(provider): RoutePath<String>,
+    Query(query): Query<BTreeMap<String, String>>,
 ) -> ApiResult {
-    from_operator(state.client.provider_models(&provider).await)
+    let fresh = query.get("fresh").is_some_and(|value| value == "1");
+    from_operator(state.client.provider_models(&provider, fresh).await)
 }
 
 async fn status_snapshot(state: &WebState) -> DaemonStatus {

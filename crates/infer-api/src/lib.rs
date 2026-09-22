@@ -1138,13 +1138,20 @@ async fn get_providers(
 async fn get_provider_models(
     State(state): State<ApiState>,
     Path(provider_id): Path<String>,
+    Query(query): Query<BTreeMap<String, String>>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, ApiError> {
     let actor = authenticate(&state, &headers)?;
     state.runtime.authorize_resource_admin(&actor)?;
+    let fresh = query.get("fresh").is_some_and(|value| value == "1");
     Ok(Json(
-        serde_json::to_value(state.runtime.provider_model_catalog(&provider_id).await?)
-            .expect("provider model catalog is serializable"),
+        serde_json::to_value(
+            state
+                .runtime
+                .provider_model_catalog(&provider_id, fresh)
+                .await?,
+        )
+        .expect("provider model catalog is serializable"),
     ))
 }
 

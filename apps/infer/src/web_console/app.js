@@ -1,6 +1,7 @@
 "use strict";
 
 const csrf = document.querySelector('meta[name="infer-console-session"]').content;
+const SUBSCRIPTION_REFRESH_MS = 60 * 60_000;
 const state = {
   snapshot: null,
   logs: [],
@@ -82,7 +83,7 @@ async function refreshSubscriptionCatalogs() {
   const providers = endpoint("providers")?.providers || endpoint("providers") || [];
   if (!Array.isArray(providers) || !state.snapshot?.daemon?.reachable) return;
   const now = Date.now();
-  if (now - state.subscriptionRefreshAt < 60_000) return;
+  if (now - state.subscriptionRefreshAt < SUBSCRIPTION_REFRESH_MS) return;
   state.subscriptionRefreshAt = now;
   const codexProviders = providers.filter(provider => provider.kind === "codex_app_server");
   const results = await Promise.allSettled(codexProviders.map(provider =>
@@ -637,7 +638,7 @@ async function showJob(jobId) {
 
 async function showProviderModels(provider) {
   try {
-    const payload = await api(`/api/providers/${encodeURIComponent(provider)}/models`);
+    const payload = await api(`/api/providers/${encodeURIComponent(provider)}/models?fresh=1`);
     const models = payload.result?.models || [];
     const configured = payload.result?.configured_deployments || [];
     state.subscriptionCatalogs[provider] = payload.result;

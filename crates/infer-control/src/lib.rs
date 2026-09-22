@@ -1523,9 +1523,14 @@ impl Runtime {
     pub async fn provider_model_catalog(
         &self,
         provider_id: &str,
+        fresh: bool,
     ) -> Result<SubscriptionModelSnapshot, RuntimeError> {
         if self.subscription_models.contains(provider_id) {
-            self.subscription_models.refresh_if_due(provider_id).await;
+            if fresh {
+                self.subscription_models.refresh_now(provider_id).await;
+            } else {
+                self.subscription_models.refresh_if_due(provider_id).await;
+            }
             return self
                 .subscription_models
                 .snapshot(provider_id)

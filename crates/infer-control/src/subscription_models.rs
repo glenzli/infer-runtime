@@ -21,7 +21,7 @@ use tokio::{
     time::{Instant, MissedTickBehavior, interval_at, timeout},
 };
 
-const REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const OBSERVATION_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -122,13 +122,23 @@ impl SubscriptionModels {
     /// The same single-flight refresh serves routing and the operator view.
     /// A failed read retains the last complete observation.
     pub async fn refresh_if_due(&self, provider_id: &str) {
+        self.refresh(provider_id, false).await;
+    }
+
+    /// An explicit operator read may request a current complete catalog.
+    pub async fn refresh_now(&self, provider_id: &str) {
+        self.refresh(provider_id, true).await;
+    }
+
+    async fn refresh(&self, provider_id: &str, force: bool) {
         let Some(entry) = self.providers.get(provider_id) else {
             return;
         };
         let mut observed = entry.observed.lock().await;
-        if observed
-            .last_attempt
-            .is_some_and(|at| at.elapsed() < REFRESH_INTERVAL)
+        if !force
+            && observed
+                .last_attempt
+                .is_some_and(|at| at.elapsed() < REFRESH_INTERVAL)
         {
             return;
         }
@@ -459,6 +469,57 @@ mod tests {
                 .all(|model| model.presence == ModelPresence::Unknown)
         );
         assert!(models.unavailable_deployments().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn operator_refresh_bypasses_the_hourly_cache() {
+        let config: RuntimeConfig =
+            toml::from_str(include_str!("../../../config/infer.example.toml")).unwrap();
+        let fake = Arc::new(FakeCatalog {
+            observations: Mutex::new(VecDeque::from([
+                Ok(Vec::new()),
+                Ok(Vec::new()),
+                Ok(vec!["gpt-5.6-sol".into()]),
+            ])),
+        });
+        let provider: DynProvider = fake.clone();
+        let models = SubscriptionModels::new(
+            &config,
+            &BTreeMap::from([("codex-subscription".into(), provider)]),
+        );
+        models.refresh_if_due("codex-subscription").await;
+        models
+            .providers
+            .get("codex-subscription")
+            .unwrap()
+            .observed
+            .lock()
+            .await
+            .last_attempt = Some(Instant::now() - Duration::from_secs(30 * 60));
+        models.refresh_if_due("codex-subscription").await;
+        assert_eq!(fake.observations.lock().await.len(), 2);
+        models
+            .providers
+            .get("codex-subscription")
+            .unwrap()
+            .observed
+            .lock()
+            .await
+            .last_attempt = Some(Instant::now() - Duration::from_secs(61 * 60));
+        models.refresh_if_due("codex-subscription").await;
+        assert_eq!(fake.observations.lock().await.len(), 1);
+        models.refresh_now("codex-subscription").await;
+        let snapshot = models.snapshot("codex-subscription").await.unwrap();
+        assert_eq!(
+            snapshot
+                .configured_deployments
+                .iter()
+                .find(|model| model.model == "gpt-5.6-sol")
+                .unwrap()
+                .presence,
+            ModelPresence::Available
+        );
+        assert!(fake.observations.lock().await.is_empty());
     }
 
     #[test]

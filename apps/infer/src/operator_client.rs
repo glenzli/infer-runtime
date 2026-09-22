@@ -168,9 +168,16 @@ impl OperatorClient {
         .await
     }
 
-    pub(crate) async fn provider_models(&self, provider: &str) -> Result<Value, String> {
+    pub(crate) async fn provider_models(
+        &self,
+        provider: &str,
+        fresh: bool,
+    ) -> Result<Value, String> {
         self.get_json_with_timeout(
-            &format!("/infer/v1/providers/{provider}/models"),
+            &format!(
+                "/infer/v1/providers/{provider}/models{}",
+                if fresh { "?fresh=1" } else { "" }
+            ),
             true,
             Duration::from_secs(30),
         )
