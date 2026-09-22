@@ -300,10 +300,11 @@
 
 ### D-113：首个具名 Consumer 使用通用 `text.edit` Intent
 
-- **状态**：Accepted for tracked example；live Shape activation remains deferred
+- **状态**：Accepted；本机 Shape 已接入通用 `text.edit`，云端选择仍为显式 opt-in
 - **合同**：`text.edit` 是 input/output 均为 text 的通用 Runtime Intent，覆盖 rewrite、expand、polish、shorten、summarize 等 Consumer 编译后的结构化编辑指令；首版不包含 tools、Agent 或多模态输入，默认 capability floor 为 `foundational`。
-- **执行面**：`qwen3_5_4b` 对该 Intent 以 `foundational/provisional` 评级，受管 Deployment 为 `ollama_qwen3_5_4b`。example Consumer 的 Intent rule 只授权该 Deployment，并维持 local-first、local-only、offline、zero-cost、fallback none。
-- **边界**：`text.edit` 不是 Shape 应用别名，也不复用开放式 `language.respond`。35B、subscription 或 cloud rating 必须有真实评估后另行登记；它们不进入首个 grant。ignored live `apps.shape`、credential 和 daemon 不在本决定中修改。
+- **执行面**：`qwen3_5_4b` 对该 Intent 以 `foundational/provisional` 评级，受管 Deployment 为 `ollama_qwen3_5_4b`，仍是 Shape 默认的 local-first/local-only/offline/zero-cost/fallback-none 路线。2026-09-23 增加 GPT-6 Luna/Sol 的 `foundational/provisional` 评级，只有 Shape 明确选择具名 Deployment，且请求 cloud-only、subscription、balanced 与 `low` reasoning effort 时才使用；不改变本地默认路由。
+- **评估边界**：两条 GPT-6 文本路由各用 Shape 凭据完成一条 `text.edit` 请求，Job 回执中的 App、Intent、Deployment 与成功状态均核对。图片路由各完成单张 PNG 和同样的 Job 路由核对；对应 `image.generate` 评级为 `capable/provisional`。这只证明当前登录态、协议和短样例能运行，不构成长期可用性或文本/图像质量基准。
+- **边界**：`text.edit` 不是 Shape 应用别名，也不复用开放式 `language.respond`。其他 35B、subscription 或 cloud rating 仍须先有针对性真实评估。具名 GPT-6 grant 不进入普通候选池，不自动 fallback。
 
 ### D-114：Build 供应链统一，Provider 保持受信任内置装配
 

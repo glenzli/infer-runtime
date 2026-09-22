@@ -596,6 +596,12 @@ Provider；本机 stdio 只是 transport。一个登录会话当前发现 Sol、
 Deployment 和 App 的显式路由授权。新模型的能力评级为 provisional；当前 Codex
 `model/list` 分别报告 Sol 支持 `low` 到 `ultra`、Luna 支持 `low` 到 `max`，均支持文本和
 图片输入。订阅桥接在执行前再次核对当前模型清单和 effort；模型缺席时不会自动替换成另一模型。
+Shape 的 tracked example 和本机配置对 `text.edit` 与 `image.generate` 保留原有默认 Deployment，
+并把 GPT-6 Luna/Sol 仅列为显式 `named_deployment_ids`。Shape 云端文本请求须显式指定
+`reasoning.effort=low`，因为该 Intent 的本地默认 `none` 不满足 GPT-6 Build；图片请求
+须使用 `image_generation` tool，且 GPT-6 Build 声明 image 输出和对应 feature。
+2026-09-23 的 Shape 凭据短样例分别核对了两条文本路由和两条单图 PNG 路由的成功 Job；
+评级维持 provisional，不推断质量排名或未来登录态可用性。
 
 Runtime 每小时读取一次完整的 Codex 模型清单；新请求遇到尚未尝试观测或上次尝试已过一小时的
 订阅 Provider 时也会尝试读取。Console 的自动展示读取同样按小时限频；运营者打开

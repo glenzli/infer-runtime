@@ -817,6 +817,14 @@ status = "provisional"
 level = "advanced"
 status = "provisional"
 
+[model_profiles.codex_gpt_6_luna.ratings."text.edit"]
+level = "foundational"
+status = "provisional"
+
+[model_profiles.codex_gpt_6_luna.ratings."image.generate"]
+level = "capable"
+status = "provisional"
+
 [model_profiles.codex_gpt_6_sol]
 family = "gpt-6"
 
@@ -830,6 +838,14 @@ status = "provisional"
 
 [model_profiles.codex_gpt_6_sol.ratings."multimodal.respond"]
 level = "exceptional"
+status = "provisional"
+
+[model_profiles.codex_gpt_6_sol.ratings."text.edit"]
+level = "foundational"
+status = "provisional"
+
+[model_profiles.codex_gpt_6_sol.ratings."image.generate"]
+level = "capable"
 status = "provisional"
 
 [model_profiles.qwen3_asr_1_7b]
@@ -1326,8 +1342,8 @@ profile = "codex_gpt_6_luna"
 model_id = "gpt-6-luna"
 variant = "codex-subscription"
 input_modalities = ["text", "image"]
-output_modalities = ["text"]
-features = ["reasoning", "web_search"]
+output_modalities = ["text", "image"]
+features = ["reasoning", "web_search", "image_generation"]
 
 [model_builds.codex_gpt_6_luna_subscription.provenance]
 source_kind = "provider_managed"
@@ -1341,8 +1357,8 @@ profile = "codex_gpt_6_sol"
 model_id = "gpt-6-sol"
 variant = "codex-subscription"
 input_modalities = ["text", "image"]
-output_modalities = ["text"]
-features = ["reasoning", "web_search"]
+output_modalities = ["text", "image"]
+features = ["reasoning", "web_search", "image_generation"]
 
 [model_builds.codex_gpt_6_sol_subscription.provenance]
 source_kind = "provider_managed"
@@ -2195,15 +2211,13 @@ latency = ["interactive", "balanced"]
 fallback = ["none"]
 max_cost_usd = { min = 0.0, max = 0.0 }
 
-# Tracked review fixture for Shape's least-privilege candidate.4 contract. It
-# does not activate or replace the ignored live `apps.shape` entry. The global
-# ceiling permits only text editing and the existing TTS slice; the empty
-# routing default denies every other named route, while each Intent rule grants
-# exactly one Runtime Deployment.
+# Tracked review fixture for Shape's model choices. It does not activate or
+# replace the ignored live `apps.shape` entry. The empty routing default denies
+# other named routes; GPT-6 targets are explicit escalation choices only.
 [apps.example-shape-consumer]
 credential = { source = "managed" }
 resource_admin = false
-allowed_intents = ["text.edit", "speech.synthesize"]
+allowed_intents = ["text.edit", "speech.synthesize", "image.generate"]
 allowed_builtin_tools = []
 allowed_speech_voice_aliases = [
     "speech.voice.zh.bright_female.v1",
@@ -2216,16 +2230,16 @@ allowed_speech_voice_aliases = [
     "speech.voice.ja.bright_female.v1",
     "speech.voice.ko.warm_female.v1",
 ]
-allowed_provider_access_classes = ["standard"]
-allowed_cloud_input_modalities = []
+allowed_provider_access_classes = ["standard", "subscription"]
+allowed_cloud_input_modalities = ["text"]
 max_pending_jobs = 8
 default_policy = "local-first"
-allowed_policies = ["local-first"]
+allowed_policies = ["local-first", "balanced"]
 
 [apps.example-shape-consumer.request_overrides]
 priority = ["interactive", "normal"]
-placement = ["local_only"]
-prefer = ["local"]
+placement = ["local_only", "cloud_only"]
+prefer = ["local", "cloud"]
 offline_required = true
 capability_floor = ["foundational", "capable"]
 latency = ["interactive", "balanced"]
@@ -2239,6 +2253,12 @@ model_profile_ids = []
 [apps.example-shape-consumer.routing.intents."text.edit"]
 deployment_ids = ["ollama_qwen3_5_4b"]
 model_profile_ids = []
+named_deployment_ids = ["codex_gpt_6_luna", "codex_gpt_6_sol"]
+
+[apps.example-shape-consumer.routing.intents."image.generate"]
+deployment_ids = ["codex_gpt_5_6_luna"]
+model_profile_ids = []
+named_deployment_ids = ["codex_gpt_6_luna", "codex_gpt_6_sol"]
 
 [apps.example-shape-consumer.routing.intents."speech.synthesize"]
 deployment_ids = ["mlx_qwen3_tts_custom_voice_1_7b"]
