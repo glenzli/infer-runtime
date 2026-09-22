@@ -23,6 +23,7 @@ application.
 | Vision | ONNX/Core ML Providers, face detection and embeddings, image-text embeddings, click-guided subject segmentation, and face parsing | All are currently narrow experimental capabilities; some weights are restricted to research use |
 | Scheduling | Intent routing, priority queues, deadlines, cancellation, retry/fallback, circuit breaking, and quotas | Available as an end-to-end runtime path |
 | Local resources | Ollama/ONNX lifecycle, pressure sampling, load benchmarks, eviction recommendations, and maintenance leases | Automatic eviction is off by default |
+| Trusted nodes | Explicitly paired remote text Deployments, mutual TLS, live candidate filtering, leases, and cancellation | Unary text on Unix only; experimental, with same-host A/B/C acceptance passing |
 | Integration and operations | Per-App ACLs, managed credentials, Infra Discovery, status interfaces, and Web Console | Used by local Consumers and Operators |
 
 Local configuration determines which models and Providers are available. The
@@ -73,6 +74,39 @@ Optional capabilities also require the corresponding Provider,
 Build/Deployment, runtime, model files, and App ACL. Runtime does not download
 models or relax placement automatically. See [Operations](docs/OPERATIONS.md)
 for setup procedures.
+
+## Trusted nodes (experimental)
+
+Each machine runs its own `inferd`. A can include local text Deployments exported
+by paired B/C nodes as routing candidates while applications continue connecting
+to A's local Consumer endpoint. Overlapping capabilities remain separate
+Deployments, selected by policy or an explicit target. The ingress Runtime owns
+the Consumer Job; the execution node owns its local resources and execution.
+
+Node addresses, certificates, imports/exports, and App grants require explicit
+configuration. Connections use mutual TLS, pinned node certificate fingerprints,
+and approved export contract digests. `local_only` always excludes trusted nodes,
+even when test nodes run on the same machine. Confirmed failure may use an
+authorized fallback; an unknown outcome after dispatch prohibits automatic replay.
+
+The current scope is unary text on Unix (macOS/Linux). Remote streaming,
+background work, audio/vision, and automatic LAN discovery are not supported.
+See [Trusted node configuration](docs/TRUSTED_NODES.md) for pairing and request
+examples.
+
+The same-host acceptance test requires Python 3 and OpenSSL:
+
+```bash
+cargo build -p inferd
+python3 tools/smoke_trusted_nodes.py --report /tmp/infer-node-smoke.json
+```
+
+The script temporarily starts three independent A/B/C Runtimes with deterministic
+backends and real TLS to verify forced routing, overlapping candidates,
+online/offline transitions, authorization, cancellation, and failures. It cleans
+up processes and temporary credentials afterward. This validates same-host
+protocol and scheduling behavior; cross-machine LAN and real-model acceptance
+remain outstanding.
 
 ## Web Console
 
@@ -168,6 +202,7 @@ documented in [Integration](docs/INTEGRATION.md) and
 | [ROADMAP.md](ROADMAP.md) | Current stage and release gates |
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | Consumer integration and data-plane examples |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Console, model resources, and background operations |
+| [docs/TRUSTED_NODES.md](docs/TRUSTED_NODES.md) | Experimental trusted text node setup, same-host acceptance, and limits |
 | [docs/CONSUMER_DISCOVERY.md](docs/CONSUMER_DISCOVERY.md) | Infra Discovery contract |
 | [contracts/consumer-core/20260813.1](contracts/consumer-core/20260813.1/README.md) | Current Core OpenAPI, fixtures, and machine contract |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | Accepted decisions and ADR index |

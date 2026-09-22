@@ -20,6 +20,7 @@ JSON 或 Tensor 接口。`infer-runtime` 也不提供模型市场、Agent 编排
 | 视觉 | ONNX/Core ML Provider；人脸检测与向量、图文向量、点击式主体分割和人脸解析 | 当前均为范围受限的 experimental 能力；部分权重仅限研究用途 |
 | 调度 | Intent 路由、优先队列、deadline、cancel、retry/fallback、熔断和配额 | 已形成可运行闭环 |
 | 本地资源 | Ollama/ONNX 生命周期、压力采样、加载基准、eviction 建议和维护租约 | 自动 eviction 默认关闭 |
+| 可信节点 | 显式配对的远程文本 Deployment、双向 TLS、在线候选过滤、租约与取消 | 仅 Unix 上的非流式文本；experimental，同机 A/B/C 验收通过 |
 | 接入与运维 | per-App ACL、managed credential、Infra Discovery、状态接口和 Web Console | 供本机 Consumer 与 Operator 使用 |
 
 具体模型和 Provider 由本机配置决定。仓库不附带模型文件，也不维护开发机上的模型清单。
@@ -62,6 +63,30 @@ CLI 默认连接 `http://127.0.0.1:8787`，可通过 `--server` 或 `INFER_URL` 
 
 可选能力还需要相应的 Provider、Build/Deployment、运行环境、模型文件和 App ACL。Runtime
 不会自动下载模型或放宽 placement。完整准备流程见 [运维文档](docs/OPERATIONS.md)。
+
+## 可信节点（experimental）
+
+每台机器运行自己的 `inferd`。A 可以将已配对的 B/C 导出的本地文本 Deployment 加入候选，
+应用仍连接 A 的本机 Consumer 入口。同种能力保留为独立 Deployment，按策略选择，也可显式
+指定目标；入口 Runtime 管理 Consumer Job，执行节点管理本机资源和执行。
+
+节点地址、证书、导入/导出和 App 授权均需显式配置。连接使用双向 TLS，并校验节点证书指纹
+和导出契约摘要。`local_only` 始终排除可信节点，即使测试节点运行在同一台机器上。
+节点明确失败时可按已授权的策略回退；任务已发送但结果未知时，Runtime 禁止自动重放。
+
+当前仅支持 Unix（macOS/Linux）上的非流式文本调用。远端流式、background、音频/视觉和自动
+局域网发现尚未支持。配对和请求示例见 [可信节点配置](docs/TRUSTED_NODES.md)。
+
+本机验收需要 Python 3 和 OpenSSL：
+
+```bash
+cargo build -p inferd
+python3 tools/smoke_trusted_nodes.py --report /tmp/infer-node-smoke.json
+```
+
+脚本临时启动 A/B/C 三个独立 Runtime，以确定性后端和真实 TLS 验证强制路由、重叠候选、
+上下线、授权、取消和故障处理，完成后清理进程与临时凭据。它验证同机协议与调度；真实跨机器
+局域网和真实模型验收仍未完成。
 
 ## Web Console
 
@@ -138,6 +163,7 @@ background、音频和视觉协议见 [接入文档](docs/INTEGRATION.md) 与
 | [ROADMAP.md](ROADMAP.md) | 当前阶段与发布门槛 |
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | Consumer 接入和各数据平面示例 |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | Console、模型资源和后台任务运维 |
+| [docs/TRUSTED_NODES.md](docs/TRUSTED_NODES.md) | 实验性可信文本节点的配置、同机验收与限制 |
 | [docs/CONSUMER_DISCOVERY.md](docs/CONSUMER_DISCOVERY.md) | Infra Discovery 合同 |
 | [contracts/consumer-core/20260813.1](contracts/consumer-core/20260813.1/README.md) | 当前 Core OpenAPI、fixtures 和机器合同 |
 | [docs/DECISIONS.md](docs/DECISIONS.md) | 已接受决策与 ADR 入口 |
