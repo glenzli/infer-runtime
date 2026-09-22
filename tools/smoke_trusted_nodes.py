@@ -459,6 +459,11 @@ def exercise(h):
     assert code != 0 and not report["ready"]
     assert {node["provider"]: node["status"] for node in report["nodes"]} == {
         "node_b": "busy", "node_c": "ready"}
+    calls_b = len(h.backends['b'].calls)
+    assert output(h.infer(prefer="trusted_node"))[0] == "C"
+    assert h.infer(deployment_ids="b_text")[0] != 200
+    assert len(h.backends['b'].calls) == calls_b
+    passed("saturated B is excluded while available C executes the trusted-node request")
     assert h.rpc("b", {**reserve, "key": {"job_id": "overflow", "attempt": 1}}, generation)["reply"] == {"kind": "error", "value": "busy"}
     wait_for(lambda: h.rpc("b", {"op": "catalog"})["reply"]["value"]["available_admissions"] == 2, 8)
     passed("atomic admission reservations and abandoned lease reclamation")

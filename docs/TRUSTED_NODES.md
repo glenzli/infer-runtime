@@ -24,6 +24,7 @@ A/B/C markers; no model installation is required or implied.
 Forced named routing to `b_text` proves the result came through B's Node listener.
 Concurrent held requests to B and C prove both backends start before either is
 released, while each node accounts for its own admission slot.
+Filling B's admission slots must leave C eligible for a trusted-node request.
 The same request with `local_only` must fail. The test also covers overlapping
 capabilities, C selection while B is offline, rejoin, authorization, revocation,
 protocol mismatch, lost dispatch acknowledgement, duplicate/altered replay,
@@ -32,14 +33,14 @@ automatic fallback to C. A machine allowing loopback TCP binds is required.
 
 ## Verified on 2026-09-23 (Asia/Shanghai)
 
-The final linked `inferd` passed all 16 same-host acceptance groups, including
+The final linked `inferd` passed all 17 same-host acceptance groups, including
 certificate/name/digest rejection, explicit App grants, running lease expiry,
 unknown-outcome replay suppression, authenticated operator probes and authorized
 fallback after confirmed failure.
 The harness records the executable and script SHA-256 in its JSON report.
 
 - Executable SHA-256: `14a91aa7590f4311669fdf9e3efbd817e5dab3095b005650b1f5f579b076d1f3`
-- Harness SHA-256: `052fdff7af5a603422c9f1eb981b342deb20b6bac9898bb4a40b140903d20f4b`
+- Harness SHA-256: `9597af6231b16f47f67189c5033d6e24af16b356446dc085cdd5fa35d0c3ecac`
 - `cargo build -p inferd --offline`: final probe binary linked successfully.
 - `cargo test -p inferd --offline`: 2 daemon tests passed.
 - `cargo clippy -p inferd --all-targets --no-deps --offline -- -D warnings`: passed.
