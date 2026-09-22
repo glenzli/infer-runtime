@@ -153,3 +153,22 @@ pub(crate) async fn write_frame<T: Serialize>(
         .map_err(|_| NodeError::Unavailable)?;
     io.flush().await.map_err(|_| NodeError::Unavailable)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn oversized_frame_length_is_rejected_before_waiting_for_a_body() {
+        let (mut writer, mut reader) = tokio::io::duplex(8);
+        writer.write_u32((MAX_FRAME + 1) as u32).await.unwrap();
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            read_frame::<serde_json::Value>(&mut reader),
+        )
+        .await
+        .expect("the frame length alone must decide rejection");
+        assert!(matches!(result, Err(NodeError::Protocol)));
+    }
+}
