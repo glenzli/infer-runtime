@@ -26,28 +26,29 @@ Concurrent held requests to B and C prove both backends start before either is
 released, while each node accounts for its own admission slot.
 Filling B's admission slots must leave C eligible for a trusted-node request.
 The same request with `local_only` must fail. The test also covers overlapping
-capabilities, C selection while B is offline, rejoin, authorization, revocation,
+capabilities, `anywhere`/`cloud_only` placement boundaries, bounded node payloads,
+C selection while B is offline, rejoin, authorization, revocation,
 protocol mismatch, lost dispatch acknowledgement, duplicate/altered replay,
-reservation exhaustion/expiry, cancellation, late output and B crash without
+concurrent reservation exhaustion/expiry, cancellation, late output and B crash without
 automatic fallback to C. A machine allowing loopback TCP binds is required.
 
 ## Verified on 2026-09-23 (Asia/Shanghai)
 
-The final linked `inferd` passed all 17 same-host acceptance groups, including
+The final linked `inferd` passed all 20 same-host acceptance groups, including
 certificate/name/digest rejection, explicit App grants, running lease expiry,
 unknown-outcome replay suppression, authenticated operator probes and authorized
 fallback after confirmed failure.
 The harness records the executable and script SHA-256 in its JSON report.
 
 - Executable SHA-256: `14a91aa7590f4311669fdf9e3efbd817e5dab3095b005650b1f5f579b076d1f3`
-- Harness SHA-256: `9597af6231b16f47f67189c5033d6e24af16b356446dc085cdd5fa35d0c3ecac`
+- Harness SHA-256: `01ba36ee409481070267335de6b93e785509e4950ee457e2d75cfb533e438473`
 - `cargo build -p inferd --offline`: final probe binary linked successfully.
 - `cargo test -p inferd --offline`: 2 daemon tests passed.
 - `cargo clippy -p inferd --all-targets --no-deps --offline -- -D warnings`: passed.
 - `cargo test --workspace --offline -- --skip tests::migration_backfills_priority_for_existing_job_metadata`:
   435 passed, 24 ignored, one known baseline test filtered out.
-- After the final catalog capacity correction, `cargo test -p infer-node --offline`:
-  all 5 node tests passed, including retained-record exhaustion and recovery.
+- `cargo test -p infer-node --offline`: all 6 node tests passed, including
+  retained-record exhaustion, recovery and oversized-frame rejection.
 - `cargo clippy -p infer-node --all-targets --no-deps --offline -- -D warnings`:
   passed with no lint exemptions. The modified core/provider/control/daemon targets
   also passed focused Clippy with only the baseline `derivable_impls` and

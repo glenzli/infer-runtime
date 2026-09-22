@@ -83,8 +83,9 @@ class Backend:
                 if request["input"] == "hold":
                     owner.started.set()
                     owner.release.wait(20)
+                text = "x" * 600_000 if request["input"] == "large-result" else owner.name
                 body = json.dumps({"output": [{"type": "message", "content": [
-                    {"type": "output_text", "text": owner.name}
+                    {"type": "output_text", "text": text}
                 ]}], "usage": {"input_tokens": 1, "output_tokens": 1}}).encode()
                 try:
                     self.send_response(200)
@@ -182,7 +183,7 @@ allowed_cloud_input_modalities = []
 [apps.consumer.routing]
 deployment_ids = ["local_text"]
 [apps.consumer.request_overrides]
-placement = ["local_only", "private"]
+placement = ["local_only", "private", "anywhere", "cloud_only"]
 prefer = ["local", "trusted_node"]
 offline_required = true
 fallback = ["none", "equivalent"]
@@ -386,6 +387,19 @@ def exercise(h):
     assert h.infer(placement="local_only", deployment_ids="b_text")[0] != 200
     assert len(h.backends['b'].calls) == before
     passed("local_only rejects same-host B without backend execution")
+    assert output(h.infer(placement="anywhere", deployment_ids="b_text"))[0] == "B"
+    before = len(h.backends['b'].calls)
+    assert h.infer(placement="cloud_only", deployment_ids="b_text")[0] != 200
+    assert len(h.backends['b'].calls) == before
+    passed("anywhere admits a paired node; cloud_only excludes it")
+    oversized = "x" * (1024 * 1024)
+    before = len(h.backends['b'].calls)
+    status, rejected = h.infer(oversized, deployment_ids="b_text")
+    assert status == 400 and rejected["error"]["code"] == "upstream_invalid_request", (status, rejected)
+    assert len(h.backends['b'].calls) == before
+    assert h.infer("large-result", deployment_ids="b_text")[0] != 200
+    assert len(h.backends['b'].calls) == before + 1
+    passed("oversized input and output are rejected at the node transport boundary")
     h.stop("b")
     code, report = h.probe()
     assert code != 0 and not report["ready"]
@@ -467,6 +481,20 @@ def exercise(h):
     assert h.rpc("b", {**reserve, "key": {"job_id": "overflow", "attempt": 1}}, generation)["reply"] == {"kind": "error", "value": "busy"}
     wait_for(lambda: h.rpc("b", {"op": "catalog"})["reply"]["value"]["available_admissions"] == 2, 8)
     passed("atomic admission reservations and abandoned lease reclamation")
+    def compete(index):
+        key = {"job_id": f"race-{index}", "attempt": 1}
+        reply = h.rpc("b", {**reserve, "key": key}, generation)["reply"]
+        return key, reply
+    with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
+        races = list(pool.map(compete, range(12)))
+    admitted = [key for key, reply in races if reply == {"kind": "task", "value": {"state": "reserved"}}]
+    rejected = [reply for _, reply in races if reply == {"kind": "error", "value": "busy"}]
+    assert len(admitted) == 2 and len(rejected) == 10, races
+    assert h.rpc("b", {"op": "catalog"})["reply"]["value"]["available_admissions"] == 0
+    for key in admitted:
+        assert h.rpc("b", {"op": "cancel", "key": key}, generation)["reply"]["value"]["state"] == "failed"
+    wait_for(lambda: h.rpc("b", {"op": "catalog"})["reply"]["value"]["available_admissions"] == 2)
+    passed("twelve simultaneous reservations admit only two and reclaim both slots")
     # An accepted running task loses its lease when its ingress disappears.
     h.backends['b'].started.clear()
     h.backends['b'].release.clear()

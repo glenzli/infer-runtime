@@ -324,7 +324,7 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
 - 未批准或已吊销节点不能获得 Job/payload；
 - 节点失联后 reservation 有界回收，Job 结果不出现双重成功；
 - 旧 agent 与新 daemon 的兼容范围明确并经过测试；
-- `trusted_nodes` 与 `local_only`/`cloud_allowed` 边界可验证；
+- `trusted_node` 与 `local_only`/`private`/`anywhere`/`cloud_only` 边界可验证；
 - 大 payload 不因控制平面中转产生无界复制。
 
 ## 9. M6：异构本地执行与类型化多模态协议族
