@@ -22,6 +22,8 @@ temporary credentials are cleaned up. Local deterministic HTTP backends return
 A/B/C markers; no model installation is required or implied.
 
 Forced named routing to `b_text` proves the result came through B's Node listener.
+Concurrent held requests to B and C prove both backends start before either is
+released, while each node accounts for its own admission slot.
 The same request with `local_only` must fail. The test also covers overlapping
 capabilities, C selection while B is offline, rejoin, authorization, revocation,
 protocol mismatch, lost dispatch acknowledgement, duplicate/altered replay,
@@ -30,13 +32,13 @@ automatic fallback to C. A machine allowing loopback TCP binds is required.
 
 ## Verified on 2026-09-23 (Asia/Shanghai)
 
-The final linked `inferd` passed all 13 same-host acceptance groups, including
+The final linked `inferd` passed all 14 same-host acceptance groups, including
 certificate/name/digest rejection, explicit App grants, running lease expiry,
 unknown-outcome replay suppression and authorized fallback after confirmed failure.
 The harness records the executable and script SHA-256 in its JSON report.
 
 - Executable SHA-256: `dc2d968a3d13b9ec1c50c9e6cd719c7ae55c3167d37784dd88a4ec456d8c0f15`
-- Harness SHA-256: `02e623d67f80fceb01ea05f94ba5ee9dfc0ad5762027151f1d4089a3b71f5b56`
+- Harness SHA-256: `b650284f41b4481523076aa4011f3da681729dad73c974b4fc2edd07565ba524`
 - `cargo test --workspace --offline -- --skip tests::migration_backfills_priority_for_existing_job_metadata`:
   435 passed, 24 ignored, one known baseline test filtered out.
 - After the final catalog capacity correction, `cargo test -p infer-node --offline`:

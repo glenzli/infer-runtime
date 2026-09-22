@@ -348,6 +348,25 @@ def exercise(h):
     assert status == 200 and snapshot["placement"] == "trusted_node" and snapshot["deployment"] == "b_text"
     passed("forced B execution crosses real mTLS and records trusted_node provenance")
     assert output(h.infer(deployment_ids="c_text"))[0] == "C"
+    # Both backends must enter execution before either is released. This proves
+    # separate remote nodes can make progress on independent Jobs at once.
+    for name in ("b", "c"):
+        h.backends[name].started.clear()
+        h.backends[name].release.clear()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        b_job = pool.submit(h.infer, "hold", deployment_ids="b_text")
+        c_job = pool.submit(h.infer, "hold", deployment_ids="c_text")
+        try:
+            assert h.backends["b"].started.wait(8)
+            assert h.backends["c"].started.wait(8)
+            for name in ("b", "c"):
+                assert h.rpc(name, {"op": "catalog"})["reply"]["value"]["available_admissions"] == 1
+        finally:
+            h.backends["b"].release.set()
+            h.backends["c"].release.set()
+        assert output(b_job.result(timeout=10))[0] == "B"
+        assert output(c_job.result(timeout=10))[0] == "C"
+    passed("B and C execute independent Jobs simultaneously with separate admission slots")
     before = len(h.backends['b'].calls)
     assert h.infer(placement="local_only", deployment_ids="b_text")[0] != 200
     assert len(h.backends['b'].calls) == before
