@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+async-trait.workspace = true
+infer-node = { path = "../infer-node" }
 infer-auth = { path = "../infer-auth" }
 async-stream.workspace = true
 bytes.workspace = true
@@ -28,7 +30,6 @@ uuid.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
-async-trait.workspace = true
 rusqlite.workspace = true
 tempfile.workspace = true
 toml.workspace = true

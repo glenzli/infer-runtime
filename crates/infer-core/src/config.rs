@@ -18,6 +18,8 @@ use crate::{
 #[serde(deny_unknown_fields)]
 pub struct RuntimeConfig {
     pub server: ServerConfig,
+    #[serde(default)]
+    pub node_server: Option<crate::NodeServerConfig>,
     /// Optional, read-only registration with the local infrastructure
     /// observer. This does not grant inference or operator authority.
     #[serde(default)]
@@ -528,7 +530,7 @@ fn default_observer_instance_id() -> String {
     "local".into()
 }
 
-fn is_loopback_http_url(value: &str) -> bool {
+pub(crate) fn is_loopback_http_url(value: &str) -> bool {
     let Some(rest) = value.strip_prefix("http://") else {
         return false;
     };
@@ -548,6 +550,8 @@ pub struct DefaultsConfig {
 #[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
     pub kind: ProviderKind,
+    #[serde(default)]
+    pub node: Option<crate::NodePeerConfig>,
     /// Economic/access boundary for this Provider instance. Subscription
     /// bridges are denied to Apps unless they opt in explicitly.
     #[serde(default)]
@@ -592,6 +596,7 @@ pub struct ProviderRuntimeDependencies {
 
 string_enum!(ProviderKind {
     Responses => "responses",
+    TrustedNode => "trusted_node",
     CodexAppServer => "codex_app_server",
     AudioWorker => "audio_worker",
     RetrievalWorker => "retrieval_worker",
@@ -605,6 +610,7 @@ impl std::fmt::Display for ProviderKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::Responses => "responses",
+            Self::TrustedNode => "trusted_node",
             Self::CodexAppServer => "codex_app_server",
             Self::AudioWorker => "audio_worker",
             Self::RetrievalWorker => "retrieval_worker",
@@ -1256,6 +1262,7 @@ impl RuntimeConfig {
         self.validate_apps()?;
         self.validate_quota()?;
         self.validate_resources()?;
+        crate::node::validate_nodes(self)?;
         Ok(())
     }
 
@@ -1453,6 +1460,7 @@ impl RuntimeConfig {
 
     fn validate_providers(&self) -> Result<(), ContractError> {
         for (id, provider) in &self.providers {
+            crate::node::validate_provider(id, provider)?;
             match provider.kind {
                 ProviderKind::Responses
                     if provider.base_url.as_deref().is_none_or(str::is_empty) =>
@@ -1479,7 +1487,7 @@ impl RuntimeConfig {
                 _ => {}
             }
             let expected_protocol = match provider.kind {
-                ProviderKind::Responses => ProviderProtocol::Responses,
+                ProviderKind::Responses | ProviderKind::TrustedNode => ProviderProtocol::Responses,
                 ProviderKind::CodexAppServer => ProviderProtocol::CodexAppServer,
                 ProviderKind::AudioWorker => ProviderProtocol::AudioWorker,
                 ProviderKind::RetrievalWorker => ProviderProtocol::RetrievalWorker,
@@ -2431,7 +2439,7 @@ fn provider_serves_data_plane(provider: &ProviderConfig, data_plane: &str) -> bo
                     .as_ref()
                     .is_some_and(|inventory| inventory.kind == LocalInventoryKind::OllamaTags))
         }
-        ProviderKind::CodexAppServer => data_plane == "responses",
+        ProviderKind::CodexAppServer | ProviderKind::TrustedNode => data_plane == "responses",
         ProviderKind::AudioWorker => data_plane.starts_with("audio."),
         ProviderKind::RetrievalWorker => matches!(data_plane, "text.embedding" | "text.rerank"),
         ProviderKind::OcrWorker => data_plane == "document.ocr",

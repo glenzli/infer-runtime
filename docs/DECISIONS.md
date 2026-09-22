@@ -198,8 +198,10 @@
 
 ### D-101：远程 Node 的信任与配对模型
 
-- **状态**：Proposed，M5 前关闭
+- **状态**：Accepted for experimental explicitly paired unary text nodes；完整 M5 仍未关闭
 - **推荐方向**：用户显式批准的设备身份 + 双向安全通道 + 可撤销证书/密钥；Node trust class 参与 placement/data policy hard constraint。
+- **已实现切片**：独立 Node TLS 入口、证书指纹绑定、origin App 到执行 App 的最小授权映射、显式导入/导出与契约摘要、代次和租约、取消、结果未知时禁止自动重放。Node 服务与本机 Consumer API 共享 Runtime 资源管理。自动发现、远程 durable、流式和多模态仍有独立门槛。
+- **ADR**：[ADR-0019](adr/0019-trusted-text-nodes.md)；[配置与同机验收](TRUSTED_NODES.md)。
 
 ### D-102：大 payload 的传输与所有权
 

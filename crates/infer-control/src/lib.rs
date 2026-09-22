@@ -1,5 +1,7 @@
 //! The control plane: admission, policy selection, dispatch, job state, and cancellation.
 
+mod trusted_nodes;
+pub use trusted_nodes::node_offers;
 mod app_admission;
 mod attempt_policy;
 mod audio_streaming;
@@ -765,8 +767,20 @@ impl Runtime {
                     return Err(self.terminal_error_for(&prepared.job_id).await);
                 }
                 let provider = self.provider(&prepared.provider_id)?;
-                let upstream =
-                    provider.execute(request.for_provider(prepared.physical_model.clone()));
+                let upstream = provider.execute_attempt(
+                    infer_provider::ProviderAttemptContext {
+                        job_id: prepared.job_id.clone(),
+                        app_id: prepared.app_id.clone(),
+                        intent: prepared.logical_model.clone(),
+                        attempt: attempt_number,
+                        remaining: prepared
+                            .deadline
+                            .map_or(Duration::from_secs(120), |deadline| {
+                                deadline.saturating_duration_since(Instant::now())
+                            }),
+                    },
+                    request.for_provider(prepared.physical_model.clone()),
+                );
                 let result = match prepared.deadline {
                     Some(deadline) => tokio::select! {
                         _ = prepared.cancellation.cancelled() => Err(self.terminal_error_for(&prepared.job_id).await),
@@ -816,10 +830,12 @@ impl Runtime {
                             None,
                         )
                         .await?;
-                        let can_retry = attempt_policy::retryable(kind)
+                        let can_retry = error.replay_allowed()
+                            && attempt_policy::retryable(kind)
                             && retry_index < attempt_policy::MAX_RETRIES_PER_CANDIDATE
                             && attempts < attempt_policy::MAX_ATTEMPTS;
-                        let can_fallback = attempt_policy::fallback_eligible(kind)
+                        let can_fallback = error.replay_allowed()
+                            && attempt_policy::fallback_eligible(kind)
                             && target_index + 1 < targets.len()
                             && attempts < attempt_policy::MAX_ATTEMPTS;
                         last_error = Some(error);
@@ -1738,6 +1754,7 @@ impl Runtime {
         app_id: &str,
         preparation: JobPreparation<'_>,
     ) -> Result<PreparedRun, RuntimeError> {
+        let submitted_at = Instant::now();
         let JobPreparation {
             logical_model,
             constraints,
@@ -1801,8 +1818,49 @@ impl Runtime {
             .profiles
             .get(&policy_name)
             .expect("validated profile");
-        let unavailable_providers = self.unavailable_providers();
-        let unavailable_deployments = self.resources.unavailable_deployments().await;
+        let mut unavailable_providers = self.unavailable_providers();
+        let mut unavailable_deployments = self.resources.unavailable_deployments().await;
+        let availability = futures_util::future::join_all(
+            self.providers
+                .iter()
+                .filter(|(id, _)| {
+                    let provider = &self.config.providers[*id];
+                    constraints
+                        .placement
+                        .is_none_or(|scope| scope.allows(provider.placement))
+                        && app
+                            .allowed_provider_access_classes
+                            .contains(&provider.access_class)
+                })
+                .map(|(id, provider)| async move {
+                    (id, provider.available_models(logical_model).await)
+                }),
+        )
+        .await;
+        for (id, result) in availability {
+            match result {
+                Err(_) => {
+                    unavailable_providers.insert(id.clone());
+                }
+                Ok(Some(models)) => {
+                    for (deployment_id, deployment) in &self.config.deployments {
+                        if &deployment.provider == id
+                            && !models
+                                .contains(&self.config.model_builds[&deployment.build].model_id)
+                        {
+                            unavailable_deployments.insert(deployment_id.clone());
+                        }
+                    }
+                }
+                Ok(None) => {}
+            }
+        }
+        if constraints
+            .deadline_ms
+            .is_some_and(|limit| submitted_at.elapsed() >= Duration::from_millis(limit))
+        {
+            return Err(RuntimeError::DeadlineExpired);
+        }
         let queue_estimates = self.provider_queue_estimates().await;
         let plan = plan_candidates_with_queue(
             &self.config,
@@ -1837,7 +1895,6 @@ impl Runtime {
         let job_id = format!("{id_prefix}_{}", Uuid::new_v4().simple());
         let cancellation = CancellationToken::new();
         let priority = constraints.priority.unwrap_or(Priority::Normal);
-        let submitted_at = Instant::now();
         let deadline = constraints
             .deadline_ms
             .map(|milliseconds| submitted_at + Duration::from_millis(milliseconds));

@@ -3,6 +3,8 @@
 //! The public surface is split by semantic ownership: Responses request intent
 //! and constraints, static registry/configuration, and observable Job state.
 
+mod node;
+pub use node::*;
 mod audio;
 mod audio_embedding;
 mod audio_event;

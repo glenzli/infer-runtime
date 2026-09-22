@@ -5,6 +5,7 @@ members = [
   "crates/infer-artifact-lease",
   "crates/infer-raw-foundation",
   "crates/infer-core",
+  "crates/infer-node",
   "crates/infer-payload",
   "crates/infer-store",
   "crates/infer-provider",
@@ -60,3 +61,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.15", features = ["v4", "serde"] }
 zeroize = "1.9"
+
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std"] }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring"] }

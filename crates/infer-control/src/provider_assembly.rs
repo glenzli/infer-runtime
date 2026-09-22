@@ -80,6 +80,17 @@ impl ProviderAssembly {
                 continue;
             }
             match provider.kind {
+                ProviderKind::TrustedNode => {
+                    let peer = provider.node.clone().ok_or_else(|| {
+                        RuntimeError::Provider(infer_provider::ProviderError::Protocol(
+                            "missing node configuration".into(),
+                        ))
+                    })?;
+                    assembly.providers.insert(
+                        id.clone(),
+                        Arc::new(infer_provider::TrustedNodeProvider::new(id.clone(), peer)?),
+                    );
+                }
                 ProviderKind::Responses => {
                     let api_key = provider
                         .api_key_env

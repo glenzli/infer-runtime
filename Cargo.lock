@@ -1261,6 +1261,7 @@ dependencies = [
  "infer-artifact-lease",
  "infer-auth",
  "infer-core",
+ "infer-node",
  "infer-observer",
  "infer-payload",
  "infer-provider",
@@ -1288,6 +1289,25 @@ dependencies = [
  "serde_json",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "infer-node"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "infer-core",
+ "libc",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "uuid",
 ]
 
 [[package]]
@@ -1331,6 +1351,7 @@ dependencies = [
  "image",
  "infer-artifact",
  "infer-core",
+ "infer-node",
  "infer-resource",
  "ndarray",
  "ort",
@@ -1419,6 +1440,7 @@ dependencies = [
  "infer-core",
  "infer-observer",
  "libc",
+ "serde_json",
  "sha2",
  "tokio",
  "tracing",

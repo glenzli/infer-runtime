@@ -1,5 +1,7 @@
 //! Provider contracts and protocol-family adapters.
 
+mod trusted_node;
+pub use trusted_node::TrustedNodeProvider;
 mod audio_stream;
 mod audio_worker;
 mod codex_app_server;
@@ -110,6 +112,8 @@ pub enum ProviderFailureKind {
 
 #[derive(Debug, Error)]
 pub enum ProviderError {
+    #[error("remote node outcome unknown; automatic replay prohibited")]
+    RemoteOutcomeUnknown,
     #[error("provider transport error: {0}")]
     Transport(#[from] reqwest::Error),
     /// Keep the upstream body for failure classification and local debugging,
@@ -162,9 +166,10 @@ impl ProviderError {
             Self::Transport(_) | Self::Io(_) => ProviderFailureKind::Unavailable,
             Self::InvalidInput(_) => ProviderFailureKind::InvalidRequest,
             Self::Classified { kind, .. } | Self::CodexTurn { kind, .. } => *kind,
-            Self::Malformed(_) | Self::Protocol(_) | Self::NativeRuntime(_) => {
-                ProviderFailureKind::Protocol
-            }
+            Self::RemoteOutcomeUnknown
+            | Self::Malformed(_)
+            | Self::Protocol(_)
+            | Self::NativeRuntime(_) => ProviderFailureKind::Protocol,
         }
     }
 
@@ -177,7 +182,14 @@ impl ProviderError {
 
     /// Payload-free summary safe for public responses, Job snapshots, audit,
     /// and ordinary logs. `Display` remains an internal diagnostic surface.
+    pub fn replay_allowed(&self) -> bool {
+        !matches!(self, Self::RemoteOutcomeUnknown)
+    }
+
     pub fn public_message(&self) -> &'static str {
+        if matches!(self, Self::RemoteOutcomeUnknown) {
+            return "remote node outcome unknown; automatic replay prohibited";
+        }
         if let Self::CodexTurn { code, .. } = self {
             return code;
         }
@@ -192,6 +204,14 @@ impl ProviderError {
     }
 }
 
+pub struct ProviderAttemptContext {
+    pub job_id: String,
+    pub app_id: String,
+    pub intent: String,
+    pub attempt: usize,
+    pub remaining: Duration,
+}
+
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn id(&self) -> &str;
@@ -200,6 +220,20 @@ pub trait Provider: Send + Sync {
         &self,
         request: ResponsesRequest,
     ) -> Result<ProviderByteStream, ProviderError>;
+    async fn execute_attempt(
+        &self,
+        _context: ProviderAttemptContext,
+        request: ResponsesRequest,
+    ) -> Result<Value, ProviderError> {
+        self.execute(request).await
+    }
+    /// None preserves static local admission. Nodes return live, approved offers.
+    async fn available_models(
+        &self,
+        _intent: &str,
+    ) -> Result<Option<std::collections::BTreeSet<String>>, ProviderError> {
+        Ok(None)
+    }
     /// Optional dynamic model inventory. Discovery never grants routing
     /// admission; callers must inspect the `admitted` marker.
     async fn model_catalog(&self) -> Result<Option<ProviderModelCatalog>, ProviderError> {

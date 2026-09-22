@@ -24,6 +24,9 @@ use tracing_subscriber::EnvFilter;
 struct Args {
     #[arg(short, long, default_value = "config/infer.toml")]
     config: PathBuf,
+    /// Print payload-free exported node contract identities, without starting services.
+    #[arg(long)]
+    print_node_offers: bool,
 }
 
 #[tokio::main]
@@ -39,12 +42,20 @@ async fn main() -> anyhow::Result<()> {
     let config = RuntimeConfig::load(&args.config)
         .map_err(anyhow::Error::msg)
         .context("load inferd configuration")?;
+    if args.print_node_offers {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&infer_control::node_offers(&config)?)?
+        );
+        return Ok(());
+    }
     let bind = config.server.bind.clone();
     let observer_config = config.observer.clone();
     let raw_config = config.raw_foundation.clone();
     let runtime = Runtime::from_config(config)
         .await
         .map_err(anyhow::Error::msg)?;
+    let _node_server = runtime.start_node_server().await?;
     let listener = tokio::net::TcpListener::bind(&bind)
         .await
         .with_context(|| format!("bind inferd to {bind}"))?;

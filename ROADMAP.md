@@ -295,6 +295,11 @@ M7 不属于 v0.1 发布门槛。Codex App Server slice 已按真实 consumer �
 
 ## 8. M5：可信远程节点
 
+实验进展（2026-09-23）：已增加显式配对的 unary text Node 切片，复用执行机器的 Runtime，
+提供独立 mTLS 入口、导入契约校验、动态可用性过滤、远程准入租约、取消及结果未知时禁止重放。
+同机 A/B/C 独立进程测试使用确定性后端验证协议；不代表真实局域网、模型负载或完整 M5 已通过。
+配置与验收见 [TRUSTED_NODES.md](docs/TRUSTED_NODES.md) 和 [ADR-0019](docs/adr/0019-trusted-text-nodes.md)。
+
 ### 目标
 
 让 DGX、Linux GPU、Windows GPU 等成为受 runtime 管理的 `Infer Node`，而不只是另一个 HTTP endpoint。

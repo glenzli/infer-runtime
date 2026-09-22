@@ -135,10 +135,12 @@ pub fn plan_candidates_with_queue(
             .is_some_and(|target| target.rank(deployment_id, &build.profile).is_some())
             && routing_grant
                 .is_some_and(|grant| grant.allows_named_deployment(deployment_id, &build.profile));
-        if routing_grant.is_some_and(|grant| {
-            !grant.allows_deployment(deployment_id, &build.profile)
-                && !named_target_is_explicitly_authorized
-        }) {
+        if (provider.kind == infer_core::ProviderKind::TrustedNode && routing_grant.is_none())
+            || routing_grant.is_some_and(|grant| {
+                !grant.allows_deployment(deployment_id, &build.profile)
+                    && !named_target_is_explicitly_authorized
+            })
+        {
             reason_codes.push(CandidateReasonCode::RoutingGrantExcluded);
         }
         if let Some(target) = constraints.named_route.as_ref() {
@@ -646,6 +648,47 @@ mod tests {
             rejected.reason_codes,
             vec![CandidateReasonCode::CapabilityBelowFloor]
         );
+    }
+
+    #[test]
+    fn a_trusted_node_requires_an_explicit_app_routing_grant() {
+        let mut config = config();
+        let provider = config.providers.get_mut("cloud").unwrap();
+        provider.kind = infer_core::ProviderKind::TrustedNode;
+        provider.placement = Placement::TrustedNode;
+        let grant = RoutingGrantConfig {
+            deployment_ids: BTreeSet::from(["strong_cloud".into()]),
+            ..Default::default()
+        };
+        for (routing_grant, expected) in [(None, 0), (Some(&grant), 1)] {
+            let plan = plan_candidates(
+                &config,
+                "reasoning.solve",
+                config.intent("reasoning.solve").unwrap(),
+                &config.profiles["balanced"],
+                CandidatePlanningContext {
+                    constraints: &RequestConstraints::default(),
+                    execution_requirements: &ExecutionRequirements::default(),
+                    reasoning_effort: None,
+                    allowed_provider_access_classes: &BTreeSet::from([
+                        ProviderAccessClass::Standard,
+                    ]),
+                    allowed_cloud_input_modalities: &BTreeSet::new(),
+                    routing_grant,
+                    unavailable_providers: &BTreeSet::new(),
+                    unavailable_deployments: &BTreeSet::new(),
+                },
+            );
+            assert_eq!(plan.candidates.len(), expected);
+            if expected == 0 {
+                assert!(plan.decision.candidates.iter().any(|candidate| {
+                    candidate.deployment == "strong_cloud"
+                        && candidate
+                            .reason_codes
+                            .contains(&CandidateReasonCode::RoutingGrantExcluded)
+                }));
+            }
+        }
     }
 
     #[test]
