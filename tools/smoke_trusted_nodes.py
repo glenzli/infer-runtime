@@ -395,11 +395,18 @@ def exercise(h):
     oversized = "x" * (1024 * 1024)
     before = len(h.backends['b'].calls)
     status, rejected = h.infer(oversized, deployment_ids="b_text")
-    assert status == 400 and rejected["error"]["code"] == "upstream_invalid_request", (status, rejected)
+    assert status == 409 and rejected["error"]["code"] == "no_candidate", (status, rejected)
     assert len(h.backends['b'].calls) == before
+    before_local = len(h.backends['a'].calls)
+    before_c = len(h.backends['c'].calls)
+    assert output(h.infer(oversized, prefer="trusted_node"))[0] == "A"
+    assert len(h.backends['a'].calls) == before_local + 1
+    assert len(h.backends['b'].calls) == before
+    assert len(h.backends['c'].calls) == before_c
+    passed("oversized node input is excluded before routing and can select allowed local A")
     assert h.infer("large-result", deployment_ids="b_text")[0] != 200
     assert len(h.backends['b'].calls) == before + 1
-    passed("oversized input and output are rejected at the node transport boundary")
+    passed("oversized node output is rejected at the transport boundary")
     h.stop("b")
     code, report = h.probe()
     assert code != 0 and not report["ready"]

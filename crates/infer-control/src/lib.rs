@@ -709,7 +709,7 @@ impl Runtime {
         let constraints = request.constraints()?;
         let execution_requirements = request.execution_requirements();
         let prepared = self
-            .prepare_job(
+            .prepare_job_with_node_transport(
                 app_id,
                 JobPreparation {
                     logical_model: &request.model,
@@ -724,6 +724,7 @@ impl Runtime {
                     ),
                     durable_payload: None,
                 },
+                infer_node::NodeClient::request_fits_wire(&request),
             )
             .await?;
         self.arm_response_deadline_watchdog(&prepared);
@@ -1754,6 +1755,16 @@ impl Runtime {
         app_id: &str,
         preparation: JobPreparation<'_>,
     ) -> Result<PreparedRun, RuntimeError> {
+        self.prepare_job_with_node_transport(app_id, preparation, true)
+            .await
+    }
+
+    async fn prepare_job_with_node_transport(
+        &self,
+        app_id: &str,
+        preparation: JobPreparation<'_>,
+        node_request_fits: bool,
+    ) -> Result<PreparedRun, RuntimeError> {
         let submitted_at = Instant::now();
         let JobPreparation {
             logical_model,
@@ -1820,14 +1831,24 @@ impl Runtime {
             .expect("validated profile");
         let mut unavailable_providers = self.unavailable_providers();
         let mut unavailable_deployments = self.resources.unavailable_deployments().await;
+        if !node_request_fits {
+            unavailable_providers.extend(
+                self.config
+                    .providers
+                    .iter()
+                    .filter(|(_, provider)| provider.kind == ProviderKind::TrustedNode)
+                    .map(|(id, _)| id.clone()),
+            );
+        }
         let availability = futures_util::future::join_all(
             self.providers
                 .iter()
                 .filter(|(id, _)| {
                     let provider = &self.config.providers[*id];
-                    constraints
-                        .placement
-                        .is_none_or(|scope| scope.allows(provider.placement))
+                    (node_request_fits || provider.kind != ProviderKind::TrustedNode)
+                        && constraints
+                            .placement
+                            .is_none_or(|scope| scope.allows(provider.placement))
                         && app
                             .allowed_provider_access_classes
                             .contains(&provider.access_class)

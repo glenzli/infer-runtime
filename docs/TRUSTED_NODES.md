@@ -34,25 +34,25 @@ automatic fallback to C. A machine allowing loopback TCP binds is required.
 
 ## Verified on 2026-09-23 (Asia/Shanghai)
 
-The final linked `inferd` passed all 20 same-host acceptance groups, including
+The current linked `inferd` passed all 21 same-host acceptance groups, including
 certificate/name/digest rejection, explicit App grants, running lease expiry,
 unknown-outcome replay suppression, authenticated operator probes and authorized
-fallback after confirmed failure.
+fallback after confirmed failure. Oversized requests are filtered before remote
+routing, while an authorized local candidate remains usable.
 The harness records the executable and script SHA-256 in its JSON report.
 
-- Executable SHA-256: `14a91aa7590f4311669fdf9e3efbd817e5dab3095b005650b1f5f579b076d1f3`
-- Harness SHA-256: `01ba36ee409481070267335de6b93e785509e4950ee457e2d75cfb533e438473`
-- `cargo build -p inferd --offline`: final probe binary linked successfully.
-- `cargo test -p inferd --offline`: 2 daemon tests passed.
-- `cargo clippy -p inferd --all-targets --no-deps --offline -- -D warnings`: passed.
+- Executable SHA-256: `8e89e4bd8743c1fdfffe934e2ee1a97e87b874ff7883c74de45ec9ca2dd02753`
+- Harness SHA-256: `7e8b0945281ec8ca4c4bf85829cb6287173d9f281ec8823d817a28eb8480863a`
+- `cargo build -p inferd --offline`: current binary linked successfully.
+- `cargo test -p infer-node -p infer-control --offline`: 6 node and 91 control tests passed.
+- `cargo fmt --all -- --check` and Python syntax parse: passed.
+
+The previous source snapshot passed `cargo test -p inferd --offline` (2 daemon tests)
+and focused daemon/node Clippy. Its broader workspace run is retained as baseline
+evidence for unchanged code, not as validation of the current routing change:
+
 - `cargo test --workspace --offline -- --skip tests::migration_backfills_priority_for_existing_job_metadata`:
   435 passed, 24 ignored, one known baseline test filtered out.
-- `cargo test -p infer-node --offline`: all 6 node tests passed, including
-  retained-record exhaustion, recovery and oversized-frame rejection.
-- `cargo clippy -p infer-node --all-targets --no-deps --offline -- -D warnings`:
-  passed with no lint exemptions. The modified core/provider/control/daemon targets
-  also passed focused Clippy with only the baseline `derivable_impls` and
-  `too_many_arguments` lints allowed.
 
 The unfiltered workspace gates are not clean: the existing store migration test
 still expects schema version 8 while the implementation uses version 9; strict
@@ -198,6 +198,10 @@ Without named narrowing, existing policies select between eligible local/B/C
 Deployments. `infer.prefer=trusted_node` is a preference within the allowed set;
 `local_only` remains a hard prohibition on B/C. A failed or stale catalog cannot
 admit a remote Deployment. A contract change requires explicit import approval.
+Unary text requests that exceed the node wire limit are excluded from trusted-node
+candidate planning. An allowed local Deployment can still run such a request;
+explicitly narrowing to an oversized node request returns `no_candidate` before
+dispatch. The node client also checks the limit as a final transport guard.
 
 Node requests are capped at 120 seconds. A shorter ingress deadline still wins.
 If the response says the remote outcome is unknown, do not automatically resubmit:

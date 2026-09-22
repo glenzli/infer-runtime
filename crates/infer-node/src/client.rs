@@ -12,6 +12,11 @@ pub struct NodeClient {
 }
 
 impl NodeClient {
+    /// Leave room for the Dispatch envelope and attempt identity in the wire frame.
+    pub fn request_fits_wire(request: &ResponsesRequest) -> bool {
+        serde_json::to_vec(request).is_ok_and(|bytes| bytes.len() <= MAX_FRAME - 1024)
+    }
+
     pub fn new(config: NodePeerConfig) -> Result<Self, NodeError> {
         if config.address.parse::<std::net::SocketAddr>().is_err()
             || !infer_core::valid_node_digest(&config.certificate_sha256)
@@ -94,11 +99,7 @@ impl NodeClient {
         {
             return Err(NodeError::Protocol);
         }
-        if serde_json::to_vec(&request)
-            .map_err(|_| NodeError::Protocol)?
-            .len()
-            > MAX_FRAME - 1024
-        {
+        if !Self::request_fits_wire(&request) {
             return Err(NodeError::Protocol);
         }
         let deadline = Instant::now() + ttl.min(Duration::from_millis(MAX_TASK_MS));
