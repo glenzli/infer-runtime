@@ -308,7 +308,7 @@ capabilities = ["responses", "instructions", "streaming", "function_tools", "rea
 # One local Codex App Server process exposes a subscription-backed group of
 # cloud models. Local stdio is only the transport: placement remains cloud and
 # existing Consumers are denied unless their App explicitly opts into the
-# subscription access class. The adapter admits only the three Builds below;
+# subscription access class. The adapter admits only the five Builds below;
 # other models returned by model/list remain operator-visible inventory.
 [providers.codex-subscription]
 kind = "codex_app_server"
@@ -800,6 +800,38 @@ status = "provisional"
 level = "exceptional"
 status = "provisional"
 
+# GPT-6 entries preserve the existing Luna/Sol routing roles. These are
+# provisional Infer ratings, not a comparison with the GPT-5.6 Builds.
+[model_profiles.codex_gpt_6_luna]
+family = "gpt-6"
+
+[model_profiles.codex_gpt_6_luna.ratings."language.respond"]
+level = "advanced"
+status = "provisional"
+
+[model_profiles.codex_gpt_6_luna.ratings."reasoning.solve"]
+level = "advanced"
+status = "provisional"
+
+[model_profiles.codex_gpt_6_luna.ratings."multimodal.respond"]
+level = "advanced"
+status = "provisional"
+
+[model_profiles.codex_gpt_6_sol]
+family = "gpt-6"
+
+[model_profiles.codex_gpt_6_sol.ratings."language.respond"]
+level = "exceptional"
+status = "provisional"
+
+[model_profiles.codex_gpt_6_sol.ratings."reasoning.solve"]
+level = "exceptional"
+status = "provisional"
+
+[model_profiles.codex_gpt_6_sol.ratings."multimodal.respond"]
+level = "exceptional"
+status = "provisional"
+
 [model_profiles.qwen3_asr_1_7b]
 family = "qwen3-asr"
 
@@ -1287,6 +1319,36 @@ source_kind = "provider_managed"
 upstream = "codex-subscription:gpt-5.6-sol"
 
 [model_builds.codex_gpt_5_6_sol_subscription.license]
+status = "unreviewed"
+
+[model_builds.codex_gpt_6_luna_subscription]
+profile = "codex_gpt_6_luna"
+model_id = "gpt-6-luna"
+variant = "codex-subscription"
+input_modalities = ["text", "image"]
+output_modalities = ["text"]
+features = ["reasoning", "web_search"]
+
+[model_builds.codex_gpt_6_luna_subscription.provenance]
+source_kind = "provider_managed"
+upstream = "codex-subscription:gpt-6-luna"
+
+[model_builds.codex_gpt_6_luna_subscription.license]
+status = "unreviewed"
+
+[model_builds.codex_gpt_6_sol_subscription]
+profile = "codex_gpt_6_sol"
+model_id = "gpt-6-sol"
+variant = "codex-subscription"
+input_modalities = ["text", "image"]
+output_modalities = ["text"]
+features = ["reasoning", "web_search"]
+
+[model_builds.codex_gpt_6_sol_subscription.provenance]
+source_kind = "provider_managed"
+upstream = "codex-subscription:gpt-6-sol"
+
+[model_builds.codex_gpt_6_sol_subscription.license]
 status = "unreviewed"
 
 [model_builds.qwen3_asr_1_7b_8bit]
@@ -1874,6 +1936,23 @@ supported_execution_modes = ["unary", "server_stream"]
 [deployments.codex_gpt_5_6_sol]
 provider = "codex-subscription"
 build = "codex_gpt_5_6_sol_subscription"
+resource_class = "standard"
+supported_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "server_stream"]
+
+[deployments.codex_gpt_6_luna]
+provider = "codex-subscription"
+build = "codex_gpt_6_luna_subscription"
+resource_class = "standard"
+# Match the signed-in Codex App Server model/list, which does not expose `none`.
+supported_efforts = ["low", "medium", "high", "xhigh", "max"]
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "server_stream"]
+
+[deployments.codex_gpt_6_sol]
+provider = "codex-subscription"
+build = "codex_gpt_6_sol_subscription"
 resource_class = "standard"
 supported_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 estimated_cost_usd = 0.0

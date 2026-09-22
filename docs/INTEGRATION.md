@@ -592,6 +592,10 @@ Codex App Server 在 Runtime 中是一个 `placement=cloud`、`access_class=subs
 Provider；本机 stdio 只是 transport。一个登录会话当前发现 Sol、Terra、Luna 等多个上游模型，
 但 Consumer 仍然请求 Intent，不得提交这些物理模型名。Runtime 按静态准入的 Deployment 路由，
 不会因为 `model/list` 出现新模型就自动开放。
+示例配置已为 `gpt-6-sol` 和 `gpt-6-luna` 增加独立 Deployment，保留原有 GPT-5.6
+Deployment 和 App 的显式路由授权。新模型的能力评级为 provisional；当前 Codex
+`model/list` 分别报告 Sol 支持 `low` 到 `ultra`、Luna 支持 `low` 到 `max`，均支持文本和
+图片输入。订阅桥接在执行前再次核对当前模型清单和 effort；模型缺席时不会自动替换成另一模型。
 
 普通 App 默认只有 `standard` access class。需要使用订阅 Provider 的 App 必须由 operator 在
 配置中显式授权，同时保留最小 Intent 与 cloud placement 上限：

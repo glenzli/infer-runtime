@@ -1286,8 +1286,24 @@ mod tests {
                 "codex_gpt_5_6_luna",
                 "codex_gpt_5_6_sol",
                 "codex_gpt_5_6_terra",
+                "codex_gpt_6_luna",
+                "codex_gpt_6_sol",
             ])
         );
+        for (deployment, model, ultra) in [
+            ("codex_gpt_6_luna", "gpt-6-luna", false),
+            ("codex_gpt_6_sol", "gpt-6-sol", true),
+        ] {
+            let configured = &config.deployments[deployment];
+            assert_eq!(config.model_builds[&configured.build].model_id, model);
+            assert_eq!(configured.provider, "codex-subscription");
+            assert_eq!(
+                configured
+                    .supported_efforts
+                    .contains(&ReasoningEffort::Ultra),
+                ultra
+            );
+        }
 
         let deep = plan_candidates(
             &config,
@@ -1344,6 +1360,18 @@ mod tests {
         assert_eq!(ultra.candidates[0].deployment_id, "codex_gpt_5_6_sol");
         assert!(ultra.decision.candidates.iter().any(|candidate| {
             candidate.deployment == "codex_gpt_5_6_luna"
+                && candidate
+                    .reason_codes
+                    .contains(&CandidateReasonCode::ReasoningEffortUnsupported)
+        }));
+        assert!(
+            ultra
+                .candidates
+                .iter()
+                .any(|candidate| { candidate.deployment_id == "codex_gpt_6_sol" })
+        );
+        assert!(ultra.decision.candidates.iter().any(|candidate| {
+            candidate.deployment == "codex_gpt_6_luna"
                 && candidate
                     .reason_codes
                     .contains(&CandidateReasonCode::ReasoningEffortUnsupported)

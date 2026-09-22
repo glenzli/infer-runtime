@@ -1052,6 +1052,8 @@ mod tests {
                 "gpt-5.6-sol".into(),
                 "gpt-5.6-terra".into(),
                 "gpt-5.6-luna".into(),
+                "gpt-6-sol".into(),
+                "gpt-6-luna".into(),
             ]),
         )
     }
@@ -1396,7 +1398,7 @@ echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1"
     async fn real_codex_app_server_discovers_group_and_completes_text() {
         let provider = real_codex_provider();
         let catalog = provider.discover_model_catalog().await.unwrap();
-        assert!(catalog.models.iter().filter(|model| model.admitted).count() >= 3);
+        assert!(catalog.models.iter().filter(|model| model.admitted).count() >= 5);
         let mut request = request(json!("Reply with exactly: bridge-ok"));
         request.reasoning = Some(infer_core::ReasoningConfig {
             effort: Some(ReasoningEffort::Low),
@@ -1409,6 +1411,28 @@ echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-1"
                 .and_then(Value::as_str)
                 .is_some_and(|text| text.contains("bridge-ok"))
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "uses the signed-in local Codex subscription and consumes quota"]
+    async fn real_codex_app_server_completes_text_with_gpt6_sol_and_luna() {
+        let provider = real_codex_provider();
+        for model in ["gpt-6-sol", "gpt-6-luna"] {
+            let mut request = request(json!("Reply with exactly: bridge-ok"));
+            request.model = model.into();
+            request.reasoning = Some(infer_core::ReasoningConfig {
+                effort: Some(ReasoningEffort::Low),
+                extra: Default::default(),
+            });
+            let response = provider.execute(request).await.unwrap();
+            assert!(
+                response
+                    .pointer("/output/0/content/0/text")
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| text.contains("bridge-ok")),
+                "{model} returned no expected text"
+            );
+        }
     }
 
     #[tokio::test]
