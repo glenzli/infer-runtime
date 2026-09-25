@@ -175,6 +175,21 @@ priority_aging_ms = 10000
 version = 1
 protocol = "audio_worker"
 
+# Optional local MLX sound generation. Install the official optimized/mlx
+# runtime and weights separately, then point these paths at that installation.
+[providers.stable-audio-3-sfx-local]
+kind = "audio_worker"
+command = "/absolute/path/to/optimized/mlx/.venv/bin/python"
+args = ["workers/stable_audio_3_worker.py", "--model-root", "/absolute/path/to/optimized/mlx"]
+placement = "local"
+max_concurrency = 1
+max_queue = 2
+priority_aging_ms = 10000
+
+[providers.stable-audio-3-sfx-local.capability_profile]
+version = 1
+protocol = "audio_worker"
+
 # Optional owner-installed YAMNet runtime. Model files must first be published
 # into ArtifactStore under the exact typed Build manifest below.
 [providers.yamnet-local]
@@ -627,6 +642,14 @@ required_features = ["built_in_voices"]
 default_capability_floor = "foundational"
 default_policy = "local-first"
 
+[intents."audio.generate_sound"]
+data_plane = "audio.sound_generation"
+input_modalities = ["text"]
+output_modalities = ["audio"]
+required_features = ["text_to_sound_effect", "wav_44100_stereo_pcm16"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
 [intents."speech.design_voice"]
 data_plane = "audio.speech"
 input_modalities = ["text"]
@@ -908,6 +931,13 @@ family = "qwen3-tts"
 
 [model_profiles.qwen3_tts_custom_voice_1_7b.ratings."speech.synthesize"]
 level = "capable"
+status = "provisional"
+
+[model_profiles.stable_audio_3_sm_sfx]
+family = "stable-audio-3"
+
+[model_profiles.stable_audio_3_sm_sfx.ratings."audio.generate_sound"]
+level = "foundational"
 status = "provisional"
 
 [model_profiles.qwen3_tts_voice_design_1_7b]
@@ -1475,6 +1505,25 @@ variant = "mlx-8bit"
 input_modalities = ["text"]
 output_modalities = ["audio"]
 features = ["built_in_voices"]
+
+[model_builds.stable_audio_3_sm_sfx_mlx]
+profile = "stable_audio_3_sm_sfx"
+model_id = "stabilityai/stable-audio-3-optimized@da6edc54ddba10bfd79a077102ded687f80e882b:sm-sfx"
+variant = "pure-mlx-fp16-same-s-fp32"
+input_modalities = ["text"]
+output_modalities = ["audio"]
+features = ["text_to_sound_effect", "wav_44100_stereo_pcm16"]
+
+[model_builds.stable_audio_3_sm_sfx_mlx.provenance]
+source_kind = "user_managed"
+upstream = "https://huggingface.co/stabilityai/stable-audio-3-optimized"
+source_revision = "da6edc54ddba10bfd79a077102ded687f80e882b"
+
+[model_builds.stable_audio_3_sm_sfx_mlx.license]
+status = "declared"
+expression = "stable-audio-community"
+license_url = "https://stability.ai/license"
+reviewed_at = "2026-09-26"
 
 [model_builds.qwen3_tts_custom_voice_1_7b_8bit.provenance]
 source_kind = "user_managed"
@@ -2081,6 +2130,13 @@ resource_class = "heavy"
 estimated_cost_usd = 0.0
 supported_execution_modes = ["unary", "server_stream"]
 
+[deployments.stable_audio_3_sm_sfx_mlx]
+provider = "stable-audio-3-sfx-local"
+build = "stable_audio_3_sm_sfx_mlx"
+resource_class = "heavy"
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary"]
+
 [deployments.mlx_qwen3_tts_voice_design_1_7b]
 provider = "mlx-audio-local"
 build = "qwen3_tts_voice_design_1_7b_8bit"
@@ -2237,7 +2293,7 @@ max_cost_usd = { min = 0.0, max = 0.0 }
 [apps.echo]
 credential = { source = "managed" }
 resource_admin = false
-allowed_intents = ["audio.detect_events"]
+allowed_intents = ["audio.detect_events", "audio.generate_sound"]
 max_pending_jobs = 16
 default_policy = "local-first"
 allowed_policies = ["local-first"]

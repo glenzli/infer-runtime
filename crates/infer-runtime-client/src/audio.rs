@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, path::Path};
 use reqwest::multipart::{Form, Part};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::{
     Client, Error, Result,
@@ -16,6 +17,7 @@ pub const TRANSCRIPTION_CAPABILITIES: &[&str] = &["infer.audio.transcription@202
 pub const EVENT_DETECTION_CAPABILITIES: &[&str] = &["infer.audio.event-detection@20260813.2"];
 pub const ALIGNMENT_CAPABILITIES: &[&str] = &["infer.audio.alignment@20260811.1"];
 pub const SPEECH_CAPABILITIES: &[&str] = &["infer.audio.speech@20260811.1"];
+pub const SOUND_GENERATION_CAPABILITIES: &[&str] = &["infer.audio.sound-generation@20260926.1"];
 pub const AUDIO_EMBEDDING_CAPABILITIES: &[&str] = &["infer.audio.embedding@20260815.2"];
 
 #[derive(Debug, Clone, Copy)]
@@ -85,6 +87,34 @@ pub struct AudioBytesResponse {
     pub content_type: String,
     pub job_id: String,
     pub logical_model: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SoundGenerationRequest {
+    pub model: String,
+    pub prompt: String,
+    pub duration_seconds: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<u32>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub metadata: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SoundGenerationResponse {
+    /// Exactly one stereo 44.1 kHz PCM16 WAV artifact.
+    pub wav: Vec<u8>,
+    pub sha256: String,
+    pub job_id: String,
+    pub logical_model: String,
+    pub provider: String,
+    pub deployment: String,
+    pub model_build: String,
+    pub physical_model: String,
+    pub placement: String,
+    pub seed: u32,
+    pub duration_seconds: u8,
 }
 
 pub struct SpeechByteStream {
@@ -633,6 +663,87 @@ impl Client {
         let response = ensure_success(response).await?;
         serde_json::from_slice(&read_bounded(response, MAX_JSON_RESPONSE_BYTES).await?)
             .map_err(|error| Error::MalformedResponse(error.to_string()))
+    }
+
+    pub async fn generate_sound_effect(
+        &self,
+        request: &SoundGenerationRequest,
+    ) -> Result<SoundGenerationResponse> {
+        if request.model != "audio.generate_sound"
+            || request.prompt.trim().is_empty()
+            || request.prompt.len() > 2000
+            || request.prompt.chars().any(char::is_control)
+            || !(1..=30).contains(&request.duration_seconds)
+        {
+            return Err(Error::Input(
+                "invalid bounded sound generation request".into(),
+            ));
+        }
+        let response = self
+            .send_capability_with(SOUND_GENERATION_CAPABILITIES, |http, endpoint| {
+                http.post(format!("{endpoint}/v1/audio/sound-generations"))
+                    .json(request)
+            })
+            .await?;
+        let response = ensure_success(response).await?;
+        if required_header(&response, reqwest::header::CONTENT_TYPE.as_str())? != "audio/wav" {
+            return Err(Error::MalformedResponse(
+                "sound generation requires audio/wav".into(),
+            ));
+        }
+        let job_id = required_header(&response, "x-infer-job-id")?;
+        let logical_model = required_header(&response, "x-infer-model")?;
+        let provider = required_header(&response, "x-infer-provider")?;
+        let deployment = required_header(&response, "x-infer-deployment")?;
+        let model_build = required_header(&response, "x-infer-model-build")?;
+        let physical_model = required_header(&response, "x-infer-physical-model")?;
+        let placement = required_header(&response, "x-infer-placement")?;
+        let sha256 = required_header(&response, "x-infer-artifact-sha256")?;
+        let seed = required_header(&response, "x-infer-seed")?
+            .parse::<u32>()
+            .map_err(|_| Error::MalformedResponse("invalid sound seed".into()))?;
+        let duration_seconds = required_header(&response, "x-infer-duration-seconds")?
+            .parse::<u8>()
+            .map_err(|_| Error::MalformedResponse("invalid sound duration".into()))?;
+        let wav = read_bounded(response, 6 * 1024 * 1024).await?;
+        if logical_model != request.model
+            || duration_seconds != request.duration_seconds
+            || request.seed.is_some_and(|expected| expected != seed)
+            || placement != "local"
+            || provider.is_empty()
+            || deployment.is_empty()
+            || model_build.is_empty()
+            || physical_model.is_empty()
+            || sha256 != format!("{:x}", Sha256::digest(&wav))
+            || wav.len() != 44 + usize::from(duration_seconds) * 44_100 * 4
+            || &wav[..4] != b"RIFF"
+            || &wav[8..12] != b"WAVE"
+            || &wav[12..16] != b"fmt "
+            || u16::from_le_bytes([wav[20], wav[21]]) != 1
+            || u16::from_le_bytes([wav[22], wav[23]]) != 2
+            || u32::from_le_bytes(wav[24..28].try_into().expect("bounded WAV header")) != 44_100
+            || u16::from_le_bytes([wav[34], wav[35]]) != 16
+            || &wav[36..40] != b"data"
+            || u32::from_le_bytes(wav[40..44].try_into().expect("bounded WAV header")) as usize
+                != wav.len() - 44
+        {
+            return Err(Error::MalformedResponse(
+                "sound artifact identity or WAV is invalid".into(),
+            ));
+        }
+        Ok(SoundGenerationResponse {
+            wav,
+            sha256,
+            job_id,
+            logical_model,
+            provider,
+            deployment,
+            model_build,
+            physical_model,
+            placement,
+            seed,
+            duration_seconds,
+        })
     }
 
     pub async fn synthesize_speech(&self, request: &SpeechRequest) -> Result<AudioBytesResponse> {

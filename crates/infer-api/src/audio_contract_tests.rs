@@ -18,6 +18,84 @@ struct ArrayLanguageTranscriptionExecutor;
 
 struct ClapEmbeddingExecutor;
 
+struct SoundGenerationExecutor;
+
+#[async_trait]
+impl AudioExecutor for SoundGenerationExecutor {
+    fn id(&self) -> &str {
+        "stable-audio-3-sfx-local"
+    }
+
+    async fn execute(
+        &self,
+        physical_model: &str,
+        request: AudioExecutionRequest,
+        _cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<AudioExecutionOutput, ProviderError> {
+        assert!(physical_model.contains("stable-audio-3-optimized@da6edc54"));
+        let AudioExecutionRequest::SoundGeneration(sound) = request else {
+            panic!("independent sound generation intent required");
+        };
+        assert_eq!(sound.duration_seconds, 1);
+        assert_eq!(sound.seed, Some(23));
+        assert_eq!(sound.metadata["infer.placement"], "local_only");
+        assert_eq!(sound.metadata["infer.offline_required"], "true");
+        assert_eq!(sound.metadata["infer.fallback"], "none");
+        Ok(AudioExecutionOutput::Audio {
+            bytes: b"RIFF0000WAVE".to_vec(),
+            content_type: "audio/wav",
+        })
+    }
+}
+
+#[tokio::test]
+async fn echo_sound_generation_is_local_and_reports_exact_artifact_identity() {
+    let config: RuntimeConfig =
+        toml::from_str(include_str!("../../../config/infer.example.toml")).unwrap();
+    config.validate().unwrap();
+    let runtime = Runtime::with_audio_executors(
+        config,
+        BTreeMap::new(),
+        AppCredentials::from_pairs([("echo", "sound-contract-token")]).unwrap(),
+        BTreeMap::from([(
+            "stable-audio-3-sfx-local".into(),
+            Arc::new(SoundGenerationExecutor) as DynAudioExecutor,
+        )]),
+    );
+    let response = router(runtime)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/audio/sound-generations")
+                .header(header::AUTHORIZATION, "Bearer sound-contract-token")
+                .header(contract::CONSUMER_CORE_HEADER, contract::CORE_CONTRACT)
+                .header(
+                    contract::CAPABILITY_CONTRACT_HEADER,
+                    "infer.audio.sound-generation@20260926.1",
+                )
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"model":"audio.generate_sound","prompt":"rain","duration_seconds":1,"seed":23}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["x-infer-placement"], "local");
+    assert_eq!(
+        response.headers()["x-infer-provider"],
+        "stable-audio-3-sfx-local"
+    );
+    assert_eq!(
+        response.headers()["x-infer-model-build"],
+        "stable_audio_3_sm_sfx_mlx"
+    );
+    assert_eq!(response.headers()["x-infer-seed"], "23");
+    assert_eq!(response.headers()["x-infer-duration-seconds"], "1");
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "audio/wav");
+    assert!(response.headers().contains_key("x-infer-job-id"));
+    assert!(response.headers().contains_key("x-infer-artifact-sha256"));
+}
+
 #[async_trait]
 impl AudioExecutor for ArrayLanguageTranscriptionExecutor {
     fn id(&self) -> &str {

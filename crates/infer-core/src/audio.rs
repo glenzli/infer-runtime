@@ -12,6 +12,7 @@ use crate::{
 };
 
 pub const MAX_AUDIO_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
+pub const MAX_SOUND_PROMPT_BYTES: usize = 2_000;
 
 /// Versioned catalog containing the Runtime-owned logical voices accepted by
 /// `speech.synthesize`.
@@ -224,6 +225,49 @@ impl SpeechRequest {
     }
 }
 
+/// One local text-to-sound candidate. This is deliberately independent of
+/// speech synthesis and voice cloning.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SoundGenerationRequest {
+    pub model: String,
+    pub prompt: String,
+    pub duration_seconds: u8,
+    #[serde(default)]
+    pub seed: Option<u32>,
+    #[serde(default)]
+    pub metadata: BTreeMap<String, String>,
+}
+
+impl SoundGenerationRequest {
+    pub fn validate(&self) -> Result<(), ContractError> {
+        if self.model != "audio.generate_sound" {
+            return Err(ContractError::InvalidAudio(
+                "sound generation requires model audio.generate_sound".into(),
+            ));
+        }
+        let prompt = self.prompt.trim();
+        if prompt.is_empty()
+            || prompt.len() > MAX_SOUND_PROMPT_BYTES
+            || prompt.chars().any(char::is_control)
+        {
+            return Err(ContractError::InvalidAudio(
+                "sound prompt must be 1-2000 UTF-8 bytes without control characters".into(),
+            ));
+        }
+        if !(1..=30).contains(&self.duration_seconds) {
+            return Err(ContractError::InvalidAudio(
+                "sound duration_seconds must be 1-30".into(),
+            ));
+        }
+        self.constraints().map(|_| ())
+    }
+
+    pub fn constraints(&self) -> Result<RequestConstraints, ContractError> {
+        RequestConstraints::from_metadata(&self.metadata)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VoiceCloneRequest {
     pub model: String,
@@ -260,6 +304,7 @@ pub enum AudioExecutionRequest {
     Embedding(AudioEmbeddingRequest),
     TextEmbedding(AudioTextEmbeddingRequest),
     Speech(SpeechRequest),
+    SoundGeneration(SoundGenerationRequest),
     VoiceClone(VoiceCloneRequest),
 }
 
@@ -272,6 +317,7 @@ impl AudioExecutionRequest {
             Self::Embedding(request) => &request.model,
             Self::TextEmbedding(request) => &request.model,
             Self::Speech(request) => &request.model,
+            Self::SoundGeneration(request) => &request.model,
             Self::VoiceClone(request) => &request.model,
         }
     }
@@ -284,6 +330,7 @@ impl AudioExecutionRequest {
             Self::Embedding(request) => request.constraints(),
             Self::TextEmbedding(request) => request.constraints(),
             Self::Speech(request) => request.constraints(),
+            Self::SoundGeneration(request) => request.constraints(),
             Self::VoiceClone(request) => request.constraints(),
         }
     }
@@ -296,6 +343,7 @@ impl AudioExecutionRequest {
             Self::Embedding(request) => request.validate(),
             Self::TextEmbedding(request) => request.validate(),
             Self::Speech(request) => request.validate(),
+            Self::SoundGeneration(request) => request.validate(),
             Self::VoiceClone(request) => request.validate(),
         }
     }
@@ -397,6 +445,34 @@ mod tests {
         }))
         .unwrap_err();
         assert!(error.to_string().contains("unknown field `formt`"));
+    }
+
+    #[test]
+    fn sound_generation_enforces_one_bounded_candidate() {
+        let mut request = SoundGenerationRequest {
+            model: "audio.generate_sound".into(),
+            prompt: "Rain on a window".into(),
+            duration_seconds: 10,
+            seed: Some(u32::MAX),
+            metadata: BTreeMap::new(),
+        };
+        assert!(request.validate().is_ok());
+        request.duration_seconds = 31;
+        assert!(request.validate().is_err());
+        request.duration_seconds = 1;
+        request.prompt = "界".repeat(667);
+        assert!(request.validate().is_err(), "UTF-8 byte bound must hold");
+        request.prompt = "Rain\nthrough a window".into();
+        assert!(
+            request.validate().is_err(),
+            "control characters must be rejected"
+        );
+        request.prompt = "Rain on a window".into();
+        request.model = "speech.synthesize".into();
+        assert!(
+            request.validate().is_err(),
+            "sound generation has its own intent"
+        );
     }
 
     #[test]

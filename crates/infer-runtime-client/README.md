@@ -45,3 +45,12 @@ session APIs (`stream_response` and `stream_speech`); unary return types remain 
 L2-normalized audio/text retrieval space, exact Build provenance, and source/query revision shape;
 unknown response fields remain available in `AudioEmbeddingResponse::extra`. They do not turn
 audio evidence into transcript/event facts or claim multilingual retrieval quality.
+
+`generate_sound_effect` uses the independent experimental
+`infer.audio.sound-generation@20260926.1` capability. One request creates one
+1–30 second 44.1 kHz stereo PCM16 WAV candidate from a prompt of at most 2000
+UTF-8 bytes. The optional `u32` seed is returned even when assigned by Runtime.
+The SDK validates the response SHA-256, WAV shape, local placement, and model
+identity headers; Consumers save `SoundGenerationResponse.wav` into their own
+artifact store and decide whether to accept or discard the candidate. The
+result's Job ID can be read with `Client::job` for routing and attempt evidence.

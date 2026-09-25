@@ -13,8 +13,8 @@ use async_trait::async_trait;
 use infer_core::{
     AlignmentRequest, AudioEmbeddingRequest, AudioExecutionRequest, AudioFile,
     AudioTextEmbeddingRequest, EventDetectionRequest, EventDetectionResult,
-    SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1, SpeechFormat, SpeechRequest, TranscriptionRequest,
-    VoiceCloneRequest,
+    SPEECH_VOICE_ZH_BRIGHT_FEMALE_V1, SoundGenerationRequest, SpeechFormat, SpeechRequest,
+    TranscriptionRequest, VoiceCloneRequest,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -117,6 +117,10 @@ struct WorkerRequest {
     language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration_seconds: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seed: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     voice: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -328,7 +332,20 @@ impl AudioExecutor for AudioWorkerExecutor {
             result = serde_json::to_value(typed)?;
         }
         if let Some((path, format)) = prepared.audio_output {
+            let size = fs::metadata(&path).await?.len();
+            if size == 0 || size > 6 * 1024 * 1024 {
+                return Err(ProviderError::Protocol(
+                    "audio worker output exceeds bounded size".into(),
+                ));
+            }
             let bytes = fs::read(path).await?;
+            if prepared.request.operation == "generate_sound"
+                && (bytes.len() < 44 || &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WAVE")
+            {
+                return Err(ProviderError::Protocol(
+                    "sound worker returned invalid WAV".into(),
+                ));
+            }
             Ok(AudioExecutionOutput::Audio {
                 bytes,
                 content_type: format.content_type(),
@@ -364,6 +381,9 @@ async fn prepare_worker_request(
         }
         AudioExecutionRequest::Speech(request) => {
             prepare_speech(request_id, physical_model, request, &temporary_files)
+        }
+        AudioExecutionRequest::SoundGeneration(request) => {
+            prepare_sound_generation(request_id, physical_model, request, &temporary_files)
         }
         AudioExecutionRequest::VoiceClone(request) => {
             prepare_voice_clone(request_id, physical_model, request, &temporary_files).await?
@@ -510,6 +530,26 @@ fn prepare_speech(
     )
 }
 
+fn prepare_sound_generation(
+    request_id: String,
+    model: &str,
+    request: SoundGenerationRequest,
+    temporary_files: &TempDir,
+) -> (WorkerRequest, Option<(PathBuf, SpeechFormat)>) {
+    let output_path = temporary_files.path().join("sound.wav");
+    (
+        WorkerRequest {
+            output_path: Some(output_path.to_string_lossy().into_owned()),
+            prompt: Some(request.prompt),
+            duration_seconds: Some(request.duration_seconds),
+            seed: request.seed,
+            format: Some(SpeechFormat::Wav),
+            ..worker_request(request_id, "generate_sound", model, None)
+        },
+        Some((output_path, SpeechFormat::Wav)),
+    )
+}
+
 async fn prepare_voice_clone(
     request_id: String,
     model: &str,
@@ -553,6 +593,8 @@ fn worker_request(
         reference_audio_path: None,
         language: None,
         prompt: None,
+        duration_seconds: None,
+        seed: None,
         voice: None,
         instructions: None,
         speed: None,
