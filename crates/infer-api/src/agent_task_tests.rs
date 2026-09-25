@@ -74,7 +74,7 @@ impl Provider for FakeAgentProvider {
         request: AgentTaskRequest,
         model: &str,
     ) -> Result<AgentTaskExecution, ProviderError> {
-        assert_eq!(model, "gpt-6-sol");
+        assert_eq!(model, "gpt-6-luna");
         assert_eq!(request.input_files[0].path, "a.txt");
         self.calls.fetch_add(1, Ordering::SeqCst);
         if self.fail_unknown {
@@ -188,7 +188,7 @@ async fn admitted_agent_runs_one_attempt_and_records_job() {
     assert_eq!(result["state"], "completed");
     assert_eq!(result["outputs"][0]["content_base64"], "b2s=");
     assert_eq!(result["provenance"]["provider"], "codex-agent");
-    assert_eq!(result["provenance"]["deployment"], "codex_agent_gpt_6_sol");
+    assert_eq!(result["provenance"]["deployment"], "codex_agent_gpt_6_luna");
     assert_eq!(result["provenance"]["attempt_number"], 1);
     assert_eq!(fake.calls.load(Ordering::SeqCst), 1);
 
@@ -240,7 +240,7 @@ async fn live_agent_http_job_round_trip() {
         "codex-agent",
         "codex",
         vec!["app-server".into(), "--listen".into(), "stdio://".into()],
-        std::collections::BTreeSet::from(["gpt-6-sol".into()]),
+        std::collections::BTreeSet::from(["gpt-6-sol".into(), "gpt-6-luna".into()]),
     ));
     let app = test_router_with_providers(
         true,

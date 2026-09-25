@@ -2971,6 +2971,28 @@ mod tests {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
         let mut config = RuntimeConfig::load(path).unwrap();
         assert!(config.apps["local-operator"].allows_agent_file_tasks());
+        for (deployment_id, build_id, model_id) in [
+            (
+                "codex_agent_gpt_6_sol",
+                "codex_gpt_6_sol_agent",
+                "gpt-6-sol",
+            ),
+            (
+                "codex_agent_gpt_6_luna",
+                "codex_gpt_6_luna_agent",
+                "gpt-6-luna",
+            ),
+        ] {
+            let deployment = &config.deployments[deployment_id];
+            assert_eq!(deployment.provider, "codex-agent");
+            assert_eq!(deployment.build, build_id);
+            assert_eq!(config.model_builds[build_id].model_id, model_id);
+            assert!(
+                config.model_profiles[build_id]
+                    .ratings
+                    .contains_key("agent.file_task")
+            );
+        }
         assert!(
             config.providers["codex-agent"]
                 .capability_profile

@@ -878,6 +878,13 @@ family = "gpt-6"
 level = "capable"
 status = "provisional"
 
+[model_profiles.codex_gpt_6_luna_agent]
+family = "gpt-6"
+
+[model_profiles.codex_gpt_6_luna_agent.ratings."agent.file_task"]
+level = "capable"
+status = "provisional"
+
 [model_profiles.codex_gpt_6_sol.ratings."image.generate"]
 level = "capable"
 status = "provisional"
@@ -1414,6 +1421,21 @@ source_kind = "provider_managed"
 upstream = "codex-agent:gpt-6-sol"
 
 [model_builds.codex_gpt_6_sol_agent.license]
+status = "unreviewed"
+
+[model_builds.codex_gpt_6_luna_agent]
+profile = "codex_gpt_6_luna_agent"
+model_id = "gpt-6-luna"
+variant = "codex-agent"
+input_modalities = ["text"]
+output_modalities = ["text"]
+features = []
+
+[model_builds.codex_gpt_6_luna_agent.provenance]
+source_kind = "provider_managed"
+upstream = "codex-agent:gpt-6-luna"
+
+[model_builds.codex_gpt_6_luna_agent.license]
 status = "unreviewed"
 
 [model_builds.qwen3_asr_1_7b_8bit]
@@ -2028,6 +2050,14 @@ provider = "codex-agent"
 build = "codex_gpt_6_sol_agent"
 resource_class = "standard"
 supported_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary"]
+
+[deployments.codex_agent_gpt_6_luna]
+provider = "codex-agent"
+build = "codex_gpt_6_luna_agent"
+resource_class = "standard"
+supported_efforts = ["low", "medium", "high", "xhigh", "max"]
 estimated_cost_usd = 0.0
 supported_execution_modes = ["unary"]
 
