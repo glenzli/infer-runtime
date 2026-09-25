@@ -1118,6 +1118,10 @@ pub struct AppConfig {
     /// A Provider capability and Intent grant never imply this App authority.
     #[serde(default)]
     pub allowed_builtin_tools: BTreeSet<BuiltinTool>,
+    /// Independent grant for the file-bearing Agent task data plane. Intent,
+    /// provider access, and Responses tool grants never imply this authority.
+    #[serde(default)]
+    pub allow_agent_file_tasks: bool,
     /// Optional allowlist for the public `voice` values accepted by
     /// `speech.synthesize`. Omitting it denies speech aliases; an explicit
     /// list lets a Consumer depend only on Runtime-owned aliases.
@@ -1165,6 +1169,10 @@ impl AppConfig {
 
     pub fn allows_builtin_tool(&self, tool: BuiltinTool) -> bool {
         self.allowed_builtin_tools.contains(&tool)
+    }
+
+    pub fn allows_agent_file_tasks(&self) -> bool {
+        self.allow_agent_file_tasks
     }
 
     pub fn allows_provider_access(&self, access_class: ProviderAccessClass) -> bool {
@@ -1537,6 +1545,15 @@ impl RuntimeConfig {
             {
                 return Err(configuration(format!(
                     "provider {id} cannot declare the first-slice image_generation capability outside Codex App Server"
+                )));
+            }
+            if provider
+                .capability_profile
+                .supports(ProviderCapability::AgentTask)
+                && expected_protocol != ProviderProtocol::CodexAppServer
+            {
+                return Err(configuration(format!(
+                    "provider {id} cannot declare agent_task outside Codex App Server"
                 )));
             }
             if provider.max_concurrency == 0
@@ -2108,6 +2125,7 @@ impl RuntimeConfig {
                     || app.allow_all_intents
                     || app.allow_all_speech_voice_aliases
                     || !app.allowed_builtin_tools.is_empty()
+                    || app.allow_agent_file_tasks
                     || app
                         .allowed_intents
                         .as_ref()
@@ -2924,6 +2942,44 @@ mod tests {
             .unwrap()
             .capability_profile
             .protocol = ProviderProtocol::Responses;
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn agent_task_provider_and_app_grants_are_independent() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
+        let mut config = RuntimeConfig::load(path).unwrap();
+        assert!(!config.apps["local-operator"].allows_agent_file_tasks());
+        assert!(
+            !config.providers["codex-subscription"]
+                .capability_profile
+                .supports(ProviderCapability::AgentTask)
+        );
+
+        config
+            .providers
+            .get_mut("codex-subscription")
+            .unwrap()
+            .capability_profile
+            .capabilities
+            .insert(ProviderCapability::AgentTask);
+        config.validate().unwrap();
+
+        config
+            .providers
+            .get_mut("codex-subscription")
+            .unwrap()
+            .capability_profile
+            .capabilities
+            .remove(&ProviderCapability::AgentTask);
+        config
+            .providers
+            .get_mut("ollama-local")
+            .unwrap()
+            .capability_profile
+            .capabilities
+            .insert(ProviderCapability::AgentTask);
         assert!(config.validate().is_err());
     }
 

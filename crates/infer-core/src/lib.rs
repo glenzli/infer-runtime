@@ -5,6 +5,7 @@
 
 mod node;
 pub use node::*;
+mod agent_task;
 mod audio;
 mod audio_embedding;
 mod audio_event;
@@ -21,6 +22,7 @@ mod vision;
 
 use thiserror::Error;
 
+pub use agent_task::*;
 pub use audio::*;
 pub use audio_embedding::*;
 pub use audio_event::*;

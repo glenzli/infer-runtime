@@ -33,6 +33,8 @@ pub mod error_code {
     pub const POLICY_VIOLATION: &str = "policy_violation";
     pub const INTENT_FORBIDDEN: &str = "intent_forbidden";
     pub const ROUTE_TARGET_FORBIDDEN: &str = "route_target_forbidden";
+    pub const AGENT_TASK_FORBIDDEN: &str = "agent_task_forbidden";
+    pub const AGENT_TASK_UNAVAILABLE: &str = "agent_task_unavailable";
     pub const RESOURCE_ADMIN_REQUIRED: &str = "resource_admin_required";
     pub const NO_CANDIDATE: &str = "no_candidate";
     pub const CANCELLED: &str = "cancelled";
@@ -90,6 +92,8 @@ pub const CORE_ERROR_CODES: &[&str] = &[
 ];
 
 pub const CAPABILITY_ERROR_CODES: &[&str] = &[
+    error_code::AGENT_TASK_FORBIDDEN,
+    error_code::AGENT_TASK_UNAVAILABLE,
     error_code::NO_CANDIDATE,
     error_code::CANCELLED,
     error_code::QUEUE_FULL,
@@ -298,6 +302,9 @@ macro_rules! capability {
 }
 
 macro_rules! capability_schema_digest {
+    ("infer.agent.task") => {
+        "947a276a16b65d11251f984aabbeaeb3a002cde156baac3a7c4344a595d70cb3"
+    };
     ("infer.responses") => {
         "abfb3b4b9a3c5d3831d56bb877ecfdd43d62b4442ba101a5ef071ec2740adbd5"
     };
@@ -370,6 +377,12 @@ macro_rules! capability_schema_digest {
 }
 
 pub const CAPABILITIES: &[CapabilityEntry] = &[
+    capability!(
+        "infer.agent.task",
+        "20260925.1",
+        "experimental",
+        [route!("POST", "/infer/v1/agent/tasks", &["unary"]),]
+    ),
     capability!(
         "infer.responses",
         "20260812.1",
@@ -573,7 +586,9 @@ pub const CAPABILITIES: &[CapabilityEntry] = &[
 ];
 
 pub fn required_capability_id(path: &str) -> Option<&'static str> {
-    if path == "/v1/responses" || path.starts_with("/v1/responses/") {
+    if path == "/infer/v1/agent/tasks" {
+        Some("infer.agent.task")
+    } else if path == "/v1/responses" || path.starts_with("/v1/responses/") {
         Some("infer.responses")
     } else if path == "/v1/audio/transcriptions" {
         Some("infer.audio.transcription")
@@ -701,6 +716,10 @@ mod tests {
             "../../../contracts/schema-source/consumer-api-20260813.1.json"
         ))
         .expect("aggregate schema source is valid");
+        let agent_extension: Value = serde_json::from_str(include_str!(
+            "../../../contracts/schema-source/agent-task-20260925.1.json"
+        ))
+        .expect("Agent task schema source is valid");
         assert_eq!(
             format!("{:x}", Sha256::digest(OPENAPI_JSON.as_bytes())),
             OPENAPI_SHA256
@@ -752,6 +771,11 @@ mod tests {
         }
 
         for capability in CAPABILITIES {
+            let source = if capability.id == "infer.agent.task" {
+                &agent_extension
+            } else {
+                &aggregate_document
+            };
             let identity = format!("{}@{}", capability.id, capability.schema_version);
             let capability_document: Value = serde_json::from_str(capability.schema.document)
                 .expect("capability OpenAPI JSON is valid");
@@ -786,8 +810,11 @@ mod tests {
                     .as_object()
                     .expect("component section is an object")
                 {
+                    let expected = source["components"][section]
+                        .get(name)
+                        .unwrap_or(&aggregate_document["components"][section][name]);
                     assert_eq!(
-                        component, &aggregate_document["components"][section][name],
+                        component, expected,
                         "capability artifact has stale component {section}/{name}"
                     );
                 }
@@ -799,9 +826,8 @@ mod tests {
                     .unwrap_or_else(|| {
                         panic!("OpenAPI is missing {} {}", route.method, route.path)
                     });
-                let mut aggregate_operation = aggregate_document["paths"][route.path]
-                    [route.method.to_ascii_lowercase()]
-                .clone();
+                let mut aggregate_operation =
+                    source["paths"][route.path][route.method.to_ascii_lowercase()].clone();
                 if let Some(responses) = aggregate_operation["responses"].as_object_mut() {
                     responses
                         .retain(|_, response| response["$ref"] != "#/components/responses/Error");

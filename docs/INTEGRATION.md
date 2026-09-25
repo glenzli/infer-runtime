@@ -157,6 +157,41 @@ if (!response.ok) {
 程序应根据 HTTP status 与 `error.code` 分支，不要解析 `error.message`。响应中未来可能增加
 字段，consumer 必须忽略未知响应字段。未知请求字段则会严格返回 400。
 
+### 文件型 Agent 任务（合同准备阶段）
+
+`infer.agent.task@20260925.1` 使用独立的 `POST /infer/v1/agent/tasks` 和 App
+`allow_agent_file_tasks` ACL。Shape 侧可按以下形状准备调用；目前已授权且合法的请求固定返回
+`503 agent_task_unavailable`，不会创建 Job 或运行 Agent。不要把它接成生产创作入口。
+
+```javascript
+const response = await fetch(`${inferBaseUrl}/infer/v1/agent/tasks`, {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${shapeInferToken}`,
+    "Infer-Consumer-Contract": "infer-runtime.consumer-core@20260813.1",
+    "Infer-Capability-Contract": "infer.agent.task@20260925.1",
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    model: "agent.file_task",
+    instruction: "Read input/scene.txt and write output/revision.txt",
+    input_files: [{
+      path: "scene.txt",
+      content_base64: "aGk=", // "hi" 的 Base64
+      sha256: "8f434346648f6b96df89dda901c5176b10a6d83961dd3c1ac88b59b2dc327aa4",
+    }],
+    output_paths: ["revision.txt"],
+  }),
+});
+const result = await response.json();
+if (!response.ok) throw new Error(`${response.status}: ${result.error?.code}`);
+// 完整执行开放后，仍须由 Shape 核对输出摘要和 source revision，再展示为候选。
+```
+
+示例内联字节及摘要只作合同演示；实际调用应对 Shape 已选源文件计算 Base64 与 SHA-256。
+请求不接受宿主路径。完整责任划分与执行门槛见
+[ADR-0020](adr/0020-agent-file-tasks.md)。
+
 ### Streaming
 
 设置 `"stream": true` 后响应为 `text/event-stream`：

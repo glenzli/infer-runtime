@@ -22,6 +22,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "contracts/schema-source/consumer-api-20260813.1.json"
+AGENT_TASK_SOURCE = ROOT / "contracts/schema-source/agent-task-20260925.1.json"
 OUTPUT = ROOT / "contracts/capabilities"
 IMMUTABLE_DIGESTS = ROOT / "contracts/immutable-contract-digests.json"
 CHECK_ONLY = "--check" in sys.argv[1:]
@@ -39,6 +40,7 @@ CORE_ROUTES = (
 )
 
 CAPABILITIES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "infer.agent.task": ("20260925.1", ("/infer/v1/agent/tasks",)),
     "infer.responses": (
         "20260812.1",
         (
@@ -219,6 +221,12 @@ def write_json_atomic(destination: Path, document: dict[str, Any]) -> None:
 
 def main() -> None:
     source = json.loads(SOURCE.read_text(encoding="utf-8"))
+    # New capability schemas may extend the aggregate source without changing
+    # the immutable Consumer Core or any previously published capability bytes.
+    extension = json.loads(AGENT_TASK_SOURCE.read_text(encoding="utf-8"))
+    source["paths"].update(extension["paths"])
+    for section, components in extension["components"].items():
+        source["components"].setdefault(section, {}).update(components)
     core_paths = {name: deepcopy(source["paths"][name]) for name in CORE_ROUTES}
     core_document = {
         "openapi": "3.1.0",

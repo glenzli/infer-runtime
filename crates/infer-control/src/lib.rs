@@ -208,6 +208,8 @@ pub enum RuntimeError {
     UnknownApp(String),
     #[error("application `{app_id}` is not permitted to submit intent `{intent}`")]
     IntentNotAllowed { app_id: String, intent: String },
+    #[error("application `{0}` is not permitted to submit file-bearing Agent tasks")]
+    AgentTaskNotAllowed(String),
     #[error("application `{app_id}` is not permitted to request the named route for `{intent}`")]
     NamedRouteNotAllowed { app_id: String, intent: String },
     #[error("policy profile `{0}` is not permitted for this application")]
@@ -704,6 +706,14 @@ impl Runtime {
         match self.config.apps.get(app_id) {
             Some(app) if app.resource_admin => Ok(()),
             Some(_) => Err(RuntimeError::ResourceAdminRequired(app_id.into())),
+            None => Err(RuntimeError::UnknownApp(app_id.into())),
+        }
+    }
+
+    pub fn authorize_agent_file_task(&self, app_id: &str) -> Result<(), RuntimeError> {
+        match self.config.apps.get(app_id) {
+            Some(app) if app.allows_agent_file_tasks() => Ok(()),
+            Some(_) => Err(RuntimeError::AgentTaskNotAllowed(app_id.into())),
             None => Err(RuntimeError::UnknownApp(app_id.into())),
         }
     }

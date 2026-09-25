@@ -68,6 +68,7 @@ mod tests {
                 allowed_intents: None,
                 routing: None,
                 allowed_builtin_tools: Default::default(),
+                allow_agent_file_tasks: false,
                 allowed_speech_voice_aliases: None,
                 allow_all_speech_voice_aliases: false,
                 allowed_provider_access_classes: std::collections::BTreeSet::from([

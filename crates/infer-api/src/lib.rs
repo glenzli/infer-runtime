@@ -1,5 +1,6 @@
 //! HTTP transport for the Responses data plane and infer control plane.
 
+mod agent_task;
 mod audio_streaming;
 pub mod contract;
 mod image_understanding;
@@ -9,6 +10,8 @@ pub mod raw_foundation;
 mod retrieval;
 mod vision;
 
+#[cfg(test)]
+mod agent_task_tests;
 #[cfg(test)]
 mod audio_contract_tests;
 #[cfg(test)]
@@ -160,6 +163,7 @@ fn base_router(runtime: Arc<Runtime>) -> Router {
         )
         .route("/infer/v1/text/rerank", post(retrieval::create_rerank))
         .route("/infer/v1/documents/ocr", post(ocr::create_document_ocr))
+        .route("/infer/v1/agent/tasks", post(agent_task::create_agent_task))
         .route("/infer/v1/jobs", get(get_jobs))
         .route("/infer/v1/operator/jobs", get(get_operator_jobs))
         .route(
@@ -266,6 +270,7 @@ fn requires_consumer_contract(path: &str) -> bool {
         || path.starts_with("/infer/v1/vision/")
         || path.starts_with("/infer/v1/text/")
         || path.starts_with("/infer/v1/documents/")
+        || path.starts_with("/infer/v1/agent/")
         || path.starts_with("/infer/v1/raw/")
 }
 
@@ -1475,6 +1480,10 @@ impl From<RuntimeError> for ApiError {
             RuntimeError::IntentNotAllowed { .. } => (
                 StatusCode::FORBIDDEN,
                 contract::error_code::INTENT_FORBIDDEN,
+            ),
+            RuntimeError::AgentTaskNotAllowed(_) => (
+                StatusCode::FORBIDDEN,
+                contract::error_code::AGENT_TASK_FORBIDDEN,
             ),
             RuntimeError::NamedRouteNotAllowed { .. } => (
                 StatusCode::FORBIDDEN,

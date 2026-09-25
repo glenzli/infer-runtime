@@ -586,6 +586,7 @@ string_enum!(ProviderCapability {
     FunctionTools => "function_tools",
     WebSearch => "web_search",
     ImageGeneration => "image_generation",
+    AgentTask => "agent_task",
     ReasoningEffort => "reasoning_effort",
     Temperature => "temperature",
     TopP => "top_p",

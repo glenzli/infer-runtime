@@ -179,6 +179,11 @@ async fn probe_capability(
                 ));
             }
         }
+        ProviderCapability::AgentTask => {
+            return Err(ProviderError::InvalidInput(
+                "Agent task probe requires verified per-task input isolation; capability is not active".into(),
+            ));
+        }
         ProviderCapability::ReasoningEffort => {
             request.reasoning = Some(ReasoningConfig {
                 // Endpoint capability and deployment effort range are
@@ -396,5 +401,22 @@ mod tests {
             Some(ProviderFailureKind::InvalidRequest)
         );
         assert_eq!(report.checks[2].status, ProviderProbeStatus::Skipped);
+    }
+
+    #[tokio::test]
+    async fn agent_task_declaration_cannot_pass_a_responses_probe() {
+        let provider = RecordingProvider {
+            requests: Mutex::new(vec![]),
+            fail_temperature: false,
+        };
+        let report = probe_responses_provider(
+            &provider,
+            "probe-model",
+            &profile(BTreeSet::from([ProviderCapability::AgentTask])),
+        )
+        .await;
+        assert!(!report.passed);
+        assert_eq!(report.checks[0].status, ProviderProbeStatus::Failed);
+        assert!(provider.requests.lock().await.is_empty());
     }
 }

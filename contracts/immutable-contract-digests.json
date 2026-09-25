@@ -2,6 +2,7 @@
   "schema": "infer-runtime.immutable-contract-digests",
   "schema_version": "20260813.1",
   "sha256": {
+    "contracts/capabilities/infer.agent.task/20260925.1/openapi.json": "947a276a16b65d11251f984aabbeaeb3a002cde156baac3a7c4344a595d70cb3",
     "contracts/capabilities/infer.audio.alignment/20260811.1/openapi.json": "76c7f4ab7d5e6333808aceec558822d9deceb2918bc478e326593d302dcb96e8",
     "contracts/capabilities/infer.audio.event-detection/20260813.1/openapi.json": "c7b6e74840bc92d92d582df58252f01f2e0dfed9178f8f7d4318349bdae42ada",
     "contracts/capabilities/infer.audio.event-detection/20260813.2/openapi.json": "a7179c88c03a768299835bd84c4c6f8d68e47f3c51a96ed4fe01387cf6fb8613",
