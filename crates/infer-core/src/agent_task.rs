@@ -1,8 +1,7 @@
 //! Contract for an explicitly admitted, file-bearing Agent task.
 //!
-//! This does not grant filesystem access. A future executor must stage only
-//! validated inline inputs into a separate, enforced read boundary before it
-//! may accept a task. The current HTTP admission remains closed.
+//! The request itself grants no filesystem access. The executor stages only
+//! validated inline inputs and constructs a separate permission profile.
 
 use std::collections::BTreeSet;
 
@@ -102,8 +101,7 @@ fn safe_relative_path(path: &str) -> bool {
         })
 }
 
-/// Future success receipt; no current route can issue one until an enforced
-/// per-task read boundary and Codex approval handling are verified.
+/// Successful bounded Agent execution receipt.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentTaskResult {

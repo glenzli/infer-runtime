@@ -1,6 +1,6 @@
 # ADR-0020：独立的文件型 Agent 任务能力
 
-- 状态：合同与拒绝路径已实现；执行阶段阻断
+- 状态：合同与受限执行已实现；产品 App 仍须单独授权
 - 日期：2026-09-25
 - 关联：D-008、D-113、ADR-0013
 
@@ -37,8 +37,8 @@ Infer 不重新实现该循环。
 本机绝对路径、现有目录、Provider ID 或物理模型字段。路径只接受 ASCII 字母数字、`-_.` 和目录分隔符。
 当前解析器拒绝路径穿越、盘符、反斜线、隐藏组件、大小写折叠后的重复路径、未知字段、
 非规范 Base64、摘要不符及超额内容。最多 16 个输入文件、16 个
-输出路径；单个输入最多 8 MiB，总输入最多 16 MiB。未来执行器读取实际 staging bytes 时仍须
-重算摘要，并只收集声明过的输出路径，限制返回文件大小，拒绝 symlink、hardlink 和特殊文件。
+输出路径；单个输入最多 8 MiB，总输入最多 16 MiB。执行器重算 staging bytes 摘要；每个
+输出文件最多 8 MiB、总输出最多 16 MiB，只返回声明过的路径，拒绝 symlink、hardlink 和特殊文件。
 
 完整执行后的预留成功结构是：
 
@@ -62,27 +62,25 @@ Infer 不重新实现该循环。
 }
 ```
 
-成功 Job 应使用现有 `/infer/v1/jobs/{job_id}` 与取消接口记录状态，Attempt 绑定所选 Deployment、
-Provider、实际工具权限和 Codex thread/turn。Agent 可能修改工作区文件，因此一旦 `turn/start` 已被
+成功 Job 使用现有 `/infer/v1/jobs/{job_id}` 与取消接口记录状态，Attempt 记录所选 Deployment
+和 Provider；成功响应的 provenance 给出实际工具策略以及 Codex thread/turn。Agent 可能修改工作区文件，因此一旦 `turn/start` 已被
 上游接受，传输断开只能记为结果未知，不能自动重试或 fallback。输出交给 Shape 后仍是候选，
 Infer 不替 Shape 接受或发布创作内容。
 
-## 当前门槛与行为
+## 执行边界
 
-现有订阅桥按 ADR-0013 禁用 shell/unified exec，并在非推理 item 出现时拒绝 Attempt。
-本机 Codex App Server schema 确认 `thread/start`、`turn/start`、`workspaceWrite.writableRoots`
-与审批字段的形状，却没有提供“只能读取这些输入文件”的 per-task 读权限。只改变 cwd 或传入
-`runtimeWorkspaceRoots` 不能证明文件隔离；拒绝交互审批也只能防止越权升级，不能限制已允许
-的本机文件读取。官方 sandbox 文档将 writable roots 说明为写权限扩展，而非读权限白名单。
+普通订阅 Responses 桥继续禁用 shell/unified exec。独立 `codex-agent` Provider 在每次请求时
+创建新的临时工作区和 `CODEX_HOME`，只把 Consumer 提交的已验证字节放进 `input/`，并预建
+声明的 `output/` 文件。Codex 登录信息仅供宿主 App Server 进程使用；Agent 工具不能读取
+`CODEX_HOME`。运行时向 Codex App Server 同时提交命名权限 profile 和 `approvalPolicy=never`，
+然后回读配置，确认权限和 MCP/plugin 空集合。profile 默认拒绝宿主文件，只开放工作区读权限和
+声明的输出文件写权限。额外审批请求被拒绝，Attempt 失败；首版没有交互式审批或动态扩权。
+该隔离不靠提示词或 cwd。Agent 的模型调用使用 Codex 订阅云端；所选输入内容可能进入模型上下文。
 
-因此当前路由完成双层合同、认证、独立 App ACL 和严格 payload 验证后，固定返回
-`503 agent_task_unavailable`，不创建 Job、不保留文件、不启动 Codex。未授权 App 返回
-`403 agent_task_forbidden`。Provider profile 可以解析 `agent_task` 声明，但只有 Codex App Server
-家族允许声明，显式 Provider probe 会失败；示例订阅 Provider 不声明它。Catalog 公布 experimental
-schema 是协商和集成准备，不表示本机已经有可用执行器。
-
-开放执行前必须提供一个真正只暴露所提交文件的隔离执行环境，验证 Codex 子进程与其工具均受
-同一读/写/网络边界约束，再覆盖拒绝外部读取、越界写入、审批请求、取消、上游结果未知、
-输出收集与 Job/Attempt 持久化的端到端测试。不能以 prompt、通知事后检查、cwd 或
-`workspaceWrite` 单独替代这些证据。若成功结构或这些语义需要变动，应发行新的日期化 capability
-版本，不覆盖本版 schema bytes。
+`local-operator` 示例身份显式允许此能力；Shape 示例仍为 `allow_agent_file_tasks=false`，
+生产 App 必须同时具备 Intent、订阅 Provider、云端文本输入和独立 Agent ACL 授权。
+没有可用执行器时返回 `503 agent_task_unavailable`；未授权 App 返回 `403 agent_task_forbidden`。
+显式 Provider probe 会运行一项合成文件任务，因此会消耗订阅额度。运行时只尝试一个
+Deployment/Attempt，任务总期限为 5 分钟，不在不确定结果后重试或 fallback。成功 Job 及 Attempt 可通过现有 Job
+接口查询。此实现目前验证了本机 Codex 0.156.0 的真实 Agent turn、未授权文件读取拒绝、
+声明输出文件写入，以及 HTTP 到 Job 的合成任务闭环；部署中的版本和产品集成仍须各自验证。

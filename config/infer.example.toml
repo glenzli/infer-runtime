@@ -341,8 +341,26 @@ priority_aging_ms = 10000
 version = 1
 protocol = "codex_app_server"
 capabilities = ["responses", "instructions", "streaming", "web_search", "image_generation", "reasoning_effort"]
-# `agent_task` is a separate, currently closed capability. This Responses
-# instance deliberately disables shell tools and must not declare it.
+# `agent_task` is a separate capability. This Responses instance deliberately
+# disables shell tools and must not declare it.
+
+# File-bearing Agent turns use a separate process with an isolated CODEX_HOME
+# and a per-task named permissions profile. Keep the Responses bridge above
+# tool-disabled.
+[providers.codex-agent]
+kind = "codex_app_server"
+access_class = "subscription"
+command = "codex"
+args = ["app-server", "--listen", "stdio://"]
+placement = "cloud"
+max_concurrency = 1
+max_queue = 8
+priority_aging_ms = 10000
+
+[providers.codex-agent.capability_profile]
+version = 1
+protocol = "codex_app_server"
+capabilities = ["agent_task"]
 
 [profiles.balanced]
 order = ["capability_fit", "deadline_fit", "queue_time", "cost", "placement"]
@@ -386,6 +404,13 @@ output_modalities = ["text"]
 default_capability_floor = "foundational"
 default_policy = "local-first"
 default_reasoning_effort = "none"
+
+[intents."agent.file_task"]
+data_plane = "agent.task"
+input_modalities = ["text"]
+output_modalities = ["text"]
+default_capability_floor = "foundational"
+default_policy = "balanced"
 
 [intents."language.respond"]
 input_modalities = ["text"]
@@ -844,6 +869,13 @@ status = "provisional"
 
 [model_profiles.codex_gpt_6_sol.ratings."text.edit"]
 level = "foundational"
+status = "provisional"
+
+[model_profiles.codex_gpt_6_sol_agent]
+family = "gpt-6"
+
+[model_profiles.codex_gpt_6_sol_agent.ratings."agent.file_task"]
+level = "capable"
 status = "provisional"
 
 [model_profiles.codex_gpt_6_sol.ratings."image.generate"]
@@ -1367,6 +1399,21 @@ source_kind = "provider_managed"
 upstream = "codex-subscription:gpt-6-sol"
 
 [model_builds.codex_gpt_6_sol_subscription.license]
+status = "unreviewed"
+
+[model_builds.codex_gpt_6_sol_agent]
+profile = "codex_gpt_6_sol_agent"
+model_id = "gpt-6-sol"
+variant = "codex-agent"
+input_modalities = ["text"]
+output_modalities = ["text"]
+features = []
+
+[model_builds.codex_gpt_6_sol_agent.provenance]
+source_kind = "provider_managed"
+upstream = "codex-agent:gpt-6-sol"
+
+[model_builds.codex_gpt_6_sol_agent.license]
 status = "unreviewed"
 
 [model_builds.qwen3_asr_1_7b_8bit]
@@ -1976,6 +2023,14 @@ supported_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
 estimated_cost_usd = 0.0
 supported_execution_modes = ["unary", "server_stream"]
 
+[deployments.codex_agent_gpt_6_sol]
+provider = "codex-agent"
+build = "codex_gpt_6_sol_agent"
+resource_class = "standard"
+supported_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary"]
+
 [deployments.mlx_qwen3_asr_1_7b]
 provider = "mlx-audio-local"
 build = "qwen3_asr_1_7b_8bit"
@@ -2097,6 +2152,7 @@ estimated_cost_usd = 0.0
 [apps.local-operator]
 credential = { source = "managed" }
 resource_admin = true
+allow_agent_file_tasks = true
 allow_all_intents = true
 allow_all_speech_voice_aliases = true
 allowed_builtin_tools = ["web_search"]

@@ -1514,15 +1514,25 @@ impl RuntimeConfig {
                     "provider {id} needs capability profile version 1 for its protocol"
                 )));
             }
-            if matches!(
-                expected_protocol,
-                ProviderProtocol::Responses | ProviderProtocol::CodexAppServer
-            ) && !provider
-                .capability_profile
-                .supports(ProviderCapability::Responses)
+            if expected_protocol == ProviderProtocol::Responses
+                && !provider
+                    .capability_profile
+                    .supports(ProviderCapability::Responses)
             {
                 return Err(configuration(format!(
                     "responses provider {id} must declare responses capability"
+                )));
+            }
+            if expected_protocol == ProviderProtocol::CodexAppServer
+                && !provider
+                    .capability_profile
+                    .supports(ProviderCapability::Responses)
+                && !provider
+                    .capability_profile
+                    .supports(ProviderCapability::AgentTask)
+            {
+                return Err(configuration(format!(
+                    "Codex App Server provider {id} must declare responses or agent_task"
                 )));
             }
             if matches!(
@@ -1735,6 +1745,7 @@ impl RuntimeConfig {
                         | "text.embedding"
                         | "text.rerank"
                         | "document.ocr"
+                        | "agent.task"
                         | "raw.foundation"
                 )
                 || intent.input_modalities.is_empty()
@@ -2457,7 +2468,16 @@ fn provider_serves_data_plane(provider: &ProviderConfig, data_plane: &str) -> bo
                     .as_ref()
                     .is_some_and(|inventory| inventory.kind == LocalInventoryKind::OllamaTags))
         }
-        ProviderKind::CodexAppServer | ProviderKind::TrustedNode => data_plane == "responses",
+        ProviderKind::CodexAppServer => match data_plane {
+            "responses" => provider
+                .capability_profile
+                .supports(ProviderCapability::Responses),
+            "agent.task" => provider
+                .capability_profile
+                .supports(ProviderCapability::AgentTask),
+            _ => false,
+        },
+        ProviderKind::TrustedNode => data_plane == "responses",
         ProviderKind::AudioWorker => data_plane.starts_with("audio."),
         ProviderKind::RetrievalWorker => matches!(data_plane, "text.embedding" | "text.rerank"),
         ProviderKind::OcrWorker => data_plane == "document.ocr",
@@ -2950,7 +2970,12 @@ mod tests {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
         let mut config = RuntimeConfig::load(path).unwrap();
-        assert!(!config.apps["local-operator"].allows_agent_file_tasks());
+        assert!(config.apps["local-operator"].allows_agent_file_tasks());
+        assert!(
+            config.providers["codex-agent"]
+                .capability_profile
+                .supports(ProviderCapability::AgentTask)
+        );
         assert!(
             !config.providers["codex-subscription"]
                 .capability_profile

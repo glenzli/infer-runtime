@@ -77,7 +77,11 @@ impl SubscriptionModels {
     pub fn new(config: &RuntimeConfig, providers: &BTreeMap<String, DynProvider>) -> Arc<Self> {
         let mut entries = BTreeMap::new();
         for (id, provider_config) in &config.providers {
-            if provider_config.kind != ProviderKind::CodexAppServer {
+            if provider_config.kind != ProviderKind::CodexAppServer
+                || !provider_config
+                    .capability_profile
+                    .supports(infer_core::ProviderCapability::Responses)
+            {
                 continue;
             }
             let Some(provider) = providers.get(id) else {

@@ -157,11 +157,12 @@ if (!response.ok) {
 程序应根据 HTTP status 与 `error.code` 分支，不要解析 `error.message`。响应中未来可能增加
 字段，consumer 必须忽略未知响应字段。未知请求字段则会严格返回 400。
 
-### 文件型 Agent 任务（合同准备阶段）
+### 文件型 Agent 任务
 
 `infer.agent.task@20260925.1` 使用独立的 `POST /infer/v1/agent/tasks` 和 App
-`allow_agent_file_tasks` ACL。Shape 侧可按以下形状准备调用；目前已授权且合法的请求固定返回
-`503 agent_task_unavailable`，不会创建 Job 或运行 Agent。不要把它接成生产创作入口。
+`allow_agent_file_tasks` ACL。App 还需获准 `agent.file_task` Intent、订阅 Provider 与云端文本
+输入。下面的请求会把所选文件内容交给受限 Codex Agent，并通过订阅云端模型执行。Shape 示例
+App 默认仍未授权；接入前需显式配置它自己的权限与候选接受流程。
 
 ```javascript
 const response = await fetch(`${inferBaseUrl}/infer/v1/agent/tasks`, {
@@ -185,11 +186,12 @@ const response = await fetch(`${inferBaseUrl}/infer/v1/agent/tasks`, {
 });
 const result = await response.json();
 if (!response.ok) throw new Error(`${response.status}: ${result.error?.code}`);
-// 完整执行开放后，仍须由 Shape 核对输出摘要和 source revision，再展示为候选。
+// Shape 仍须核对输出摘要和 source revision，再展示为候选。
 ```
 
 示例内联字节及摘要只作合同演示；实际调用应对 Shape 已选源文件计算 Base64 与 SHA-256。
-请求不接受宿主路径。完整责任划分与执行门槛见
+请求不接受宿主路径，输出只返回声明过的文件。额外工具审批不会在首版中交互扩权，而会使
+任务失败；没有可用执行器时返回 `503 agent_task_unavailable`。完整责任划分见
 [ADR-0020](adr/0020-agent-file-tasks.md)。
 
 ### Streaming

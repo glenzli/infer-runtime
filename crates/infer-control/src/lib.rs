@@ -2,6 +2,7 @@
 
 mod trusted_nodes;
 pub use trusted_nodes::node_offers;
+mod agent_task;
 mod app_admission;
 mod attempt_policy;
 mod audio_streaming;
@@ -238,7 +239,7 @@ pub enum RuntimeError {
     AppQueueFull,
     #[error("provider `{0}` does not expose a probeable Responses data plane")]
     ProviderProbeUnsupported(String),
-    #[error("provider `{0}` has no Responses deployment to use as its probe model")]
+    #[error("provider `{0}` has no deployment to use as its probe model")]
     ProviderProbeModelMissing(String),
     #[error("durable background execution is disabled")]
     BackgroundDisabled,
@@ -1482,7 +1483,7 @@ impl Runtime {
     }
 
     /// Runs an explicit, real request compatibility probe against one configured
-    /// Responses provider. This is intentionally operator-triggered because it
+    /// provider. This is intentionally operator-triggered because it
     /// can consume provider quota.
     pub async fn probe_provider(
         &self,
@@ -1535,6 +1536,19 @@ impl Runtime {
         provider_id: &str,
         fresh: bool,
     ) -> Result<SubscriptionModelSnapshot, RuntimeError> {
+        if self
+            .config
+            .providers
+            .get(provider_id)
+            .is_some_and(|provider| {
+                provider.kind == ProviderKind::CodexAppServer
+                    && !provider
+                        .capability_profile
+                        .supports(ProviderCapability::Responses)
+            })
+        {
+            return Err(RuntimeError::ProviderProbeUnsupported(provider_id.into()));
+        }
         if self.subscription_models.contains(provider_id) {
             if fresh {
                 self.subscription_models.refresh_now(provider_id).await;

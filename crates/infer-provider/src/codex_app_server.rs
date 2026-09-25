@@ -6,6 +6,7 @@
 //! and image generation operations. Each call runs in an empty ephemeral
 //! workspace; all other tool-like items fail the Attempt closed.
 
+mod agent_task;
 mod image_generation;
 mod input;
 mod web_search;
@@ -19,7 +20,7 @@ use std::{
 use async_stream::try_stream;
 use async_trait::async_trait;
 use bytes::Bytes;
-use infer_core::{ReasoningEffort, ResponsesRequest, ToolChoice};
+use infer_core::{AgentTaskRequest, ReasoningEffort, ResponsesRequest, ToolChoice};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::{
@@ -29,8 +30,8 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::{
-    Provider, ProviderByteStream, ProviderError, ProviderFailureKind, ProviderModelCatalog,
-    ProviderModelInfo,
+    AgentTaskExecution, Provider, ProviderByteStream, ProviderError, ProviderFailureKind,
+    ProviderModelCatalog, ProviderModelInfo,
 };
 use image_generation::GeneratedImage;
 use input::prepare_turn_input;
@@ -351,6 +352,14 @@ impl Provider for CodexAppServerProvider {
 
     async fn execute(&self, request: ResponsesRequest) -> Result<Value, ProviderError> {
         self.execute_inner(request).await
+    }
+
+    async fn execute_agent_task(
+        &self,
+        request: AgentTaskRequest,
+        model: &str,
+    ) -> Result<AgentTaskExecution, ProviderError> {
+        self.execute_bounded_agent_task(request, model).await
     }
 
     async fn execute_stream(
@@ -871,14 +880,27 @@ struct CodexSession {
 impl CodexSession {
     async fn spawn(command: &str, args: &[String]) -> Result<Self, ProviderError> {
         let workspace = tempfile::tempdir()?;
-        let mut child = Command::new(command)
+        Self::spawn_in(command, args, workspace, None).await
+    }
+
+    async fn spawn_in(
+        command: &str,
+        args: &[String],
+        workspace: TempDir,
+        codex_home: Option<&std::path::Path>,
+    ) -> Result<Self, ProviderError> {
+        let mut command_builder = Command::new(command);
+        command_builder
             .args(args)
             .current_dir(workspace.path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .kill_on_drop(true)
-            .spawn()?;
+            .kill_on_drop(true);
+        if let Some(home) = codex_home {
+            command_builder.env("CODEX_HOME", home);
+        }
+        let mut child = command_builder.spawn()?;
         let stdin = child
             .stdin
             .take()

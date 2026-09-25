@@ -18,7 +18,7 @@ use std::{pin::Pin, sync::Arc, time::Duration};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
-use infer_core::ResponsesRequest;
+use infer_core::{AgentTaskInputFile, AgentTaskRequest, ResponsesRequest};
 use reqwest::Client;
 use serde_json::Value;
 use thiserror::Error;
@@ -195,7 +195,7 @@ impl ProviderError {
 
     pub fn public_message(&self) -> &'static str {
         if matches!(self, Self::RemoteOutcomeUnknown) {
-            return "remote node outcome unknown; automatic replay prohibited";
+            return "remote execution outcome unknown; automatic replay prohibited";
         }
         if let Self::CodexTurn { code, .. } = self {
             return code;
@@ -222,10 +222,28 @@ pub struct ProviderAttemptContext {
     pub remaining: Duration,
 }
 
+pub struct AgentTaskExecution {
+    pub answer: String,
+    pub outputs: Vec<AgentTaskInputFile>,
+    pub thread_id: String,
+    pub turn_id: String,
+    pub sandbox_profile: String,
+    pub tool_policy: String,
+}
+
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn id(&self) -> &str;
     async fn execute(&self, request: ResponsesRequest) -> Result<Value, ProviderError>;
+    async fn execute_agent_task(
+        &self,
+        _request: AgentTaskRequest,
+        _model: &str,
+    ) -> Result<AgentTaskExecution, ProviderError> {
+        Err(ProviderError::InvalidInput(
+            "provider does not support Agent file tasks".into(),
+        ))
+    }
     async fn execute_stream(
         &self,
         request: ResponsesRequest,

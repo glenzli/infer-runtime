@@ -1,11 +1,13 @@
-//! Explicit, billable provider contract probes for the Responses protocol.
+//! Explicit, billable provider capability probes.
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use infer_core::{
-    ProviderCapability, ProviderCapabilityProfile, ReasoningConfig, ReasoningEffort,
-    ResponsesRequest, ToolChoice,
+    AgentTaskInputFile, AgentTaskRequest, ProviderCapability, ProviderCapabilityProfile,
+    ReasoningConfig, ReasoningEffort, ResponsesRequest, ToolChoice,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::{Provider, ProviderError, ProviderFailureKind};
 
@@ -37,7 +39,7 @@ pub struct ProviderProbeReport {
     pub checks: Vec<ProviderProbeCheck>,
 }
 
-/// Runs the concrete checks declared by one Responses capability profile.
+/// Runs the concrete checks declared by one provider capability profile.
 ///
 /// A probe intentionally never runs automatically: it sends real provider
 /// requests and may consume a small amount of quota. The first failed check
@@ -180,9 +182,24 @@ async fn probe_capability(
             }
         }
         ProviderCapability::AgentTask => {
-            return Err(ProviderError::InvalidInput(
-                "Agent task probe requires verified per-task input isolation; capability is not active".into(),
-            ));
+            let bytes = b"INFER-AGENT-PROBE";
+            let result = provider.execute_agent_task(AgentTaskRequest {
+                model: "agent.file_task".into(),
+                instruction: "Read input/probe.txt and write its exact bytes to output/probe.txt. Do not add a newline.".into(),
+                input_files: vec![AgentTaskInputFile {
+                    path: "probe.txt".into(), content_base64: STANDARD.encode(bytes),
+                    sha256: format!("{:x}", Sha256::digest(bytes)),
+                }],
+                output_paths: vec!["probe.txt".into()],
+            }, model).await?;
+            if result.outputs.len() != 1
+                || result.outputs[0].path != "probe.txt"
+                || result.outputs[0].content_base64 != STANDARD.encode(bytes)
+            {
+                return Err(ProviderError::Protocol(
+                    "Agent task probe output differs from input".into(),
+                ));
+            }
         }
         ProviderCapability::ReasoningEffort => {
             request.reasoning = Some(ReasoningConfig {
