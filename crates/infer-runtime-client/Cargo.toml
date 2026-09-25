@@ -10,6 +10,7 @@ keywords = ["inference", "local-first", "ai", "client"]
 categories = ["api-bindings"]
 
 [dependencies]
+base64.workspace = true
 bytes.workspace = true
 infer-artifact-lease = { path = "../infer-artifact-lease" }
 reqwest.workspace = true

@@ -20,6 +20,10 @@ pub const CONSUMER_OPENAPI_SHA256: &str =
 
 pub(crate) fn expected_capability_schema(identity: &str) -> Option<(&'static str, &'static str)> {
     Some(match identity {
+        "infer.agent.task@20260925.1" => (
+            "/infer/v1/capability-schemas/infer.agent.task/20260925.1/openapi.json",
+            "947a276a16b65d11251f984aabbeaeb3a002cde156baac3a7c4344a595d70cb3",
+        ),
         "infer.responses@20260812.1" => (
             "/infer/v1/capability-schemas/infer.responses/20260812.1/openapi.json",
             "abfb3b4b9a3c5d3831d56bb877ecfdd43d62b4442ba101a5ef071ec2740adbd5",
@@ -298,6 +302,22 @@ impl CapabilityCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_task_schema_is_pinned_to_frozen_bytes() {
+        use sha2::{Digest, Sha256};
+        let (url, digest) =
+            expected_capability_schema(crate::agent_task::AGENT_TASK_CAPABILITIES[0])
+                .expect("Agent task schema is registered");
+        assert_eq!(
+            url,
+            "/infer/v1/capability-schemas/infer.agent.task/20260925.1/openapi.json"
+        );
+        let bytes = include_bytes!(
+            "../../../contracts/capabilities/infer.agent.task/20260925.1/openapi.json"
+        );
+        assert_eq!(format!("{:x}", Sha256::digest(bytes)), digest);
+    }
 
     #[test]
     fn clap_schema_is_registered_and_rejects_digest_drift() {

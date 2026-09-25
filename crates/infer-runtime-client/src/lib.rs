@@ -5,6 +5,7 @@
 //! error decoding. Capability-specific request and response types live in
 //! additive modules rather than changing the Core contract.
 
+mod agent_task;
 mod audio;
 mod contract;
 mod discovery;
@@ -17,6 +18,10 @@ mod retrieval;
 mod transport;
 mod vision;
 
+pub use agent_task::{
+    AGENT_TASK_CAPABILITIES, AGENT_TASK_INTENT, AgentTaskInputFile, AgentTaskProvenance,
+    AgentTaskRequest, AgentTaskResult,
+};
 pub use audio::{
     ALIGNMENT_CAPABILITIES, AUDIO_EMBEDDING_CAPABILITIES, AlignmentItem, AlignmentResponse,
     AudioAnalysisCoverage, AudioBytesResponse, AudioCoverageStatus, AudioEmbeddingProvenance,

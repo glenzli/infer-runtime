@@ -11,7 +11,7 @@ reimplement:
 - loopback HTTP with proxies and redirects disabled;
 - generation-aware reconnect and machine-readable errors;
 - exact Capability Catalog intersection and immutable OpenAPI digest validation;
-- typed text, audio, vision, retrieval, OCR, capability-catalog, Job, and
+- typed Agent file tasks, text, audio, vision, retrieval, OCR, capability-catalog, Job, and
   opt-in local RAW foundation clients.
 
 Applications still own their product data, persistence, stale-result decisions,
