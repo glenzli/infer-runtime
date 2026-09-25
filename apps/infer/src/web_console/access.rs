@@ -180,6 +180,7 @@ struct AppAccessView {
     fingerprint: Option<String>,
     environment_variable: Option<String>,
     resource_admin: bool,
+    allow_agent_file_tasks: bool,
     observer_access: ObserverAccess,
     protected: bool,
     allowed_intents: Option<Vec<String>>,
@@ -268,6 +269,7 @@ impl AccessManager {
                 AppCredentialConfig::Managed,
                 ObserverAccess::None,
                 None,
+                false,
             ),
         );
         config.validate().map_err(anyhow::Error::from)?;
@@ -325,6 +327,7 @@ impl AccessManager {
                 existing.credential,
                 existing.observer_access,
                 existing.routing,
+                existing.allow_agent_file_tasks,
             ),
         );
         config.validate().map_err(anyhow::Error::from)?;
@@ -436,6 +439,7 @@ fn app_view(
         fingerprint,
         environment_variable: variable,
         resource_admin: app.resource_admin,
+        allow_agent_file_tasks: app.allow_agent_file_tasks,
         observer_access: app.observer_access,
         allowed_intents: app.allowed_intents,
         allowed_builtin_tools: app.allowed_builtin_tools,
@@ -479,11 +483,15 @@ fn app_config(
     credential: AppCredentialConfig,
     observer_access: ObserverAccess,
     routing: Option<infer_core::AppRoutingConfig>,
+    allow_agent_file_tasks: bool,
 ) -> AppConfig {
     AppConfig {
         credential,
         observer_access,
         resource_admin: false,
+        // The Console does not offer Agent authorization editing. Keep an
+        // existing explicit grant on update; newly created Apps deny it.
+        allow_agent_file_tasks,
         allow_all_intents: false,
         allowed_intents: input.allowed_intents.clone(),
         // This Console surface does not edit named routing; create denies it
