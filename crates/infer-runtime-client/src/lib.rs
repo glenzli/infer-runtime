@@ -29,10 +29,10 @@ pub use audio::{
     AudioTextEmbeddingRequest, AudioTextQueryNormalizerProvenance, DetectedSoundEvent,
     EVENT_DETECTION_CAPABILITIES, ExecutionMode, SOUND_GENERATION_CAPABILITIES,
     SPEECH_CAPABILITIES, SoundEventDetectionPolicy, SoundEventOntology, SoundEventProvenance,
-    SoundEventSmoothingPolicy, SoundGenerationRequest, SoundGenerationResponse, SpeechByteStream,
-    SpeechFormat, SpeechPresence, SpeechPresenceStatus, SpeechRequest, TRANSCRIPTION_CAPABILITIES,
-    TranscriptionFormat, TranscriptionLanguageEvidence, TranscriptionLanguageEvidenceSource,
-    TranscriptionLanguageSegment, TranscriptionResponse,
+    SoundEventSmoothingPolicy, SoundGenerationRequest, SoundGenerationResponse, SoundModelChoice,
+    SpeechByteStream, SpeechFormat, SpeechPresence, SpeechPresenceStatus, SpeechRequest,
+    TRANSCRIPTION_CAPABILITIES, TranscriptionFormat, TranscriptionLanguageEvidence,
+    TranscriptionLanguageEvidenceSource, TranscriptionLanguageSegment, TranscriptionResponse,
 };
 pub use contract::{
     CAPABILITY_CATALOG_SCHEMA, CAPABILITY_CATALOG_VERSION, CAPABILITY_CONTRACT_HEADER,

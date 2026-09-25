@@ -52,6 +52,10 @@ pub(crate) fn expected_capability_schema(identity: &str) -> Option<(&'static str
             "/infer/v1/capability-schemas/infer.audio.sound-generation/20260926.1/openapi.json",
             "efe43ca2bfffacc7b5ae695e507753ded3e229f569a57e36d7a8e8c39be18c97",
         ),
+        "infer.audio.sound-generation@20260926.2" => (
+            "/infer/v1/capability-schemas/infer.audio.sound-generation/20260926.2/openapi.json",
+            "03803c16a38d29261a3b0567ebf4243325bfa4cabc786da59a6959be3eb7fc60",
+        ),
         "infer.audio.voice-clone@20260811.1" => (
             "/infer/v1/capability-schemas/infer.audio.voice-clone/20260811.1/openapi.json",
             "ac182b38d13a91dd5bb3d69f8f4715807357fc9a75e8cdbdaacf2b15931b0ef8",
@@ -330,10 +334,10 @@ mod tests {
         let (url, digest) = expected_capability_schema(identity).unwrap();
         assert_eq!(
             url,
-            "/infer/v1/capability-schemas/infer.audio.sound-generation/20260926.1/openapi.json"
+            "/infer/v1/capability-schemas/infer.audio.sound-generation/20260926.2/openapi.json"
         );
         let bytes = include_bytes!(
-            "../../../contracts/capabilities/infer.audio.sound-generation/20260926.1/openapi.json"
+            "../../../contracts/capabilities/infer.audio.sound-generation/20260926.2/openapi.json"
         );
         assert_eq!(format!("{:x}", Sha256::digest(bytes)), digest);
     }

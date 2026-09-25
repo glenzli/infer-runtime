@@ -55,8 +55,8 @@ use infer_control::{
 use infer_core::{
     AlignmentRequest, AudioEmbeddingRequest, AudioExecutionRequest, AudioFile,
     AudioTextEmbeddingRequest, EventDetectionRequest, JobPageCursor, JobSnapshot, JobState,
-    MAX_AUDIO_UPLOAD_BYTES, Priority, ResponsesRequest, SpeechFormat, SpeechRequest,
-    TranscriptionFormat, TranscriptionRequest, VoiceCloneRequest,
+    MAX_AUDIO_UPLOAD_BYTES, Priority, ResponsesRequest, SoundGenerationRequest, SpeechFormat,
+    SpeechRequest, TranscriptionFormat, TranscriptionRequest, VoiceCloneRequest,
 };
 use infer_payload::PayloadError;
 use infer_provider::ProviderFailureKind;
@@ -65,6 +65,7 @@ use infer_resource::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::contract::{
     CAPABILITY_CONTRACT_HEADER, CONSUMER_CORE_HEADER, CORE_CONTRACT, CapabilityCatalog,
@@ -108,6 +109,7 @@ fn base_router(runtime: Arc<Runtime>) -> Router {
         )
         .route("/v1/audio/alignments", post(create_alignment))
         .route("/v1/audio/speech", post(create_speech))
+        .route("/v1/audio/sound-generations", post(create_sound_generation))
         .route("/v1/audio/voice-clones", post(create_voice_clone))
         .route(
             "/infer/v1/vision/face-detections",
@@ -568,7 +570,7 @@ async fn create_audio_embedding(
         model: form.required_text("model")?,
         file: form.required_file()?,
         source_revision: form.required_text("source_revision")?,
-        metadata: fail_closed_audio_embedding_metadata(form.metadata)?,
+        metadata: fail_closed_local_audio_metadata(form.metadata, "audio-text embedding")?,
     };
     let result = state
         .runtime
@@ -589,7 +591,7 @@ async fn create_audio_text_embedding(
 ) -> Result<Response<Body>, ApiError> {
     let app_id = authenticate(&state, &headers)?;
     let mut request = strict_json(request)?;
-    request.metadata = fail_closed_audio_embedding_metadata(request.metadata)?;
+    request.metadata = fail_closed_local_audio_metadata(request.metadata, "audio-text embedding")?;
     let result = state
         .runtime
         .execute_audio(&app_id, AudioExecutionRequest::TextEmbedding(request))
@@ -602,8 +604,9 @@ async fn create_audio_text_embedding(
     }
 }
 
-fn fail_closed_audio_embedding_metadata(
+fn fail_closed_local_audio_metadata(
     mut metadata: BTreeMap<String, String>,
+    purpose: &str,
 ) -> Result<BTreeMap<String, String>, ApiError> {
     for (key, required) in [
         ("infer.placement", "local_only"),
@@ -612,7 +615,7 @@ fn fail_closed_audio_embedding_metadata(
     ] {
         if metadata.get(key).is_some_and(|actual| actual != required) {
             return Err(ApiError::bad_request(format!(
-                "{key} is fixed to {required} for audio-text embedding"
+                "{key} is fixed to {required} for {purpose}"
             )));
         }
         metadata.insert(key.into(), required.into());
@@ -657,6 +660,64 @@ async fn create_speech(
         .execute_audio(&app_id, AudioExecutionRequest::Speech(request))
         .await?;
     audio_response(result)
+}
+
+async fn create_sound_generation(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    request: Result<Json<SoundGenerationRequest>, JsonRejection>,
+) -> Result<Response<Body>, ApiError> {
+    let app_id = authenticate(&state, &headers)?;
+    let mut request = strict_json(request)?;
+    if headers
+        .get(infer_core::CAPABILITY_CONTRACT_HEADER)
+        .is_some_and(|value| value == "infer.audio.sound-generation@20260926.1")
+        && request.model_choice.is_some()
+    {
+        return Err(ApiError::bad_request(
+            "model_choice requires sound-generation contract 20260926.2",
+        ));
+    }
+    request.metadata = fail_closed_local_audio_metadata(request.metadata, "sound generation")?;
+    let duration_seconds = request.duration_seconds;
+    let model_choice = request.selected_model_choice();
+    let result = state
+        .runtime
+        .execute_audio(&app_id, AudioExecutionRequest::SoundGeneration(request))
+        .await?;
+    match result.output {
+        AudioExecutionOutput::Audio {
+            bytes,
+            content_type: "audio/wav",
+        } => {
+            let digest = format!("{:x}", Sha256::digest(&bytes));
+            let mut response = Response::new(Body::from(bytes));
+            let headers = response.headers_mut();
+            headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("audio/wav"));
+            headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            insert_response_header(headers, "x-infer-job-id", &result.job_id)?;
+            insert_response_header(headers, "x-infer-model", &result.logical_model)?;
+            insert_response_header(headers, "x-infer-model-choice", model_choice.as_str())?;
+            insert_response_header(headers, "x-infer-provider", &result.provider)?;
+            insert_response_header(headers, "x-infer-deployment", &result.deployment)?;
+            insert_response_header(headers, "x-infer-model-build", &result.model_build)?;
+            insert_response_header(headers, "x-infer-physical-model", &result.physical_model)?;
+            insert_response_header(headers, "x-infer-placement", &result.placement)?;
+            insert_response_header(headers, "x-infer-artifact-sha256", &digest)?;
+            insert_response_header(
+                headers,
+                "x-infer-seed",
+                &result.seed.expect("sound seed is assigned").to_string(),
+            )?;
+            insert_response_header(
+                headers,
+                "x-infer-duration-seconds",
+                &duration_seconds.to_string(),
+            )?;
+            Ok(response)
+        }
+        _ => Err(ApiError::internal("sound worker did not return WAV audio")),
+    }
 }
 
 fn speech_stream_response(

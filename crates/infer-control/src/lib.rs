@@ -107,6 +107,12 @@ pub struct AudioRuntimeResult {
     pub job_id: String,
     pub logical_model: String,
     pub output: AudioExecutionOutput,
+    pub provider: String,
+    pub deployment: String,
+    pub model_build: String,
+    pub physical_model: String,
+    pub placement: String,
+    pub seed: Option<u32>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -1578,9 +1584,24 @@ impl Runtime {
     pub async fn execute_audio(
         self: &Arc<Self>,
         app_id: &str,
-        request: AudioExecutionRequest,
+        mut request: AudioExecutionRequest,
     ) -> Result<AudioRuntimeResult, RuntimeError> {
         request.validate()?;
+        let sound_seed = if let AudioExecutionRequest::SoundGeneration(sound) = &mut request {
+            let seed = *sound.seed.get_or_insert_with(|| {
+                let bytes = Uuid::new_v4().into_bytes();
+                u32::from_be_bytes(bytes[..4].try_into().expect("UUID has four bytes"))
+            });
+            Some(seed)
+        } else {
+            None
+        };
+        let sound_model_feature = match &request {
+            AudioExecutionRequest::SoundGeneration(sound) => {
+                Some(sound.selected_model_choice().required_feature().to_owned())
+            }
+            _ => None,
+        };
         if let AudioExecutionRequest::Speech(speech) = &request {
             self.authorize_speech_voice(app_id, speech)?;
         }
@@ -1619,6 +1640,9 @@ impl Runtime {
                 ("audio.embedding", BTreeSet::from([Modality::Text]))
             }
             AudioExecutionRequest::Speech(_) => ("audio.speech", BTreeSet::from([Modality::Text])),
+            AudioExecutionRequest::SoundGeneration(_) => {
+                ("audio.sound_generation", BTreeSet::from([Modality::Text]))
+            }
             AudioExecutionRequest::VoiceClone(_) => (
                 "audio.voice_clone",
                 BTreeSet::from([Modality::Audio, Modality::Text]),
@@ -1632,6 +1656,7 @@ impl Runtime {
                     constraints,
                     execution_requirements: ExecutionRequirements {
                         input_modalities,
+                        model_features: sound_model_feature.into_iter().collect(),
                         execution_mode: ExecutionMode::Unary,
                         ..ExecutionRequirements::default()
                     },
@@ -1646,6 +1671,7 @@ impl Runtime {
                             "audio.event_detection" => "infer.audio.event-detection@20260813.2",
                             "audio.embedding" => "infer.audio.embedding@20260815.2",
                             "audio.speech" => "infer.audio.speech@20260811.1",
+                            "audio.sound_generation" => "infer.audio.sound-generation@20260926.2",
                             "audio.voice_clone" => "infer.audio.voice-clone@20260811.1",
                             _ => unreachable!("validated audio data plane"),
                         },
@@ -1735,6 +1761,19 @@ impl Runtime {
                     job_id: prepared.job_id,
                     logical_model,
                     output,
+                    model_build: self.config.deployments[&prepared.deployment_id]
+                        .build
+                        .clone(),
+                    placement: match self.config.providers[&prepared.provider_id].placement {
+                        infer_core::Placement::Local => "local",
+                        infer_core::Placement::TrustedNode => "trusted_node",
+                        infer_core::Placement::Cloud => "cloud",
+                    }
+                    .into(),
+                    physical_model: prepared.physical_model,
+                    deployment: prepared.deployment_id,
+                    provider: prepared.provider_id,
+                    seed: sound_seed,
                 })
             }
             Err(RuntimeError::Cancelled) => {

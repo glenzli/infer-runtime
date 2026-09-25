@@ -14,6 +14,52 @@ use crate::{
 pub const MAX_AUDIO_UPLOAD_BYTES: usize = 25 * 1024 * 1024;
 pub const MAX_SOUND_PROMPT_BYTES: usize = 2_000;
 
+/// Stable consumer choice. Physical checkpoint and deployment identities stay
+/// in Runtime configuration and are recorded on the resulting Job.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SoundModelChoice {
+    #[default]
+    #[serde(rename = "stable_audio_3_small_sfx")]
+    SmallSfx,
+    #[serde(rename = "stable_audio_3_small_music")]
+    SmallMusic,
+    #[serde(rename = "stable_audio_open_small")]
+    OpenSmall,
+}
+
+impl SoundModelChoice {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SmallSfx => "stable_audio_3_small_sfx",
+            Self::SmallMusic => "stable_audio_3_small_music",
+            Self::OpenSmall => "stable_audio_open_small",
+        }
+    }
+
+    pub const fn model_profile(self) -> &'static str {
+        match self {
+            Self::SmallSfx => "stable_audio_3_sm_sfx",
+            Self::SmallMusic => "stable_audio_3_sm_music",
+            Self::OpenSmall => "stable_audio_open_small",
+        }
+    }
+
+    pub const fn required_feature(self) -> &'static str {
+        match self {
+            Self::SmallSfx => "text_to_sound_effect",
+            Self::SmallMusic => "text_to_music_material",
+            Self::OpenSmall => "stable_audio_open_small_generation",
+        }
+    }
+
+    pub const fn max_duration_seconds(self) -> u8 {
+        match self {
+            Self::OpenSmall => 11,
+            Self::SmallSfx | Self::SmallMusic => 30,
+        }
+    }
+}
+
 /// Versioned catalog containing the Runtime-owned logical voices accepted by
 /// `speech.synthesize`.
 pub const SPEECH_VOICE_ALIAS_CATALOG_REVISION: &str = "infer.speech.voice-aliases@20260922.1";
@@ -231,6 +277,8 @@ impl SpeechRequest {
 #[serde(deny_unknown_fields)]
 pub struct SoundGenerationRequest {
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_choice: Option<SoundModelChoice>,
     pub prompt: String,
     pub duration_seconds: u8,
     #[serde(default)]
@@ -255,16 +303,29 @@ impl SoundGenerationRequest {
                 "sound prompt must be 1-2000 UTF-8 bytes without control characters".into(),
             ));
         }
-        if !(1..=30).contains(&self.duration_seconds) {
+        if !(1..=self.selected_model_choice().max_duration_seconds())
+            .contains(&self.duration_seconds)
+        {
             return Err(ContractError::InvalidAudio(
-                "sound duration_seconds must be 1-30".into(),
+                "sound duration_seconds exceeds selected model limit".into(),
             ));
         }
         self.constraints().map(|_| ())
     }
 
     pub fn constraints(&self) -> Result<RequestConstraints, ContractError> {
+        if self.metadata.contains_key("infer.deployment_ids")
+            || self.metadata.contains_key("infer.model_profile_ids")
+        {
+            return Err(ContractError::InvalidAudio(
+                "sound model selection must use model_choice".into(),
+            ));
+        }
         RequestConstraints::from_metadata(&self.metadata)
+    }
+
+    pub fn selected_model_choice(&self) -> SoundModelChoice {
+        self.model_choice.unwrap_or_default()
     }
 }
 
@@ -451,6 +512,7 @@ mod tests {
     fn sound_generation_enforces_one_bounded_candidate() {
         let mut request = SoundGenerationRequest {
             model: "audio.generate_sound".into(),
+            model_choice: None,
             prompt: "Rain on a window".into(),
             duration_seconds: 10,
             seed: Some(u32::MAX),
@@ -473,6 +535,37 @@ mod tests {
             request.validate().is_err(),
             "sound generation has its own intent"
         );
+    }
+
+    #[test]
+    fn sound_choice_selects_exact_feature_and_rejects_route_overrides() {
+        let mut request: SoundGenerationRequest = serde_json::from_value(serde_json::json!({
+            "model": "audio.generate_sound",
+            "model_choice": "stable_audio_3_small_music",
+            "prompt": "Ambient piano and synthesizer",
+            "duration_seconds": 10
+        }))
+        .unwrap();
+        assert!(request.validate().is_ok());
+        assert_eq!(
+            request.selected_model_choice(),
+            SoundModelChoice::SmallMusic
+        );
+        assert_eq!(
+            request.selected_model_choice().required_feature(),
+            "text_to_music_material"
+        );
+        assert_eq!(request.constraints().unwrap().named_route, None);
+        request.model_choice = Some(SoundModelChoice::OpenSmall);
+        request.duration_seconds = 12;
+        assert!(request.validate().is_err());
+        request.duration_seconds = 11;
+        assert!(request.validate().is_ok());
+        request.metadata.insert(
+            "infer.model_profile_ids".into(),
+            "stable_audio_3_sm_sfx".into(),
+        );
+        assert!(request.validate().is_err());
     }
 
     #[test]

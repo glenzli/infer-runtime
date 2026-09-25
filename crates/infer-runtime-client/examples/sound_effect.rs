@@ -1,8 +1,8 @@
-//! Local Echo-style sound generation smoke: credential_file output.wav
+//! Local Echo-style sound generation smoke: credential_file output.wav [music]
 
 use std::{collections::BTreeMap, path::PathBuf};
 
-use infer_runtime_client::{Client, SoundGenerationRequest};
+use infer_runtime_client::{Client, SoundGenerationRequest, SoundModelChoice};
 use serde_json::json;
 
 #[tokio::main]
@@ -16,8 +16,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.next()
             .ok_or("usage: sound_effect CREDENTIAL_FILE OUTPUT.wav")?,
     );
+    let music = match args.next().as_deref() {
+        None => false,
+        Some("music") => true,
+        _ => return Err("third argument must be music when provided".into()),
+    };
     if args.next().is_some() || !output.is_absolute() {
-        return Err("output path must be absolute and only two arguments are accepted".into());
+        return Err(
+            "output path must be absolute and only two or three arguments are accepted".into(),
+        );
     }
     let client = Client::builder().credential_file(credential).build()?;
     let metadata = BTreeMap::from([
@@ -33,7 +40,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ]);
     let request = SoundGenerationRequest {
         model: "audio.generate_sound".into(),
-        prompt: "Light rain falling on a window, no speech or music".into(),
+        model_choice: music.then_some(SoundModelChoice::SmallMusic),
+        prompt: if music {
+            "Gentle ambient electric piano and warm synth pad, no vocals".into()
+        } else {
+            "Light rain falling on a window, no speech or music".into()
+        },
         duration_seconds: 5,
         seed: Some(4200),
         metadata,
@@ -48,6 +60,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         || job.deployment != artifact.deployment
         || job.model_build != artifact.model_build
         || job.physical_model != artifact.physical_model
+        || artifact.model_choice != request.model_choice.unwrap_or_default()
+        || job.model_profile
+            != if music {
+                "stable_audio_3_sm_music"
+            } else {
+                "stable_audio_3_sm_sfx"
+            }
+        || job.capability_contract.as_deref() != Some("infer.audio.sound-generation@20260926.2")
         || job.routing.capability_floor != "foundational"
         || job.constraints["policy"] != "local-first"
         || job.constraints["priority"] != "background"
@@ -72,6 +92,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "bytes": artifact.wav.len(),
         "duration_seconds": artifact.duration_seconds,
         "seed": artifact.seed,
+        "model_choice": artifact.model_choice.as_str(),
         "job": job,
     });
     let sidecar = output.with_extension("json");

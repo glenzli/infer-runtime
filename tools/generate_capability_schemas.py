@@ -23,7 +23,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "contracts/schema-source/consumer-api-20260813.1.json"
 AGENT_TASK_SOURCE = ROOT / "contracts/schema-source/agent-task-20260925.1.json"
-SOUND_GENERATION_SOURCE = ROOT / "contracts/schema-source/sound-generation-20260926.1.json"
+SOUND_GENERATION_SOURCE = ROOT / "contracts/schema-source/sound-generation-20260926.2.json"
 OUTPUT = ROOT / "contracts/capabilities"
 IMMUTABLE_DIGESTS = ROOT / "contracts/immutable-contract-digests.json"
 CHECK_ONLY = "--check" in sys.argv[1:]
@@ -58,7 +58,7 @@ CAPABILITIES: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "infer.audio.alignment": ("20260811.1", ("/v1/audio/alignments",)),
     "infer.audio.speech": ("20260811.1", ("/v1/audio/speech",)),
-    "infer.audio.sound-generation": ("20260926.1", ("/v1/audio/sound-generations",)),
+    "infer.audio.sound-generation": ("20260926.2", ("/v1/audio/sound-generations",)),
     "infer.audio.voice-clone": ("20260811.1", ("/v1/audio/voice-clones",)),
     "infer.audio.transcription-stream": (
         "20260811.1",

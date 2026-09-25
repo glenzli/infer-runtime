@@ -1,0 +1,194 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.audio.sound-generation",
+    "version": "20260926.2",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.audio.sound-generation@20260926.2",
+  "paths": {
+    "/v1/audio/sound-generations": {
+      "post": {
+        "operationId": "generateSoundMaterial",
+        "summary": "Generate one local sound effect or music material as a bounded WAV artifact",
+        "security": [
+          {
+            "bearerAuth": [],
+            "consumerContract": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ConsumerContract"
+          },
+          {
+            "$ref": "#/components/parameters/SoundGenerationCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SoundGenerationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One 44.1 kHz stereo PCM16 WAV. The Consumer saves the returned bytes as its own artifact; no Runtime filesystem path is disclosed.",
+            "headers": {
+              "x-infer-job-id": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-infer-model": {
+                "schema": {
+                  "type": "string",
+                  "const": "audio.generate_sound"
+                }
+              },
+              "x-infer-model-choice": {
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "stable_audio_3_small_sfx",
+                    "stable_audio_3_small_music",
+                    "stable_audio_open_small"
+                  ]
+                }
+              },
+              "x-infer-provider": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-infer-deployment": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-infer-model-build": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-infer-physical-model": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "x-infer-placement": {
+                "schema": {
+                  "type": "string",
+                  "const": "local"
+                }
+              },
+              "x-infer-artifact-sha256": {
+                "schema": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "x-infer-seed": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                }
+              },
+              "x-infer-duration-seconds": {
+                "schema": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 30
+                }
+              }
+            },
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "ConsumerContract": {
+        "name": "Infer-Consumer-Contract",
+        "in": "header",
+        "required": true,
+        "description": "The only accepted dated Consumer Core identity.",
+        "schema": {
+          "const": "infer-runtime.consumer-core@20260813.1"
+        }
+      },
+      "SoundGenerationCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "const": "infer.audio.sound-generation@20260926.2"
+        }
+      }
+    },
+    "schemas": {
+      "SoundGenerationRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model",
+          "prompt",
+          "duration_seconds"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "const": "audio.generate_sound"
+          },
+          "model_choice": {
+            "type": "string",
+            "enum": [
+              "stable_audio_3_small_sfx",
+              "stable_audio_3_small_music",
+              "stable_audio_open_small"
+            ],
+            "description": "Defaults to stable_audio_3_small_sfx when omitted. A choice without a configured, admitted local deployment is unavailable."
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "English prompt, at most 2000 UTF-8 bytes, without control characters"
+          },
+          "duration_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 30
+          },
+          "seed": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295,
+            "description": "Optional; Runtime assigns and returns a seed when omitted"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -17,7 +17,10 @@ pub const TRANSCRIPTION_CAPABILITIES: &[&str] = &["infer.audio.transcription@202
 pub const EVENT_DETECTION_CAPABILITIES: &[&str] = &["infer.audio.event-detection@20260813.2"];
 pub const ALIGNMENT_CAPABILITIES: &[&str] = &["infer.audio.alignment@20260811.1"];
 pub const SPEECH_CAPABILITIES: &[&str] = &["infer.audio.speech@20260811.1"];
-pub const SOUND_GENERATION_CAPABILITIES: &[&str] = &["infer.audio.sound-generation@20260926.1"];
+pub const SOUND_GENERATION_CAPABILITIES: &[&str] = &[
+    "infer.audio.sound-generation@20260926.2",
+    "infer.audio.sound-generation@20260926.1",
+];
 pub const AUDIO_EMBEDDING_CAPABILITIES: &[&str] = &["infer.audio.embedding@20260815.2"];
 
 #[derive(Debug, Clone, Copy)]
@@ -93,12 +96,54 @@ pub struct AudioBytesResponse {
 #[serde(deny_unknown_fields)]
 pub struct SoundGenerationRequest {
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_choice: Option<SoundModelChoice>,
     pub prompt: String,
     pub duration_seconds: u8,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<u32>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub enum SoundModelChoice {
+    #[default]
+    #[serde(rename = "stable_audio_3_small_sfx")]
+    SmallSfx,
+    #[serde(rename = "stable_audio_3_small_music")]
+    SmallMusic,
+    #[serde(rename = "stable_audio_open_small")]
+    OpenSmall,
+}
+
+impl SoundModelChoice {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SmallSfx => "stable_audio_3_small_sfx",
+            Self::SmallMusic => "stable_audio_3_small_music",
+            Self::OpenSmall => "stable_audio_open_small",
+        }
+    }
+
+    pub const fn physical_model(self) -> Option<&'static str> {
+        match self {
+            Self::SmallSfx => Some(
+                "stabilityai/stable-audio-3-optimized@da6edc54ddba10bfd79a077102ded687f80e882b:sm-sfx",
+            ),
+            Self::SmallMusic => Some(
+                "stabilityai/stable-audio-3-optimized@da6edc54ddba10bfd79a077102ded687f80e882b:sm-music",
+            ),
+            Self::OpenSmall => None,
+        }
+    }
+
+    pub const fn max_duration_seconds(self) -> u8 {
+        match self {
+            Self::OpenSmall => 11,
+            Self::SmallSfx | Self::SmallMusic => 30,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -108,6 +153,7 @@ pub struct SoundGenerationResponse {
     pub sha256: String,
     pub job_id: String,
     pub logical_model: String,
+    pub model_choice: SoundModelChoice,
     pub provider: String,
     pub deployment: String,
     pub model_build: String,
@@ -673,7 +719,11 @@ impl Client {
             || request.prompt.trim().is_empty()
             || request.prompt.len() > 2000
             || request.prompt.chars().any(char::is_control)
-            || !(1..=30).contains(&request.duration_seconds)
+            || !(1..=request
+                .model_choice
+                .unwrap_or_default()
+                .max_duration_seconds())
+                .contains(&request.duration_seconds)
         {
             return Err(Error::Input(
                 "invalid bounded sound generation request".into(),
@@ -693,6 +743,23 @@ impl Client {
         }
         let job_id = required_header(&response, "x-infer-job-id")?;
         let logical_model = required_header(&response, "x-infer-model")?;
+        let model_choice = match response.headers().get("x-infer-model-choice") {
+            Some(header) => serde_json::from_value::<SoundModelChoice>(Value::String(
+                header
+                    .to_str()
+                    .map_err(|_| Error::MalformedResponse("invalid sound model choice".into()))?
+                    .to_owned(),
+            ))
+            .map_err(|_| Error::MalformedResponse("invalid sound model choice".into()))?,
+            None if request.model_choice.unwrap_or_default() == SoundModelChoice::SmallSfx => {
+                SoundModelChoice::SmallSfx
+            }
+            None => {
+                return Err(Error::MalformedResponse(
+                    "missing sound model choice".into(),
+                ));
+            }
+        };
         let provider = required_header(&response, "x-infer-provider")?;
         let deployment = required_header(&response, "x-infer-deployment")?;
         let model_build = required_header(&response, "x-infer-model-build")?;
@@ -707,6 +774,10 @@ impl Client {
             .map_err(|_| Error::MalformedResponse("invalid sound duration".into()))?;
         let wav = read_bounded(response, 6 * 1024 * 1024).await?;
         if logical_model != request.model
+            || model_choice != request.model_choice.unwrap_or_default()
+            || model_choice
+                .physical_model()
+                .is_some_and(|expected| physical_model != expected)
             || duration_seconds != request.duration_seconds
             || request.seed.is_some_and(|expected| expected != seed)
             || placement != "local"
@@ -736,6 +807,7 @@ impl Client {
             sha256,
             job_id,
             logical_model,
+            model_choice,
             provider,
             deployment,
             model_build,

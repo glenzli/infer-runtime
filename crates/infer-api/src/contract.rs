@@ -323,6 +323,9 @@ macro_rules! capability_schema_digest {
     ("infer.audio.speech") => {
         "19d29d6799a6cee1a6d24a63f9a9aab73ab925dd2e79f7181fbfe922f6906c68"
     };
+    ("infer.audio.sound-generation") => {
+        "03803c16a38d29261a3b0567ebf4243325bfa4cabc786da59a6959be3eb7fc60"
+    };
     ("infer.audio.voice-clone") => {
         "ac182b38d13a91dd5bb3d69f8f4715807357fc9a75e8cdbdaacf2b15931b0ef8"
     };
@@ -430,6 +433,27 @@ pub const CAPABILITIES: &[CapabilityEntry] = &[
             &["unary", "server_stream"]
         ),]
     ),
+    capability!(
+        "infer.audio.sound-generation",
+        "20260926.2",
+        "experimental",
+        [route!("POST", "/v1/audio/sound-generations", &["unary"]),]
+    ),
+    CapabilityEntry {
+        id: "infer.audio.sound-generation",
+        identity: "infer.audio.sound-generation@20260926.1",
+        schema_version: "20260926.1",
+        stability: "experimental",
+        schema: CapabilitySchemaReference {
+            format: "openapi-3.1",
+            url: "/infer/v1/capability-schemas/infer.audio.sound-generation/20260926.1/openapi.json",
+            sha256: "efe43ca2bfffacc7b5ae695e507753ded3e229f569a57e36d7a8e8c39be18c97",
+            document: include_str!(
+                "../../../contracts/capabilities/infer.audio.sound-generation/20260926.1/openapi.json"
+            ),
+        },
+        routes: &[route!("POST", "/v1/audio/sound-generations", &["unary"])],
+    },
     capability!(
         "infer.audio.voice-clone",
         "20260811.1",
@@ -600,6 +624,8 @@ pub fn required_capability_id(path: &str) -> Option<&'static str> {
         Some("infer.audio.alignment")
     } else if path == "/v1/audio/speech" {
         Some("infer.audio.speech")
+    } else if path == "/v1/audio/sound-generations" {
+        Some("infer.audio.sound-generation")
     } else if path == "/v1/audio/voice-clones" {
         Some("infer.audio.voice-clone")
     } else if path == "/v1/audio/transcriptions/stream" {
@@ -720,6 +746,14 @@ mod tests {
             "../../../contracts/schema-source/agent-task-20260925.1.json"
         ))
         .expect("Agent task schema source is valid");
+        let sound_extension: Value = serde_json::from_str(include_str!(
+            "../../../contracts/schema-source/sound-generation-20260926.2.json"
+        ))
+        .expect("Sound generation schema source is valid");
+        let sound_v1_extension: Value = serde_json::from_str(include_str!(
+            "../../../contracts/schema-source/sound-generation-20260926.1.json"
+        ))
+        .expect("Sound generation v1 schema source is valid");
         assert_eq!(
             format!("{:x}", Sha256::digest(OPENAPI_JSON.as_bytes())),
             OPENAPI_SHA256
@@ -773,6 +807,10 @@ mod tests {
         for capability in CAPABILITIES {
             let source = if capability.id == "infer.agent.task" {
                 &agent_extension
+            } else if capability.identity == "infer.audio.sound-generation@20260926.1" {
+                &sound_v1_extension
+            } else if capability.id == "infer.audio.sound-generation" {
+                &sound_extension
             } else {
                 &aggregate_document
             };

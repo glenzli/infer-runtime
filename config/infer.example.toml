@@ -190,6 +190,19 @@ priority_aging_ms = 10000
 version = 1
 protocol = "audio_worker"
 
+[providers.stable-audio-3-music-local]
+kind = "audio_worker"
+command = "/absolute/path/to/optimized/mlx/.venv/bin/python"
+args = ["workers/stable_audio_3_worker.py", "--model-root", "/absolute/path/to/optimized/mlx"]
+placement = "local"
+max_concurrency = 1
+max_queue = 2
+priority_aging_ms = 10000
+
+[providers.stable-audio-3-music-local.capability_profile]
+version = 1
+protocol = "audio_worker"
+
 # Optional owner-installed YAMNet runtime. Model files must first be published
 # into ArtifactStore under the exact typed Build manifest below.
 [providers.yamnet-local]
@@ -646,7 +659,7 @@ default_policy = "local-first"
 data_plane = "audio.sound_generation"
 input_modalities = ["text"]
 output_modalities = ["audio"]
-required_features = ["text_to_sound_effect", "wav_44100_stereo_pcm16"]
+required_features = ["wav_44100_stereo_pcm16"]
 default_capability_floor = "foundational"
 default_policy = "local-first"
 
@@ -937,6 +950,13 @@ status = "provisional"
 family = "stable-audio-3"
 
 [model_profiles.stable_audio_3_sm_sfx.ratings."audio.generate_sound"]
+level = "foundational"
+status = "provisional"
+
+[model_profiles.stable_audio_3_sm_music]
+family = "stable-audio-3"
+
+[model_profiles.stable_audio_3_sm_music.ratings."audio.generate_sound"]
 level = "foundational"
 status = "provisional"
 
@@ -1520,6 +1540,25 @@ upstream = "https://huggingface.co/stabilityai/stable-audio-3-optimized"
 source_revision = "da6edc54ddba10bfd79a077102ded687f80e882b"
 
 [model_builds.stable_audio_3_sm_sfx_mlx.license]
+status = "declared"
+expression = "stable-audio-community"
+license_url = "https://stability.ai/license"
+reviewed_at = "2026-09-26"
+
+[model_builds.stable_audio_3_sm_music_mlx]
+profile = "stable_audio_3_sm_music"
+model_id = "stabilityai/stable-audio-3-optimized@da6edc54ddba10bfd79a077102ded687f80e882b:sm-music"
+variant = "pure-mlx-fp16-same-s-fp32"
+input_modalities = ["text"]
+output_modalities = ["audio"]
+features = ["text_to_music_material", "wav_44100_stereo_pcm16"]
+
+[model_builds.stable_audio_3_sm_music_mlx.provenance]
+source_kind = "user_managed"
+upstream = "https://huggingface.co/stabilityai/stable-audio-3-optimized"
+source_revision = "da6edc54ddba10bfd79a077102ded687f80e882b"
+
+[model_builds.stable_audio_3_sm_music_mlx.license]
 status = "declared"
 expression = "stable-audio-community"
 license_url = "https://stability.ai/license"
@@ -2133,6 +2172,13 @@ supported_execution_modes = ["unary", "server_stream"]
 [deployments.stable_audio_3_sm_sfx_mlx]
 provider = "stable-audio-3-sfx-local"
 build = "stable_audio_3_sm_sfx_mlx"
+resource_class = "heavy"
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary"]
+
+[deployments.stable_audio_3_sm_music_mlx]
+provider = "stable-audio-3-music-local"
+build = "stable_audio_3_sm_music_mlx"
 resource_class = "heavy"
 estimated_cost_usd = 0.0
 supported_execution_modes = ["unary"]

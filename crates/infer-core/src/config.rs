@@ -1731,6 +1731,7 @@ impl RuntimeConfig {
                         | "audio.event_detection"
                         | "audio.embedding"
                         | "audio.speech"
+                        | "audio.sound_generation"
                         | "audio.voice_clone"
                         | "vision.face_detection"
                         | "vision.face_embedding"
