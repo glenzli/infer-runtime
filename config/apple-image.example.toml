@@ -1,0 +1,128 @@
+# Standalone local example. Build the worker and replace its absolute path.
+# Apple manages system models; no third-party weights or cloud fallback.
+[server]
+bind = "127.0.0.1:8788"
+[observer]
+enabled = false
+[auth]
+managed_credentials_directory = ".infer-runtime/apple-example/credentials"
+[persistence]
+path = ".infer-runtime/apple-example/jobs.sqlite3"
+[defaults]
+policy = "local-first"
+[profiles.local-first]
+order = ["placement", "cost"]
+[providers.apple]
+kind = "apple_image"
+placement = "local"
+command = "/absolute/path/to/infer-runtime/target/apple-image-worker"
+max_concurrency = 1
+max_queue = 4
+[providers.apple.capability_profile]
+version = 1
+protocol = "apple_image"
+capabilities = []
+
+[intents."apple.segment"]
+data_plane = "vision.apple_segmentation"
+input_modalities = ["image"]
+output_modalities = ["json"]
+default_capability_floor = "foundational"
+[model_profiles.apple_segment]
+family = "apple-os-managed-segment"
+[model_profiles.apple_segment.ratings."apple.segment"]
+level = "foundational"
+status = "provisional"
+[model_builds.apple_segment]
+profile = "apple_segment"
+model_id = "segment"
+input_modalities = ["image"]
+output_modalities = ["json"]
+[model_builds.apple_segment.provenance]
+source_kind = "provider_managed"
+upstream = "apple:macos27:segment"
+[deployments.apple_segment]
+provider = "apple"
+build = "apple_segment"
+
+[intents."apple.raw_render"]
+data_plane = "image.apple_raw_render"
+input_modalities = ["image"]
+output_modalities = ["json"]
+default_capability_floor = "foundational"
+[model_profiles.apple_raw_render]
+family = "apple-os-managed-raw_render"
+[model_profiles.apple_raw_render.ratings."apple.raw_render"]
+level = "foundational"
+status = "provisional"
+[model_builds.apple_raw_render]
+profile = "apple_raw_render"
+model_id = "raw_render"
+input_modalities = ["image"]
+output_modalities = ["json"]
+[model_builds.apple_raw_render.provenance]
+source_kind = "provider_managed"
+upstream = "apple:macos27:raw_render"
+[deployments.apple_raw_render]
+provider = "apple"
+build = "apple_raw_render"
+
+[intents."apple.ocr"]
+data_plane = "vision.apple_ocr"
+input_modalities = ["image"]
+output_modalities = ["json"]
+default_capability_floor = "foundational"
+[model_profiles.apple_ocr]
+family = "apple-os-managed-ocr"
+[model_profiles.apple_ocr.ratings."apple.ocr"]
+level = "foundational"
+status = "provisional"
+[model_builds.apple_ocr]
+profile = "apple_ocr"
+model_id = "ocr"
+input_modalities = ["image"]
+output_modalities = ["json"]
+[model_builds.apple_ocr.provenance]
+source_kind = "provider_managed"
+upstream = "apple:macos27:ocr"
+[deployments.apple_ocr]
+provider = "apple"
+build = "apple_ocr"
+
+[intents."apple.aesthetics"]
+data_plane = "vision.apple_aesthetics"
+input_modalities = ["image"]
+output_modalities = ["json"]
+default_capability_floor = "foundational"
+[model_profiles.apple_aesthetics]
+family = "apple-os-managed-aesthetics"
+[model_profiles.apple_aesthetics.ratings."apple.aesthetics"]
+level = "foundational"
+status = "provisional"
+[model_builds.apple_aesthetics]
+profile = "apple_aesthetics"
+model_id = "aesthetics"
+input_modalities = ["image"]
+output_modalities = ["json"]
+[model_builds.apple_aesthetics.provenance]
+source_kind = "provider_managed"
+upstream = "apple:macos27:aesthetics"
+[deployments.apple_aesthetics]
+provider = "apple"
+build = "apple_aesthetics"
+
+# Foundation Models description is intentionally not admitted by this default config.
+# This host fails the system device-region eligibility check. A different eligible
+# Mac can explicitly register the describe operation after a successful native probe.
+
+[apps.apple-example]
+credential = { source = "environment", variable = "INFER_APPLE_IMAGE_TOKEN" }
+resource_admin = false
+allowed_intents = ["apple.segment", "apple.raw_render", "apple.ocr", "apple.aesthetics"]
+allowed_policies = ["local-first"]
+allowed_cloud_input_modalities = []
+max_pending_jobs = 4
+[apps.apple-example.request_overrides]
+placement = ["local_only"]
+offline_required = true
+fallback = ["none"]

@@ -1,9 +1,12 @@
-# Trusted text nodes (experimental)
+# Trusted nodes (experimental)
 
 This opt-in slice lets a local Runtime execute unary text requests on explicitly
-paired Runtime nodes. Default configurations keep the existing loopback-only
-Consumer surface. Audio, vision, streams, durable remote Jobs, automatic LAN
-discovery and large artifact transfer are not enabled.
+paired Runtime nodes. An additional versioned protocol now supports
+[bounded Apple native image tasks](APPLE_NATIVE_IMAGES.md) with real encoded
+image bytes. The rest of this document describes the text protocol. Default
+configurations keep the existing loopback-only Consumer surface. Audio, generic
+vision tasks, streams, durable remote Jobs, automatic LAN discovery and large
+artifact transfer are not enabled.
 The initial credential-permission implementation supports Unix (macOS/Linux).
 Other platforms reject Node credential loading until owner/ACL validation exists.
 
@@ -32,7 +35,7 @@ protocol mismatch, lost dispatch acknowledgement, duplicate/altered replay,
 concurrent reservation exhaustion/expiry, cancellation, late output and B crash without
 automatic fallback to C. A machine allowing loopback TCP binds is required.
 
-## Verified on 2026-09-23 (Asia/Shanghai)
+## Historical text validation on 2026-09-23 (Asia/Shanghai)
 
 The current linked `inferd` passed all 21 same-host acceptance groups, including
 certificate/name/digest rejection, explicit App grants, running lease expiry,

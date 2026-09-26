@@ -1,6 +1,7 @@
 //! HTTP transport for the Responses data plane and infer control plane.
 
 mod agent_task;
+mod apple_image;
 mod audio_streaming;
 pub mod contract;
 mod image_understanding;
@@ -106,6 +107,12 @@ fn base_router(runtime: Arc<Runtime>) -> Router {
         .route(
             "/v1/audio/transcriptions/stream",
             get(audio_streaming::open_transcription_stream),
+        )
+        .route(
+            "/infer/v1/vision/apple-images",
+            post(apple_image::execute).layer(DefaultBodyLimit::max(
+                infer_core::MAX_APPLE_IMAGE_BYTES + 64 * 1024,
+            )),
         )
         .route("/v1/audio/alignments", post(create_alignment))
         .route("/v1/audio/speech", post(create_speech))

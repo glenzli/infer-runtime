@@ -28,6 +28,7 @@
     "contracts/capabilities/infer.vision.subject-segmentation/20260813.1/openapi.json": "4df56eefaa7ced43ef3c823f933e9bea689bee23f60d3279c3d84f75414bdb1d",
     "contracts/capabilities/infer.vision.subject-segmentation-soft-mask/20260814.1/openapi.json": "8ae50dcde6459072bc09a0f32b7a391df62cb0eae27d45879a3441aa203330d4",
     "contracts/capabilities/infer.vision.text-embedding/20260811.1/openapi.json": "b1bc536f7ded5f1397c739c2b1a282d460ff4b59923fb4f6fd3c564a8627be71",
-    "contracts/consumer-core/20260813.1/openapi.json": "08dcb1cc800b3eb5a8f63d45e8767404a40e8d36d7be391f5e7dd73c085f5801"
+    "contracts/consumer-core/20260813.1/openapi.json": "08dcb1cc800b3eb5a8f63d45e8767404a40e8d36d7be391f5e7dd73c085f5801",
+    "contracts/capabilities/infer.vision.apple-native/20260926.1/openapi.json": "38d311aed57823caaf52b93f8ba0873b9c1aec49be3e57685eab21a407736ce9"
   }
 }

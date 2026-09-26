@@ -595,6 +595,7 @@ pub struct ProviderRuntimeDependencies {
 }
 
 string_enum!(ProviderKind {
+    AppleImage => "apple_image",
     Responses => "responses",
     TrustedNode => "trusted_node",
     CodexAppServer => "codex_app_server",
@@ -609,6 +610,7 @@ string_enum!(ProviderKind {
 impl std::fmt::Display for ProviderKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
+            Self::AppleImage => "apple_image",
             Self::Responses => "responses",
             Self::TrustedNode => "trusted_node",
             Self::CodexAppServer => "codex_app_server",
@@ -1469,13 +1471,17 @@ impl RuntimeConfig {
     fn validate_providers(&self) -> Result<(), ContractError> {
         for (id, provider) in &self.providers {
             crate::node::validate_provider(id, provider)?;
+            if provider.kind == ProviderKind::AppleImage && provider.placement != Placement::Local {
+                return Err(configuration("Apple image worker must execute locally"));
+            }
             match provider.kind {
                 ProviderKind::Responses
                     if provider.base_url.as_deref().is_none_or(str::is_empty) =>
                 {
                     return Err(configuration(format!("provider {id} needs base_url")));
                 }
-                ProviderKind::AudioWorker
+                ProviderKind::AppleImage
+                | ProviderKind::AudioWorker
                 | ProviderKind::RetrievalWorker
                 | ProviderKind::OcrWorker
                 | ProviderKind::CoremlWorker
@@ -1495,6 +1501,7 @@ impl RuntimeConfig {
                 _ => {}
             }
             let expected_protocol = match provider.kind {
+                ProviderKind::AppleImage => ProviderProtocol::AppleImage,
                 ProviderKind::Responses | ProviderKind::TrustedNode => ProviderProtocol::Responses,
                 ProviderKind::CodexAppServer => ProviderProtocol::CodexAppServer,
                 ProviderKind::AudioWorker => ProviderProtocol::AudioWorker,
@@ -1537,7 +1544,8 @@ impl RuntimeConfig {
             }
             if matches!(
                 expected_protocol,
-                ProviderProtocol::AudioWorker
+                ProviderProtocol::AppleImage
+                    | ProviderProtocol::AudioWorker
                     | ProviderProtocol::RetrievalWorker
                     | ProviderProtocol::OcrWorker
                     | ProviderProtocol::CoremlWorker
@@ -1732,6 +1740,11 @@ impl RuntimeConfig {
                         | "audio.embedding"
                         | "audio.speech"
                         | "audio.sound_generation"
+                        | "vision.apple_segmentation"
+                        | "image.apple_raw_render"
+                        | "vision.apple_ocr"
+                        | "vision.apple_aesthetics"
+                        | "vision.apple_description"
                         | "audio.voice_clone"
                         | "vision.face_detection"
                         | "vision.face_embedding"
@@ -2027,6 +2040,27 @@ impl RuntimeConfig {
             for intent_id in model.ratings.keys() {
                 let data_plane = self.intents[intent_id].data_plane.as_str();
                 let compatible = provider_serves_data_plane(provider, data_plane);
+                if provider.kind == ProviderKind::AppleImage {
+                    let expected = match build.model_id.as_str() {
+                        "segment" => "vision.apple_segmentation",
+                        "raw_render" => "image.apple_raw_render",
+                        "ocr" => "vision.apple_ocr",
+                        "aesthetics" => "vision.apple_aesthetics",
+                        "describe" => "vision.apple_description",
+                        _ => "",
+                    };
+                    if data_plane != expected
+                        || build.input_modalities != [Modality::Image]
+                        || build.output_modalities != [Modality::Json]
+                        || deployment.supported_execution_modes
+                            != std::collections::BTreeSet::from([ExecutionMode::Unary])
+                    {
+                        return Err(configuration(format!(
+                            "Apple image deployment {id} requires its exact unary image operation"
+                        )));
+                    }
+                }
+
                 if !compatible {
                     return Err(configuration(format!(
                         "deployment {id} provider kind {} cannot serve {data_plane}",
@@ -2459,6 +2493,14 @@ impl ProviderConfig {
 
 fn provider_serves_data_plane(provider: &ProviderConfig, data_plane: &str) -> bool {
     match provider.kind {
+        ProviderKind::AppleImage => matches!(
+            data_plane,
+            "vision.apple_segmentation"
+                | "image.apple_raw_render"
+                | "vision.apple_ocr"
+                | "vision.apple_aesthetics"
+                | "vision.apple_description"
+        ),
         ProviderKind::Responses => {
             data_plane == "responses"
                 || (matches!(
@@ -2478,12 +2520,16 @@ fn provider_serves_data_plane(provider: &ProviderConfig, data_plane: &str) -> bo
                 .supports(ProviderCapability::AgentTask),
             _ => false,
         },
-        ProviderKind::TrustedNode => data_plane == "responses",
+        ProviderKind::TrustedNode => {
+            data_plane == "responses" || crate::is_apple_image_plane(data_plane)
+        }
         ProviderKind::AudioWorker => data_plane.starts_with("audio."),
         ProviderKind::RetrievalWorker => matches!(data_plane, "text.embedding" | "text.rerank"),
         ProviderKind::OcrWorker => data_plane == "document.ocr",
         ProviderKind::CoremlWorker => data_plane == "vision.subject_segmentation",
-        ProviderKind::Onnx => data_plane.starts_with("vision."),
+        ProviderKind::Onnx => {
+            data_plane.starts_with("vision.") && !crate::is_apple_image_plane(data_plane)
+        }
         // Raw foundation execution is a typed ONNX graph contract with a
         // dedicated controller and API, not a generic tensor surface.
         ProviderKind::RawFoundation => data_plane == "raw.foundation",

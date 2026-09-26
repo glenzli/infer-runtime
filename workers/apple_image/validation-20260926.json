@@ -1,0 +1,168 @@
+{
+  "date": "2026-09-26",
+  "timezone": "Asia/Shanghai",
+  "scope": "same-host isolated acceptance; installed service unchanged",
+  "limitations": [
+    "No compatible real RAW fixture supplied",
+    "Foundation Models reports deviceNotEligible on this host",
+    "Physical second-machine LAN not tested",
+    "Remote encoded input limited to 192 KiB; no RAW or large artifact transfer"
+  ],
+  "native_worker_source_sha256": "9f8891992c1d8adcc3163730744d0ea7b6415df43f234c739f03b798a66f4ab9",
+  "local": {
+    "binary_sha256": "893976c197e5b131712e825ad8dd340769286ececa40a39617839e8a0102665d",
+    "worker_sha256": "515322d9d3f2dd3600acbd1008b18509f30547f09702a35f8371f8b75fa39f2c",
+    "checks": [
+      {
+        "check": "authentication",
+        "status": 401
+      },
+      {
+        "check": "capability",
+        "status": 426
+      },
+      {
+        "check": "privacy",
+        "status": 400
+      },
+      {
+        "operation": "ocr",
+        "http_status": 200,
+        "round_trip_ms": 271,
+        "provenance": {
+          "os_version": "Version 27.0 (Build 26A428)",
+          "worker_protocol": "infer.apple-image-worker@20260926.1",
+          "worker_sha256": "515322d9d3f2dd3600acbd1008b18509f30547f09702a35f8371f8b75fa39f2c",
+          "execution_location": "device",
+          "execution_node": null,
+          "elapsed_ms": 244,
+          "model_ownership": "apple_os_managed_weights_not_exposed",
+          "request_revision": "3"
+        },
+        "recognized_text": "INFER Z7"
+      },
+      {
+        "operation": "aesthetics",
+        "http_status": 200,
+        "round_trip_ms": 129,
+        "provenance": {
+          "os_version": "Version 27.0 (Build 26A428)",
+          "worker_protocol": "infer.apple-image-worker@20260926.1",
+          "worker_sha256": "515322d9d3f2dd3600acbd1008b18509f30547f09702a35f8371f8b75fa39f2c",
+          "execution_location": "device",
+          "execution_node": null,
+          "elapsed_ms": 104,
+          "model_ownership": "apple_os_managed_weights_not_exposed",
+          "request_revision": "1"
+        },
+        "overall_score": -0.30806595
+      },
+      {
+        "operation": "segment",
+        "http_status": 200,
+        "round_trip_ms": 482,
+        "provenance": {
+          "os_version": "Version 27.0 (Build 26A428)",
+          "worker_protocol": "infer.apple-image-worker@20260926.1",
+          "worker_sha256": "515322d9d3f2dd3600acbd1008b18509f30547f09702a35f8371f8b75fa39f2c",
+          "execution_location": "device",
+          "execution_node": null,
+          "elapsed_ms": 441,
+          "model_ownership": "apple_os_managed_weights_not_exposed",
+          "request_revision": "revision1"
+        },
+        "raster": {
+          "width": 960,
+          "height": 640,
+          "content_type": "image/png",
+          "sha256": "82dc0b5a7f3fe1badd31f7c936a927e2a26adc75904a860d0adee1c108cf5d2c",
+          "semantics": "apple_vision_iterative_mask"
+        }
+      },
+      {
+        "check": "model_unavailable_does_not_disable_other_native_operations",
+        "status": "passed"
+      },
+      {
+        "operation": "describe",
+        "http_status": 503,
+        "round_trip_ms": 29,
+        "error": {
+          "error": {
+            "message": "configured model is absent from provider inventory",
+            "type": "invalid_request_error",
+            "code": "upstream_unavailable"
+          }
+        }
+      },
+      {
+        "operation": "raw_render",
+        "status": "not_tested_no_raw_fixture"
+      }
+    ]
+  },
+  "image_nodes": {
+    "scope": "same_host_two_process_mtls",
+    "binary_sha256": "893976c197e5b131712e825ad8dd340769286ececa40a39617839e8a0102665d",
+    "worker_sha256": "515322d9d3f2dd3600acbd1008b18509f30547f09702a35f8371f8b75fa39f2c",
+    "checks": [
+      {
+        "check": "image ALPN authenticates paired node B"
+      },
+      {
+        "check": "native ocr executes on B and returns authenticated provenance",
+        "round_trip_ms": 440
+      },
+      {
+        "check": "native aesthetics executes on B and returns authenticated provenance",
+        "round_trip_ms": 228
+      },
+      {
+        "check": "native segment executes on B and returns authenticated provenance",
+        "round_trip_ms": 478
+      },
+      {
+        "check": "local_only refuses forced remote image deployment"
+      },
+      {
+        "check": "oversized encoded image fails before remote dispatch"
+      },
+      {
+        "check": "text ALPN cannot carry image protocol envelope"
+      },
+      {
+        "check": "revoked peer cannot execute native image work"
+      }
+    ]
+  },
+  "text_nodes_regression": {
+    "scope": "same-host multi-process mTLS; deterministic inference only",
+    "completed_at": "2026-09-26T03:23:33.528564+00:00",
+    "binary_sha256": "b8c899fb74f2b4239138061b2bc2042d5792d993300188a37825a85a9d6b3935",
+    "harness_sha256": "7e8b0945281ec8ca4c4bf85829cb6287173d9f281ec8823d817a28eb8480863a",
+    "checks": [
+      "operator probe authenticates both live nodes and matches approved imports",
+      "three independent runtimes; overlapping capability defaults to local A",
+      "forced B execution crosses real mTLS and records trusted_node provenance",
+      "B and C execute independent Jobs simultaneously with separate admission slots",
+      "local_only rejects same-host B without backend execution",
+      "anywhere admits a paired node; cloud_only excludes it",
+      "oversized node input is excluded before routing and can select allowed local A",
+      "oversized node output is rejected at the transport boundary",
+      "operator probe reports B offline while C remains ready",
+      "B offline removes its candidates; C remains usable; B rejoin works",
+      "unpaired certificate and incompatible protocol rejected",
+      "pairing revocation takes effect without daemon restart",
+      "certificate pin, server name, contract digest and explicit App routing are enforced",
+      "lost dispatch acknowledgement reconciles; duplicate dispatch executes once; altered replay rejected",
+      "saturated B is excluded while available C executes the trusted-node request",
+      "atomic admission reservations and abandoned lease reclamation",
+      "twelve simultaneous reservations admit only two and reclaim both slots",
+      "running task is cancelled and reclaimed after ingress lease loss",
+      "A cancellation reaches B; reservation released; late backend output cannot succeed",
+      "B crash after dispatch yields unknown outcome without replaying on C",
+      "confirmed B execution failure allows explicitly authorized fallback to C"
+    ]
+  },
+  "validation_reuse": "Text-node acceptance used the prior linked binary. The final change only scopes unavailable Apple model errors and extends the local image harness; text/node sources are unchanged. Native local and image-node checks were rerun on the final binary."
+}

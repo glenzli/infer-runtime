@@ -38,6 +38,7 @@ pub(super) struct ProviderAssembly {
     pub text_embedding_executors: BTreeMap<String, DynTextEmbeddingExecutor>,
     pub image_understanding_executors: BTreeMap<String, DynImageUnderstandingExecutor>,
     pub retrieval_executors: BTreeMap<String, DynRetrievalExecutor>,
+    pub apple_image_executors: BTreeMap<String, Arc<infer_provider::AppleImageExecutor>>,
     pub ocr_executors: BTreeMap<String, DynOcrExecutor>,
     pub native_controllers: NativeControllerMap,
     pub schedulers: BTreeMap<String, ProviderScheduler>,
@@ -80,6 +81,26 @@ impl ProviderAssembly {
                 continue;
             }
             match provider.kind {
+                ProviderKind::AppleImage => {
+                    match infer_provider::AppleImageExecutor::new(
+                        process.command.clone().expect("resolved command"),
+                        process.args.clone(),
+                    ) {
+                        Ok(executor) => {
+                            assembly
+                                .apple_image_executors
+                                .insert(id.clone(), Arc::new(executor));
+                        }
+                        Err(_) => {
+                            assembly
+                                .readiness
+                                .get_mut(id)
+                                .expect("readiness exists")
+                                .mark_unavailable("apple_image", "Apple image worker unavailable");
+                        }
+                    }
+                }
+
                 ProviderKind::TrustedNode => {
                     let peer = provider.node.clone().ok_or_else(|| {
                         RuntimeError::Provider(infer_provider::ProviderError::Protocol(
@@ -604,6 +625,7 @@ impl ProviderAssembly {
             text_embedding_executors: BTreeMap::new(),
             image_understanding_executors: BTreeMap::new(),
             retrieval_executors: BTreeMap::new(),
+            apple_image_executors: BTreeMap::new(),
             ocr_executors: BTreeMap::new(),
             native_controllers: BTreeMap::new(),
             schedulers: BTreeMap::new(),

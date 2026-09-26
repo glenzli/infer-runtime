@@ -1,4 +1,4 @@
-//! Explicitly paired, single-hop unary text nodes. No discovery grants access.
+//! Explicitly paired, single-hop unary text and bounded Apple image nodes. No discovery grants access.
 
 use crate::config::is_loopback_http_url;
 use serde::{Deserialize, Serialize};
@@ -71,13 +71,21 @@ pub(crate) fn validate_nodes(config: &RuntimeConfig) -> Result<(), ContractError
             .node
             .as_ref()
             .is_some_and(|peer| peer.imports.contains_key(&build.model_id))
-            || build.input_modalities != [Modality::Text]
-            || build.output_modalities != [Modality::Text]
+            || !((build.input_modalities == [Modality::Text]
+                && build.output_modalities == [Modality::Text])
+                || (build.input_modalities == [Modality::Image]
+                    && build.output_modalities == [Modality::Json]
+                    && config.model_profiles[&build.profile]
+                        .ratings
+                        .keys()
+                        .all(|intent| {
+                            crate::is_apple_image_plane(&config.intents[intent].data_plane)
+                        })))
             || deployment.supported_execution_modes != BTreeSet::from([ExecutionMode::Unary])
             || deployment.resource_estimate != DeploymentResourceEstimateConfig::default()
         {
             return Err(configuration(
-                "trusted-node imports require approved, unary text deployments",
+                "trusted-node imports require approved unary text or bounded Apple image deployments",
             ));
         }
     }
@@ -104,10 +112,15 @@ pub(crate) fn validate_nodes(config: &RuntimeConfig) -> Result<(), ContractError
                 .get(&export.intent)
                 .ok_or_else(|| configuration("unknown node export intent"))?;
             if provider.placement != Placement::Local
-                || provider.kind != ProviderKind::Responses
-                || intent.data_plane != "responses"
-                || build.input_modalities != [Modality::Text]
-                || build.output_modalities != [Modality::Text]
+                || !((provider.kind == ProviderKind::Responses
+                    && intent.data_plane == "responses"
+                    && build.input_modalities == [Modality::Text]
+                    && build.output_modalities == [Modality::Text])
+                    || (provider.kind == ProviderKind::AppleImage
+                        && crate::is_apple_image_plane(&intent.data_plane)
+                        && build.input_modalities == [Modality::Image]
+                        && build.output_modalities == [Modality::Json]
+                        && build.model_id != "raw_render"))
                 || !config.model_profiles[&build.profile]
                     .ratings
                     .contains_key(&export.intent)
@@ -116,14 +129,15 @@ pub(crate) fn validate_nodes(config: &RuntimeConfig) -> Result<(), ContractError
                     .contains(&ExecutionMode::Unary)
             {
                 return Err(configuration(
-                    "node exports must be assessed local unary text Responses deployments",
+                    "node exports must be assessed local unary text or Apple image deployments",
                 ));
             }
-            // The first slice only exports direct local HTTP backends. No cloud or peer relay.
-            if !provider
-                .base_url
-                .as_deref()
-                .is_some_and(is_loopback_http_url)
+            // Text exports require direct local HTTP backends. No cloud or peer relay.
+            if provider.kind == ProviderKind::Responses
+                && !provider
+                    .base_url
+                    .as_deref()
+                    .is_some_and(is_loopback_http_url)
             {
                 return Err(configuration(
                     "node text export requires a numeric loopback HTTP backend",

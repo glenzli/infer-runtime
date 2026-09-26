@@ -6,6 +6,7 @@
 //! additive modules rather than changing the Core contract.
 
 mod agent_task;
+pub mod apple_image;
 mod audio;
 mod contract;
 mod discovery;

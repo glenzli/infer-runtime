@@ -3,6 +3,31 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+pub const IMAGE_PROTOCOL: &str = "infer.node.apple-image@20260926.1";
+pub const MAX_NODE_IMAGE_BYTES: usize = 192 * 1024;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppleNodeRequest {
+    pub parameters: infer_core::AppleImageParameters,
+    pub bytes: Vec<u8>,
+}
+impl AppleNodeRequest {
+    pub fn validate(&self) -> Result<(), NodeError> {
+        self.parameters
+            .validate()
+            .map_err(|_| NodeError::Protocol)?;
+        if self.bytes.is_empty()
+            || self.bytes.len() > MAX_NODE_IMAGE_BYTES
+            || matches!(
+                self.parameters.options,
+                infer_core::AppleImageOperation::RawRender { .. }
+            )
+        {
+            return Err(NodeError::Protocol);
+        }
+        Ok(())
+    }
+}
 pub const PROTOCOL: &str = "infer.node.text@20260922.1";
 pub const MAX_FRAME: usize = 1024 * 1024;
 pub const LEASE_MS: u64 = 5000;
@@ -84,6 +109,10 @@ pub(crate) enum Command {
     Dispatch {
         key: TaskKey,
         request: Box<ResponsesRequest>,
+    },
+    DispatchImage {
+        key: TaskKey,
+        request: Box<AppleNodeRequest>,
     },
     Status {
         key: TaskKey,

@@ -1,5 +1,7 @@
 //! Provider contracts and protocol-family adapters.
 
+mod apple_image;
+pub use apple_image::{AppleImageExecution, AppleImageExecutor};
 mod trusted_node;
 pub use trusted_node::TrustedNodeProvider;
 mod audio_stream;

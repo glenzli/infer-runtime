@@ -89,8 +89,11 @@ and approved export contract digests. `local_only` always excludes trusted nodes
 even when test nodes run on the same machine. Confirmed failure may use an
 authorized fallback; an unknown outcome after dispatch prohibits automatic replay.
 
-The current scope is unary text on Unix (macOS/Linux). Remote streaming,
-background work, audio/vision, and automatic LAN discovery are not supported.
+The current scope is unary text on Unix (macOS/Linux) and bounded Apple native
+image requests. See [Apple native images](docs/APPLE_NATIVE_IMAGES.md) for macOS 27
+OCR, aesthetics, segmentation, local RAW 9 rendering and system-dependent image
+understanding. Remote streaming, background work, audio, large image transfer
+and automatic LAN discovery are not supported.
 See [Trusted node configuration](docs/TRUSTED_NODES.md) for pairing and request
 examples.
 

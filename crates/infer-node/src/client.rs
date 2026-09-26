@@ -8,6 +8,7 @@ use tokio_rustls::TlsConnector;
 #[derive(Clone)]
 pub struct NodeClient {
     config: NodePeerConfig,
+    protocol: &'static str,
     tls: Arc<rustls::ClientConfig>,
 }
 
@@ -18,13 +19,20 @@ impl NodeClient {
     }
 
     pub fn new(config: NodePeerConfig) -> Result<Self, NodeError> {
+        Self::with_protocol(config, PROTOCOL)
+    }
+    pub fn new_images(config: NodePeerConfig) -> Result<Self, NodeError> {
+        Self::with_protocol(config, IMAGE_PROTOCOL)
+    }
+    fn with_protocol(config: NodePeerConfig, protocol: &'static str) -> Result<Self, NodeError> {
         if config.address.parse::<std::net::SocketAddr>().is_err()
             || !infer_core::valid_node_digest(&config.certificate_sha256)
         {
             return Err(NodeError::Protocol);
         }
         Ok(Self {
-            tls: tls::client(&config.tls)?,
+            tls: tls::client(&config.tls, protocol)?,
+            protocol,
             config,
         })
     }
@@ -42,21 +50,21 @@ impl NodeClient {
                 .map_err(|_| NodeError::Forbidden)?;
             if tls::fingerprint(socket.get_ref().1.peer_certificates())?
                 != self.config.certificate_sha256
-                || socket.get_ref().1.alpn_protocol() != Some(PROTOCOL.as_bytes())
+                || socket.get_ref().1.alpn_protocol() != Some(self.protocol.as_bytes())
             {
                 return Err(NodeError::Forbidden);
             }
             write_frame(
                 &mut socket,
                 &Request {
-                    protocol: PROTOCOL.into(),
+                    protocol: self.protocol.into(),
                     generation: generation.map(str::to_owned),
                     command,
                 },
             )
             .await?;
             let response: Response = read_frame(&mut socket).await?;
-            if response.protocol != PROTOCOL
+            if response.protocol != self.protocol
                 || response.node_id != self.config.node_id
                 || generation.is_some_and(|expected| response.generation != expected)
             {
@@ -90,6 +98,9 @@ impl NodeClient {
         mut request: ResponsesRequest,
         ttl: Duration,
     ) -> Result<serde_json::Value, NodeError> {
+        if self.protocol != PROTOCOL {
+            return Err(NodeError::Protocol);
+        }
         request.validate().map_err(|_| NodeError::Protocol)?;
         if request.stream
             || request.background
@@ -102,6 +113,56 @@ impl NodeClient {
         if !Self::request_fits_wire(&request) {
             return Err(NodeError::Protocol);
         }
+        self.execute_admitted(attempt, deployment, ttl, move |key, intent| {
+            request.model = intent;
+            request.metadata.clear();
+            Command::Dispatch {
+                key,
+                request: Box::new(request),
+            }
+        })
+        .await
+    }
+    pub async fn execute_image(
+        &self,
+        attempt: NodeAttempt,
+        deployment: String,
+        mut request: AppleNodeRequest,
+        ttl: Duration,
+    ) -> Result<serde_json::Value, NodeError> {
+        if self.protocol != IMAGE_PROTOCOL {
+            return Err(NodeError::Protocol);
+        }
+        request.validate()?;
+        if serde_json::to_vec(&request)
+            .map_err(|_| NodeError::Protocol)?
+            .len()
+            > MAX_FRAME - 1024
+        {
+            return Err(NodeError::Protocol);
+        }
+        self.execute_admitted(attempt, deployment, ttl, move |key, intent| {
+            request.parameters.model = intent;
+            request.parameters.metadata.clear();
+            request.parameters.metadata.extend([
+                ("infer.placement".into(), "local_only".into()),
+                ("infer.offline_required".into(), "true".into()),
+                ("infer.fallback".into(), "none".into()),
+            ]);
+            Command::DispatchImage {
+                key,
+                request: Box::new(request),
+            }
+        })
+        .await
+    }
+    async fn execute_admitted(
+        &self,
+        attempt: NodeAttempt,
+        deployment: String,
+        ttl: Duration,
+        dispatch: impl FnOnce(TaskKey, String) -> Command,
+    ) -> Result<serde_json::Value, NodeError> {
         let deadline = Instant::now() + ttl.min(Duration::from_millis(MAX_TASK_MS));
         let NodeAttempt {
             key,
@@ -127,9 +188,7 @@ impl NodeClient {
             return Err(NodeError::Cancelled);
         }
         let ttl_ms = remaining.as_millis().clamp(1, u128::from(MAX_TASK_MS)) as u64;
-        // Physical model on A names the paired deployment; the wire carries its declared Intent.
-        request.model = offer.intent.clone();
-        request.metadata.clear();
+        let command = dispatch(key.clone(), offer.intent.clone());
         let guard = CancelOnDrop {
             client: self.clone(),
             generation: generation.clone(),
@@ -148,15 +207,7 @@ impl NodeClient {
         )
         .await?;
         // After dispatch is attempted, transport failure is ambiguous. Never dispatch again.
-        let dispatched = self
-            .rpc(
-                Some(&generation),
-                Command::Dispatch {
-                    key: key.clone(),
-                    request: Box::new(request),
-                },
-            )
-            .await;
+        let dispatched = self.rpc(Some(&generation), command).await;
         let mut disconnected_since = None;
         let mut response = dispatched;
         loop {

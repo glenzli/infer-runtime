@@ -1,0 +1,572 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.vision.apple-native",
+    "version": "20260926.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.vision.apple-native@20260926.1",
+  "paths": {
+    "/infer/v1/vision/apple-images": {
+      "post": {
+        "operationId": "executeAppleNativeImage",
+        "summary": "Execute a bounded on-device Apple image operation",
+        "security": [
+          {
+            "bearerAuth": [],
+            "consumerContract": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ConsumerContract"
+          },
+          {
+            "$ref": "#/components/parameters/AppleImageCapability"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "request": {
+                    "contentMediaType": "application/json",
+                    "contentSchema": {
+                      "$ref": "#/components/schemas/AppleImageParameters"
+                    },
+                    "type": "string",
+                    "maxLength": 16384
+                  },
+                  "image": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "PNG/JPEG or supported RAW; maximum 100 MiB"
+                  }
+                },
+                "required": [
+                  "request",
+                  "image"
+                ],
+                "additionalProperties": false
+              },
+              "encoding": {
+                "request": {
+                  "contentType": "application/json"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Typed result with OS and worker provenance; raster is display-oriented sRGB PNG, not a raw foundation artifact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppleImageResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "AppleImageCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "const": "infer.vision.apple-native@20260926.1"
+        }
+      },
+      "ConsumerContract": {
+        "name": "Infer-Consumer-Contract",
+        "in": "header",
+        "required": true,
+        "description": "The only accepted dated Consumer Core identity.",
+        "schema": {
+          "const": "infer-runtime.consumer-core@20260813.1"
+        }
+      }
+    },
+    "schemas": {
+      "AppleImageParameters": {
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "options": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "const": "segment"
+                  },
+                  "points": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "y": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "include": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "x",
+                        "y",
+                        "include"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "box_prompt": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "x": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "y": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1
+                          },
+                          "width": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 1
+                          },
+                          "height": {
+                            "type": "number",
+                            "exclusiveMinimum": 0,
+                            "maximum": 1
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y",
+                          "width",
+                          "height"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "operation",
+                  "points"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "const": "raw_render"
+                  },
+                  "exposure": {
+                    "type": "number",
+                    "minimum": -5,
+                    "maximum": 5
+                  },
+                  "noise_reduction": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "operation",
+                  "exposure",
+                  "noise_reduction"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "const": "ocr"
+                  }
+                },
+                "required": [
+                  "operation"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "const": "aesthetics"
+                  }
+                },
+                "required": [
+                  "operation"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "const": "describe"
+                  },
+                  "prompt": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  }
+                },
+                "required": [
+                  "operation",
+                  "prompt"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "model",
+          "source_revision",
+          "options"
+        ],
+        "additionalProperties": false
+      },
+      "AppleImageRaster": {
+        "type": "object",
+        "properties": {
+          "width": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "content_type": {
+            "type": "string",
+            "const": "image/png"
+          },
+          "data_base64": {
+            "type": "string",
+            "contentEncoding": "base64"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "semantics": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "width",
+          "height",
+          "content_type",
+          "data_base64",
+          "sha256",
+          "semantics"
+        ],
+        "additionalProperties": false
+      },
+      "AppleImageResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "source_revision": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "deployment": {
+            "type": "string"
+          },
+          "model_build": {
+            "type": "string"
+          },
+          "result": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "const": "segment"
+                  },
+                  "raster": {
+                    "$ref": "#/components/schemas/AppleImageRaster"
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                },
+                "required": [
+                  "operation",
+                  "raster",
+                  "confidence"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "const": "raw_render"
+                  },
+                  "raster": {
+                    "$ref": "#/components/schemas/AppleImageRaster"
+                  },
+                  "decoder_version": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "operation",
+                  "raster",
+                  "decoder_version"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "const": "ocr"
+                  },
+                  "width": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "height": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "lines": {
+                    "type": "array",
+                    "maxItems": 512,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string",
+                          "maxLength": 8192
+                        },
+                        "confidence": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "box": {
+                          "type": "object",
+                          "properties": {
+                            "x": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "y": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "width": {
+                              "type": "number",
+                              "exclusiveMinimum": 0,
+                              "maximum": 1
+                            },
+                            "height": {
+                              "type": "number",
+                              "exclusiveMinimum": 0,
+                              "maximum": 1
+                            }
+                          },
+                          "required": [
+                            "x",
+                            "y",
+                            "width",
+                            "height"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "confidence",
+                        "box"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "operation",
+                  "width",
+                  "height",
+                  "lines"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "const": "aesthetics"
+                  },
+                  "overall_score": {
+                    "type": "number",
+                    "minimum": -1,
+                    "maximum": 1
+                  },
+                  "is_utility": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "operation",
+                  "overall_score",
+                  "is_utility"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "const": "describe"
+                  },
+                  "text": {
+                    "type": "string",
+                    "maxLength": 32768
+                  }
+                },
+                "required": [
+                  "operation",
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "properties": {
+              "os_version": {
+                "type": "string"
+              },
+              "worker_protocol": {
+                "type": "string",
+                "const": "infer.apple-image-worker@20260926.1"
+              },
+              "worker_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "execution_location": {
+                "type": "string",
+                "const": "device"
+              },
+              "elapsed_ms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "model_ownership": {
+                "type": "string",
+                "const": "apple_os_managed_weights_not_exposed"
+              },
+              "request_revision": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "execution_node": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Authenticated destination node ID, or null for local execution."
+              }
+            },
+            "required": [
+              "os_version",
+              "worker_protocol",
+              "worker_sha256",
+              "execution_location",
+              "elapsed_ms",
+              "model_ownership",
+              "request_revision",
+              "execution_node"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "source_revision",
+          "provider",
+          "deployment",
+          "model_build",
+          "result",
+          "provenance"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

@@ -3,6 +3,8 @@
 //! The public surface is split by semantic ownership: Responses request intent
 //! and constraints, static registry/configuration, and observable Job state.
 
+mod apple_image;
+pub use apple_image::*;
 mod node;
 pub use node::*;
 mod agent_task;

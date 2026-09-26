@@ -29,6 +29,15 @@ pub type PeerGrants = BTreeMap<String, PeerGrant>;
 
 #[async_trait]
 pub trait NodeExecutor: Send + Sync {
+    async fn execute_image(
+        &self,
+        _app: &str,
+        _export: &str,
+        _request: AppleNodeRequest,
+        _cancellation: CancellationToken,
+    ) -> Result<Value, NodeError> {
+        Err(NodeError::Protocol)
+    }
     async fn execute(
         &self,
         app: &str,
@@ -38,7 +47,13 @@ pub trait NodeExecutor: Send + Sync {
     ) -> Result<Value, NodeError>;
 }
 
+enum DispatchPayload {
+    Text(Box<ResponsesRequest>),
+    Image(Box<AppleNodeRequest>),
+}
+
 struct Task {
+    protocol: String,
     app: String,
     local_app: String,
     deployment: String,
@@ -128,15 +143,17 @@ impl NodeServer {
                             let serve = async {
                                 let mut socket = acceptor.accept(socket).await.map_err(|_| NodeError::Forbidden)?;
                                 let peer = tls::fingerprint(socket.get_ref().1.peer_certificates())?;
-                                if socket.get_ref().1.alpn_protocol() != Some(PROTOCOL.as_bytes()) { return Err(NodeError::Protocol); }
+                                let protocol = match socket.get_ref().1.alpn_protocol() { Some(p) if p==PROTOCOL.as_bytes()=>PROTOCOL, Some(p) if p==IMAGE_PROTOCOL.as_bytes()=>IMAGE_PROTOCOL, _=>return Err(NodeError::Protocol) };
                                 let grants = read_grants(&state.config)?;
                                 if !grants.contains_key(&peer) { return Err(NodeError::Forbidden); }
                                 let request: Request = read_frame(&mut socket).await?;
-                                let reply = match state.handle(&peer, request).await {
+                                let reply = if request.protocol != protocol {
+                                    Reply::Error(NodeError::Protocol)
+                                } else { match state.handle(&peer, request).await {
                                     Ok(reply) => reply, Err(error) => Reply::Error(error),
-                                };
+                                }};
                                 write_frame(&mut socket, &Response {
-                                    protocol: PROTOCOL.into(), node_id: state.config.node_id.clone(), generation: state.generation.clone(), reply,
+                                    protocol: protocol.into(), node_id: state.config.node_id.clone(), generation: state.generation.clone(), reply,
                                 }).await
                             };
                             tokio::select! {
@@ -189,7 +206,7 @@ impl State {
     }
 
     async fn handle(self: &Arc<Self>, peer: &str, request: Request) -> Result<Reply, NodeError> {
-        if request.protocol != PROTOCOL {
+        if request.protocol != PROTOCOL && request.protocol != IMAGE_PROTOCOL {
             return Err(NodeError::Protocol);
         }
         let grants = read_grants(&self.config)?;
@@ -218,6 +235,7 @@ impl State {
         if request.generation.as_deref() != Some(&self.generation) {
             return Err(NodeError::Protocol);
         }
+        let protocol = request.protocol.clone();
         let is_cancel = matches!(request.command, Command::Cancel { .. });
         match request.command {
             Command::Catalog => unreachable!(),
@@ -246,7 +264,8 @@ impl State {
                 let mut tasks = self.tasks.lock().await;
                 let id = (peer.to_string(), key);
                 if let Some(task) = tasks.get(&id) {
-                    if task.app != app_id
+                    if task.protocol != protocol
+                        || task.app != app_id
                         || task.deployment != deployment
                         || task.contract != contract_digest
                     {
@@ -263,6 +282,7 @@ impl State {
                 tasks.insert(
                     id,
                     Task {
+                        protocol: protocol.clone(),
                         app: app_id,
                         local_app: app.clone(),
                         deployment,
@@ -279,6 +299,9 @@ impl State {
                 Ok(Reply::Task(TaskState::Reserved))
             }
             Command::Dispatch { key, request } => {
+                if protocol != PROTOCOL {
+                    return Err(NodeError::Protocol);
+                }
                 request.validate().map_err(|_| NodeError::Protocol)?;
                 if request.stream
                     || request.background
@@ -288,59 +311,16 @@ impl State {
                 {
                     return Err(NodeError::Protocol);
                 }
-                let digest = contract_digest(&request)?;
-                let id = (peer.to_string(), key);
-                let mut tasks = self.tasks.lock().await;
-                let task = tasks.get_mut(&id).ok_or(NodeError::Missing)?;
-                if task
-                    .payload_digest
-                    .as_ref()
-                    .is_some_and(|old| old != &digest)
-                {
+                self.dispatch(peer, key, &protocol, DispatchPayload::Text(request))
+                    .await
+            }
+            Command::DispatchImage { key, request } => {
+                if protocol != IMAGE_PROTOCOL {
                     return Err(NodeError::Protocol);
                 }
-                if task.state != TaskState::Reserved {
-                    return Ok(Reply::Task(task.state.clone()));
-                }
-                let offer = &self.offers[&task.deployment];
-                if request.model != offer.intent {
-                    return Err(NodeError::Protocol);
-                }
-                task.payload_digest = Some(digest);
-                task.state = TaskState::Running;
-                let app = task.local_app.clone();
-                let deployment = task.deployment.clone();
-                let cancel = task.cancellation.clone();
-                let state = Arc::clone(self);
-                tokio::spawn(async move {
-                    let result = state
-                        .executor
-                        .execute(&app, &deployment, *request, cancel)
-                        .await;
-                    let mut tasks = state.tasks.lock().await;
-                    if let Some(task) = tasks.get_mut(&id) {
-                        if task.state != TaskState::Running {
-                            return;
-                        }
-                        if Instant::now() >= task.deadline || Instant::now() >= task.lease {
-                            task.cancel();
-                            return;
-                        }
-                        task.state = match result {
-                            Ok(result)
-                                if serde_json::to_vec(&result)
-                                    .is_ok_and(|bytes| bytes.len() < MAX_FRAME / 2) =>
-                            {
-                                TaskState::Succeeded { result }
-                            }
-                            Ok(_) => TaskState::Failed {
-                                error: NodeError::Protocol,
-                            },
-                            Err(error) => TaskState::Failed { error },
-                        };
-                    }
-                });
-                Ok(Reply::Task(TaskState::Running))
+                request.validate()?;
+                self.dispatch(peer, key, &protocol, DispatchPayload::Image(request))
+                    .await
             }
             Command::Status { key } | Command::Cancel { key } => {
                 let cancel = is_cancel;
@@ -348,6 +328,9 @@ impl State {
                 let task = tasks
                     .get_mut(&(peer.to_string(), key))
                     .ok_or(NodeError::Missing)?;
+                if task.protocol != protocol {
+                    return Err(NodeError::Protocol);
+                }
                 if cancel {
                     task.cancel();
                 } else if task.active() {
@@ -356,6 +339,86 @@ impl State {
                 Ok(Reply::Task(task.state.clone()))
             }
         }
+    }
+    async fn dispatch(
+        self: &Arc<Self>,
+        peer: &str,
+        key: TaskKey,
+        protocol: &str,
+        payload: DispatchPayload,
+    ) -> Result<Reply, NodeError> {
+        let (intent, digest) = match &payload {
+            DispatchPayload::Text(request) => (request.model.clone(), contract_digest(request)?),
+            DispatchPayload::Image(request) => (
+                request.parameters.model.clone(),
+                contract_digest(&("image", request))?,
+            ),
+        };
+        let id = (peer.to_string(), key);
+        let mut tasks = self.tasks.lock().await;
+        let task = tasks.get_mut(&id).ok_or(NodeError::Missing)?;
+        if task.protocol != protocol {
+            return Err(NodeError::Protocol);
+        }
+        if task
+            .payload_digest
+            .as_ref()
+            .is_some_and(|old| old != &digest)
+        {
+            return Err(NodeError::Protocol);
+        }
+        if task.state != TaskState::Reserved {
+            return Ok(Reply::Task(task.state.clone()));
+        }
+        let offer = &self.offers[&task.deployment];
+        if intent != offer.intent {
+            return Err(NodeError::Protocol);
+        }
+        task.payload_digest = Some(digest);
+        task.state = TaskState::Running;
+        let app = task.local_app.clone();
+        let deployment = task.deployment.clone();
+        let cancel = task.cancellation.clone();
+        let state = Arc::clone(self);
+        tokio::spawn(async move {
+            let result = match payload {
+                DispatchPayload::Text(request) => {
+                    state
+                        .executor
+                        .execute(&app, &deployment, *request, cancel)
+                        .await
+                }
+                DispatchPayload::Image(request) => {
+                    state
+                        .executor
+                        .execute_image(&app, &deployment, *request, cancel)
+                        .await
+                }
+            };
+            let mut tasks = state.tasks.lock().await;
+            if let Some(task) = tasks.get_mut(&id) {
+                if task.state != TaskState::Running {
+                    return;
+                }
+                if Instant::now() >= task.deadline || Instant::now() >= task.lease {
+                    task.cancel();
+                    return;
+                }
+                task.state = match result {
+                    Ok(result)
+                        if serde_json::to_vec(&result)
+                            .is_ok_and(|bytes| bytes.len() < MAX_FRAME / 2) =>
+                    {
+                        TaskState::Succeeded { result }
+                    }
+                    Ok(_) => TaskState::Failed {
+                        error: NodeError::Protocol,
+                    },
+                    Err(error) => TaskState::Failed { error },
+                };
+            }
+        });
+        Ok(Reply::Task(TaskState::Running))
     }
 }
 
@@ -372,6 +435,19 @@ mod tests {
     }
     #[async_trait]
     impl NodeExecutor for ControlledExecutor {
+        async fn execute_image(
+            &self,
+            _: &str,
+            _: &str,
+            _: AppleNodeRequest,
+            _: CancellationToken,
+        ) -> Result<Value, NodeError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.started.notify_one();
+            self.release.notified().await;
+            Ok(serde_json::json!({"image":true}))
+        }
+
         async fn execute(
             &self,
             _: &str,
@@ -478,6 +554,98 @@ mod tests {
                 },
             )
             .await
+    }
+
+    async fn image_command(
+        state: &Arc<State>,
+        peer: &str,
+        command: Command,
+    ) -> Result<Reply, NodeError> {
+        state
+            .handle(
+                peer,
+                Request {
+                    protocol: IMAGE_PROTOCOL.into(),
+                    generation: Some(state.generation.clone()),
+                    command,
+                },
+            )
+            .await
+    }
+    fn image_dispatch(id: &str, bytes: Vec<u8>) -> Command {
+        Command::DispatchImage {
+            key: key(id),
+            request: Box::new(AppleNodeRequest {
+                parameters: infer_core::AppleImageParameters {
+                    model: "text.summarize".into(),
+                    source_revision: "r1".into(),
+                    options: infer_core::AppleImageOperation::Ocr {},
+                    metadata: BTreeMap::from([
+                        ("infer.placement".into(), "local_only".into()),
+                        ("infer.offline_required".into(), "true".into()),
+                        ("infer.fallback".into(), "none".into()),
+                    ]),
+                },
+                bytes,
+            }),
+        }
+    }
+    #[tokio::test]
+    async fn image_protocol_binds_reservation_and_rejects_replay_changes() {
+        let (_dir, state, executor, peer) = fixture();
+        image_command(&state, &peer, reserve("image"))
+            .await
+            .unwrap();
+        assert!(matches!(
+            command(&state, &peer, reserve("image")).await,
+            Err(NodeError::Protocol)
+        ));
+        assert!(matches!(
+            command(&state, &peer, image_dispatch("image", vec![1])).await,
+            Err(NodeError::Protocol)
+        ));
+        assert!(matches!(
+            image_command(&state, &peer, dispatch("image", "text")).await,
+            Err(NodeError::Protocol)
+        ));
+        image_command(&state, &peer, image_dispatch("image", vec![1]))
+            .await
+            .unwrap();
+        executor.started.notified().await;
+        image_command(&state, &peer, image_dispatch("image", vec![1]))
+            .await
+            .unwrap();
+        assert_eq!(executor.calls.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            image_command(&state, &peer, image_dispatch("image", vec![2])).await,
+            Err(NodeError::Protocol)
+        ));
+        image_command(&state, &peer, Command::Cancel { key: key("image") })
+            .await
+            .unwrap();
+        executor.release.notify_one();
+        tokio::task::yield_now().await;
+        assert!(matches!(
+            image_command(&state, &peer, Command::Status { key: key("image") }).await,
+            Ok(Reply::Task(TaskState::Failed {
+                error: NodeError::Cancelled
+            }))
+        ));
+    }
+    #[tokio::test]
+    async fn oversized_image_is_rejected_without_execution() {
+        let (_dir, state, executor, peer) = fixture();
+        image_command(&state, &peer, reserve("big")).await.unwrap();
+        assert!(matches!(
+            image_command(
+                &state,
+                &peer,
+                image_dispatch("big", vec![0; MAX_NODE_IMAGE_BYTES + 1])
+            )
+            .await,
+            Err(NodeError::Protocol)
+        ));
+        assert_eq!(executor.calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

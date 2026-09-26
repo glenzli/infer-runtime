@@ -4,6 +4,7 @@ mod trusted_nodes;
 pub use trusted_nodes::node_offers;
 mod agent_task;
 mod app_admission;
+mod apple_image;
 mod attempt_policy;
 mod audio_streaming;
 mod background_jobs;
@@ -416,6 +417,7 @@ pub struct Runtime {
     text_embedding_executors: BTreeMap<String, DynTextEmbeddingExecutor>,
     image_understanding_executors: BTreeMap<String, DynImageUnderstandingExecutor>,
     retrieval_executors: BTreeMap<String, DynRetrievalExecutor>,
+    apple_image_executors: BTreeMap<String, Arc<infer_provider::AppleImageExecutor>>,
     ocr_executors: BTreeMap<String, DynOcrExecutor>,
     schedulers: BTreeMap<String, ProviderScheduler>,
     jobs: Mutex<HashMap<String, JobEntry>>,
@@ -534,6 +536,7 @@ impl Runtime {
             text_embedding_executors: assembly.text_embedding_executors,
             image_understanding_executors: assembly.image_understanding_executors,
             retrieval_executors: assembly.retrieval_executors,
+            apple_image_executors: assembly.apple_image_executors,
             ocr_executors: assembly.ocr_executors,
             schedulers: assembly.schedulers,
             jobs: Mutex::new(HashMap::new()),
@@ -633,6 +636,7 @@ impl Runtime {
             text_embedding_executors: BTreeMap::new(),
             image_understanding_executors: BTreeMap::new(),
             retrieval_executors: BTreeMap::new(),
+            apple_image_executors: BTreeMap::new(),
             ocr_executors: BTreeMap::new(),
             schedulers,
             jobs: Mutex::new(HashMap::new()),

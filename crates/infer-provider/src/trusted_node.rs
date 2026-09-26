@@ -20,7 +20,7 @@ impl TrustedNodeProvider {
     }
 }
 
-fn map_error(error: NodeError) -> ProviderError {
+pub(crate) fn map_error(error: NodeError) -> ProviderError {
     if error == NodeError::OutcomeUnknown {
         return ProviderError::RemoteOutcomeUnknown;
     }

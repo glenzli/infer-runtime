@@ -20,6 +20,10 @@ pub const CONSUMER_OPENAPI_SHA256: &str =
 
 pub(crate) fn expected_capability_schema(identity: &str) -> Option<(&'static str, &'static str)> {
     Some(match identity {
+        "infer.vision.apple-native@20260926.1" => (
+            "/infer/v1/capability-schemas/infer.vision.apple-native/20260926.1/openapi.json",
+            "38d311aed57823caaf52b93f8ba0873b9c1aec49be3e57685eab21a407736ce9",
+        ),
         "infer.agent.task@20260925.1" => (
             "/infer/v1/capability-schemas/infer.agent.task/20260925.1/openapi.json",
             "947a276a16b65d11251f984aabbeaeb3a002cde156baac3a7c4344a595d70cb3",

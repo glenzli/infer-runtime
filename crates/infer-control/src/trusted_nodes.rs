@@ -58,6 +58,40 @@ pub fn node_offers(config: &RuntimeConfig) -> Result<Vec<Offer>, NodeError> {
 
 #[async_trait::async_trait]
 impl NodeExecutor for RuntimeNodeExecutor {
+    async fn execute_image(
+        &self,
+        app: &str,
+        export: &str,
+        mut request: infer_node::AppleNodeRequest,
+        cancellation: CancellationToken,
+    ) -> Result<Value, NodeError> {
+        request.validate()?;
+        let export = self.exports.get(export).ok_or(NodeError::Forbidden)?;
+        if request.parameters.model != export.intent {
+            return Err(NodeError::Protocol);
+        }
+        request.parameters.metadata.clear();
+        request.parameters.metadata.extend([
+            ("infer.placement".into(), "local_only".into()),
+            ("infer.offline_required".into(), "true".into()),
+            ("infer.fallback".into(), "none".into()),
+            ("infer.deployment_ids".into(), export.deployment.clone()),
+        ]);
+        let response = self
+            .runtime
+            .execute_apple_image(
+                app,
+                infer_core::AppleImageRequest {
+                    parameters: request.parameters,
+                    bytes: request.bytes,
+                },
+                cancellation,
+            )
+            .await
+            .map_err(map_runtime)?;
+        serde_json::to_value(response).map_err(|_| NodeError::Protocol)
+    }
+
     async fn execute(
         &self,
         app: &str,

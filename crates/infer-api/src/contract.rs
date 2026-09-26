@@ -302,6 +302,9 @@ macro_rules! capability {
 }
 
 macro_rules! capability_schema_digest {
+    ("infer.vision.apple-native") => {
+        "38d311aed57823caaf52b93f8ba0873b9c1aec49be3e57685eab21a407736ce9"
+    };
     ("infer.agent.task") => {
         "947a276a16b65d11251f984aabbeaeb3a002cde156baac3a7c4344a595d70cb3"
     };
@@ -380,6 +383,12 @@ macro_rules! capability_schema_digest {
 }
 
 pub const CAPABILITIES: &[CapabilityEntry] = &[
+    capability!(
+        "infer.vision.apple-native",
+        "20260926.1",
+        "experimental",
+        [route!("POST", "/infer/v1/vision/apple-images", &["unary"]),]
+    ),
     capability!(
         "infer.agent.task",
         "20260925.1",
@@ -610,6 +619,9 @@ pub const CAPABILITIES: &[CapabilityEntry] = &[
 ];
 
 pub fn required_capability_id(path: &str) -> Option<&'static str> {
+    if path == "/infer/v1/vision/apple-images" {
+        return Some("infer.vision.apple-native");
+    }
     if path == "/infer/v1/agent/tasks" {
         Some("infer.agent.task")
     } else if path == "/v1/responses" || path.starts_with("/v1/responses/") {
@@ -804,8 +816,14 @@ mod tests {
             );
         }
 
+        let apple_extension: Value = serde_json::from_str(include_str!(
+            "../../../contracts/schema-source/apple-native-20260926.1.json"
+        ))
+        .unwrap();
         for capability in CAPABILITIES {
-            let source = if capability.id == "infer.agent.task" {
+            let source = if capability.id == "infer.vision.apple-native" {
+                &apple_extension
+            } else if capability.id == "infer.agent.task" {
                 &agent_extension
             } else if capability.identity == "infer.audio.sound-generation@20260926.1" {
                 &sound_v1_extension

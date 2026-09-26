@@ -1,4 +1,4 @@
-use crate::{NodeError, PROTOCOL};
+use crate::{IMAGE_PROTOCOL, NodeError, PROTOCOL};
 use infer_core::NodeTlsConfig;
 use rustls::{
     ClientConfig, RootCertStore, ServerConfig,
@@ -65,7 +65,10 @@ fn key(config: &NodeTlsConfig) -> Result<PrivateKeyDer<'static>, NodeError> {
     key
 }
 
-pub(crate) fn client(config: &NodeTlsConfig) -> Result<Arc<ClientConfig>, NodeError> {
+pub(crate) fn client(
+    config: &NodeTlsConfig,
+    protocol: &str,
+) -> Result<Arc<ClientConfig>, NodeError> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let mut tls = ClientConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])
@@ -73,7 +76,7 @@ pub(crate) fn client(config: &NodeTlsConfig) -> Result<Arc<ClientConfig>, NodeEr
         .with_root_certificates(roots(config)?)
         .with_client_auth_cert(certificates(&config.certificate)?, key(config)?)
         .map_err(|_| NodeError::Forbidden)?;
-    tls.alpn_protocols = vec![PROTOCOL.as_bytes().to_vec()];
+    tls.alpn_protocols = vec![protocol.as_bytes().to_vec()];
     Ok(Arc::new(tls))
 }
 
@@ -91,7 +94,10 @@ pub(crate) fn server(config: &NodeTlsConfig) -> Result<Arc<ServerConfig>, NodeEr
         .with_client_cert_verifier(verifier)
         .with_single_cert(certificates(&config.certificate)?, key(config)?)
         .map_err(|_| NodeError::Forbidden)?;
-    tls.alpn_protocols = vec![PROTOCOL.as_bytes().to_vec()];
+    tls.alpn_protocols = vec![
+        PROTOCOL.as_bytes().to_vec(),
+        IMAGE_PROTOCOL.as_bytes().to_vec(),
+    ];
     Ok(Arc::new(tls))
 }
 

@@ -571,6 +571,7 @@ string_enum!(SortKey {
     Capability => "capability"
 });
 string_enum!(ProviderProtocol {
+    AppleImage => "apple_image",
     Responses => "responses",
     CodexAppServer => "codex_app_server",
     AudioWorker => "audio_worker",
