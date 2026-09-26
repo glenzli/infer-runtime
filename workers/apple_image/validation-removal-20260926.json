@@ -1,0 +1,386 @@
+{
+  "validated_at": "2026-09-26T12:59:11.265373+08:00",
+  "base_revision": "f3f432858a3d5f37da25e4d4eab96d8b5f006c8f",
+  "scope": "Apple description removed; isolated local inferd and linked SDK; same-host two-process mTLS; installed Console service unchanged; physical LAN and Windows not tested",
+  "capability": "infer.vision.apple-native@20260926.2",
+  "worker_protocol": "infer.apple-image-worker@20260926.2",
+  "node_protocol": "infer.node.apple-image@20260926.2",
+  "source_sha256": {
+    "workers/apple_image/main.swift": "be44eac1359c66bc06a23357927c9878d56099a147ab8aae36acfd6e7197b633",
+    "config/apple-image.example.toml": "3afac7776137b2619af380438428b385771ba4b8af7564732e585e601435cba5",
+    "crates/infer-core/src/apple_image.rs": "8ce931d6498216bfe4f17b205bada2af1c706e768322c912777a259a84dbae01",
+    "crates/infer-core/src/config.rs": "327f622d70b01c845fd8cb7fdfab3c935ea4f9d27ab6e827ca370a0077931e26",
+    "crates/infer-api/src/contract.rs": "e4112f5530ee04c4438d08243c22b85b5eaaf58125d377712d222e68bb05a032",
+    "crates/infer-provider/src/apple_image.rs": "615d5cb6459d05c84bc28e07d4e25cf0013b94e062afd8a2a336b4bcdfea92a5",
+    "crates/infer-runtime-client/src/apple_image.rs": "654a80e2b9cb60d77f0336e053d929cd2b51507b023f3ccc1be04a0c3242bbf6",
+    "crates/infer-runtime-client/src/apple_image/tests.rs": "a39a436a260903893f7f4fb0408338b231148806b8ff9e012f72ce342ad44479",
+    "crates/infer-runtime-client/src/contract.rs": "32e25c185fce041c70f6c80a94d7982d1c1ecb251c683ffc0d5e18773d523031",
+    "crates/infer-runtime-client/examples/apple_image.rs": "52df50e2c9aedb2b22fe4cb4e94b4f0b38f935a050864e02b994a1d66119d429",
+    "crates/infer-node/src/wire.rs": "0e1c3aba50b4db7b53378ec514a0f77f287cd77110f1384ee64957abb4e29233",
+    "tools/smoke_apple_image.py": "2bbc16047e30c247607a78b91ddcaae971ca16a2086691eb05b73615904b20bc",
+    "tools/smoke_apple_image_nodes.py": "561d584122f6114ae10452e1d555b0d22a9c7a5a3a46444aa25a1e3045dd92a4",
+    "tools/generate_capability_schemas.py": "f4686bdb348b0de8c8e0e928db9ce0bf5ea4e4584e4a84ec7cee69785f48a925",
+    "contracts/schema-source/apple-native-20260926.2.json": "d90e5e0770353d4fecd370082947a8d0f04d80c091a357467a63fb5fcfd0eca6",
+    "contracts/capabilities/infer.vision.apple-native/20260926.2/openapi.json": "b5f381c4d7b16bd53c3884b8f21c2417756e0b95d2ab4eeb94c5efe302f43ade"
+  },
+  "sdk_consumer_sha256": "b58c24585cd3255858fbe1c3cecfa1bfc907e69922ba144cac9bb1ea1b903512",
+  "foundation_models_linked": false,
+  "validation": [
+    {
+      "command": "cargo test -p infer-core -p infer-provider -p infer-control -p infer-runtime-client --offline --lib apple_image",
+      "passed": 13
+    },
+    {
+      "command": "cargo test -p infer-api --offline --lib contract::tests",
+      "passed": 8
+    },
+    {
+      "command": "cargo test -p infer-node --offline --lib",
+      "passed": 8
+    },
+    {
+      "command": "cargo build -p inferd -p infer-runtime-client --bin inferd --example apple_image --offline",
+      "result": "passed"
+    },
+    {
+      "command": "bash tools/build_apple_image_worker.sh",
+      "result": "passed"
+    },
+    {
+      "command": "python3 tools/generate_capability_schemas.py --check",
+      "result": "passed"
+    },
+    {
+      "command": "python3 tools/validate_contract_artifacts.py",
+      "result": "passed"
+    },
+    {
+      "check": "28 existing immutable contract digests and bytes unchanged from base revision",
+      "result": "passed"
+    },
+    {
+      "check": "owned Rust formatting and Python syntax",
+      "result": "passed"
+    }
+  ],
+  "local": {
+    "binary_sha256": "db181dff9570f99f1095fecfa32c07056db08b849f827664bd0c9b384e1efba3",
+    "worker_sha256": "337337473711cf0784da35bc1dc813a1a2b711535fcb7aec459a3468e96d0901",
+    "checks": [
+      {
+        "check": "authentication",
+        "status": 401
+      },
+      {
+        "check": "capability",
+        "status": 426
+      },
+      {
+        "check": "retired_capability",
+        "status": 426
+      },
+      {
+        "check": "privacy",
+        "status": 400
+      },
+      {
+        "check": "removed_description_rejected_before_admission",
+        "status": 400
+      },
+      {
+        "check": "removed_description_rejected_by_worker",
+        "error": "invalid_request"
+      },
+      {
+        "operation": "ocr",
+        "http_status": 200,
+        "round_trip_ms": 575,
+        "provenance": {
+          "os_version": "Version 27.0 (Build 26A428)",
+          "worker_protocol": "infer.apple-image-worker@20260926.2",
+          "worker_sha256": "337337473711cf0784da35bc1dc813a1a2b711535fcb7aec459a3468e96d0901",
+          "execution_location": "device",
+          "execution_node": null,
+          "elapsed_ms": 545,
+          "model_ownership": "apple_os_managed_weights_not_exposed",
+          "request_revision": "3"
+        },
+        "recognized_text": "INFER Z7"
+      },
+      {
+        "operation": "aesthetics",
+        "http_status": 200,
+        "round_trip_ms": 188,
+        "provenance": {
+          "os_version": "Version 27.0 (Build 26A428)",
+          "worker_protocol": "infer.apple-image-worker@20260926.2",
+          "worker_sha256": "337337473711cf0784da35bc1dc813a1a2b711535fcb7aec459a3468e96d0901",
+          "execution_location": "device",
+          "execution_node": null,
+          "elapsed_ms": 163,
+          "model_ownership": "apple_os_managed_weights_not_exposed",
+          "request_revision": "1"
+        },
+        "overall_score": -0.30806595
+      },
+      {
+        "operation": "segment",
+        "http_status": 200,
+        "round_trip_ms": 620,
+        "provenance": {
+          "os_version": "Version 27.0 (Build 26A428)",
+          "worker_protocol": "infer.apple-image-worker@20260926.2",
+          "worker_sha256": "337337473711cf0784da35bc1dc813a1a2b711535fcb7aec459a3468e96d0901",
+          "execution_location": "device",
+          "execution_node": null,
+          "elapsed_ms": 576,
+          "model_ownership": "apple_os_managed_weights_not_exposed",
+          "request_revision": "revision1"
+        },
+        "raster": {
+          "width": 960,
+          "height": 640,
+          "content_type": "image/png",
+          "sha256": "82dc0b5a7f3fe1badd31f7c936a927e2a26adc75904a860d0adee1c108cf5d2c",
+          "semantics": "apple_vision_iterative_mask"
+        }
+      },
+      {
+        "operation": "raw_render",
+        "http_status": 200,
+        "round_trip_ms": 8030,
+        "provenance": {
+          "os_version": "Version 27.0 (Build 26A428)",
+          "worker_protocol": "infer.apple-image-worker@20260926.2",
+          "worker_sha256": "337337473711cf0784da35bc1dc813a1a2b711535fcb7aec459a3468e96d0901",
+          "execution_location": "device",
+          "execution_node": null,
+          "elapsed_ms": 5939,
+          "model_ownership": "apple_os_managed_weights_not_exposed",
+          "request_revision": null
+        },
+        "raster": {
+          "width": 6720,
+          "height": 4480,
+          "content_type": "image/png",
+          "sha256": "9ee2aec4c19f841fd127dab2a7dec0aff4d8e94e1b00438dc53f8df9276705e6",
+          "semantics": "display_referred_srgb_8bit"
+        },
+        "decoder_version": "9",
+        "input": {
+          "name": "Canon-eos-r-raw-00011.cr3",
+          "sha256": "441f44e757b06fe11322d3a0d80b06452eb31075ac9bad9e91bca1688547c85f"
+        },
+        "sdk_result": {
+          "deployment": "apple_raw_render",
+          "id": "apple_image_04948a5150604062a8b1ec47caae61df",
+          "job_state": "succeeded",
+          "model_build": "apple_raw_render",
+          "provenance": {
+            "elapsed_ms": 5298,
+            "execution_location": "device",
+            "execution_node": null,
+            "model_ownership": "apple_os_managed_weights_not_exposed",
+            "os_version": "Version 27.0 (Build 26A428)",
+            "request_revision": null,
+            "worker_protocol": "infer.apple-image-worker@20260926.2",
+            "worker_sha256": "337337473711cf0784da35bc1dc813a1a2b711535fcb7aec459a3468e96d0901"
+          },
+          "provider": "apple",
+          "result": {
+            "decoder_version": "9",
+            "operation": "raw_render",
+            "raster": {
+              "content_type": "image/png",
+              "height": 4480,
+              "semantics": "display_referred_srgb_8bit",
+              "sha256": "9ee2aec4c19f841fd127dab2a7dec0aff4d8e94e1b00438dc53f8df9276705e6",
+              "width": 6720
+            }
+          },
+          "source_revision": "sha256:441f44e757b06fe11322d3a0d80b06452eb31075ac9bad9e91bca1688547c85f"
+        }
+      },
+      {
+        "operation": "raw_render",
+        "http_status": 200,
+        "round_trip_ms": 2926,
+        "provenance": {
+          "os_version": "Version 27.0 (Build 26A428)",
+          "worker_protocol": "infer.apple-image-worker@20260926.2",
+          "worker_sha256": "337337473711cf0784da35bc1dc813a1a2b711535fcb7aec459a3468e96d0901",
+          "execution_location": "device",
+          "execution_node": null,
+          "elapsed_ms": 1817,
+          "model_ownership": "apple_os_managed_weights_not_exposed",
+          "request_revision": null
+        },
+        "raster": {
+          "width": 3916,
+          "height": 2634,
+          "content_type": "image/png",
+          "sha256": "82044534dc5c6a3a90917d661f2af83b82e516ef150a9ddbde213dff47628d41",
+          "semantics": "display_referred_srgb_8bit"
+        },
+        "decoder_version": "9.dng",
+        "input": {
+          "name": "RAW_LEICA_M8.DNG",
+          "sha256": "081bc2378ad24e36670ad39028fd167953dfb4972699b00404a303744c5be4b6"
+        },
+        "sdk_result": {
+          "deployment": "apple_raw_render",
+          "id": "apple_image_fc91587e21624937adbb4d05b16188d0",
+          "job_state": "succeeded",
+          "model_build": "apple_raw_render",
+          "provenance": {
+            "elapsed_ms": 1797,
+            "execution_location": "device",
+            "execution_node": null,
+            "model_ownership": "apple_os_managed_weights_not_exposed",
+            "os_version": "Version 27.0 (Build 26A428)",
+            "request_revision": null,
+            "worker_protocol": "infer.apple-image-worker@20260926.2",
+            "worker_sha256": "337337473711cf0784da35bc1dc813a1a2b711535fcb7aec459a3468e96d0901"
+          },
+          "provider": "apple",
+          "result": {
+            "decoder_version": "9.dng",
+            "operation": "raw_render",
+            "raster": {
+              "content_type": "image/png",
+              "height": 2634,
+              "semantics": "display_referred_srgb_8bit",
+              "sha256": "82044534dc5c6a3a90917d661f2af83b82e516ef150a9ddbde213dff47628d41",
+              "width": 3916
+            }
+          },
+          "source_revision": "sha256:081bc2378ad24e36670ad39028fd167953dfb4972699b00404a303744c5be4b6"
+        }
+      },
+      {
+        "check": "unsupported_raw9_rejected_without_fallback",
+        "status": 400,
+        "error": {
+          "error": {
+            "message": "provider rejected the request",
+            "type": "invalid_request_error",
+            "code": "upstream_invalid_request"
+          }
+        }
+      },
+      {
+        "check": "negotiated_sdk_consumer",
+        "result": {
+          "deployment": "apple_ocr",
+          "id": "apple_image_0594a69bdb5747d0913d87a3cd918dc5",
+          "job_state": "succeeded",
+          "model_build": "apple_ocr",
+          "provenance": {
+            "elapsed_ms": 251,
+            "execution_location": "device",
+            "execution_node": null,
+            "model_ownership": "apple_os_managed_weights_not_exposed",
+            "os_version": "Version 27.0 (Build 26A428)",
+            "request_revision": "3",
+            "worker_protocol": "infer.apple-image-worker@20260926.2",
+            "worker_sha256": "337337473711cf0784da35bc1dc813a1a2b711535fcb7aec459a3468e96d0901"
+          },
+          "provider": "apple",
+          "result": {
+            "height": 180,
+            "lines": [
+              {
+                "box": {
+                  "height": 0.5196208106146919,
+                  "width": 0.7056909942626952,
+                  "x": 0.04465450309963167,
+                  "y": 0.2235229263528563
+                },
+                "confidence": 1.0,
+                "text": "INFER Z7"
+              }
+            ],
+            "operation": "ocr",
+            "width": 800
+          },
+          "source_revision": "sha256:a98ab8816f83d9df5ff263b6597d50879fe4ed64d908a88d8997ceae11cbefa2"
+        }
+      }
+    ]
+  },
+  "paired_nodes": {
+    "scope": "same_host_two_process_mtls",
+    "binary_sha256": "db181dff9570f99f1095fecfa32c07056db08b849f827664bd0c9b384e1efba3",
+    "worker_sha256": "337337473711cf0784da35bc1dc813a1a2b711535fcb7aec459a3468e96d0901",
+    "checks": [
+      {
+        "check": "image ALPN authenticates paired node B"
+      },
+      {
+        "check": "native ocr executes on B and returns authenticated provenance",
+        "round_trip_ms": 646
+      },
+      {
+        "check": "native aesthetics executes on B and returns authenticated provenance",
+        "round_trip_ms": 230
+      },
+      {
+        "check": "native segment executes on B and returns authenticated provenance",
+        "round_trip_ms": 891
+      },
+      {
+        "check": "negotiated SDK consumer executes over paired image transport",
+        "result": {
+          "deployment": "remote_ocr",
+          "id": "apple_image_a6ddfd2ef3e04286a9df57f004ab64df",
+          "job_state": "succeeded",
+          "model_build": "remote_ocr",
+          "provenance": {
+            "elapsed_ms": 231,
+            "execution_location": "device",
+            "execution_node": "b",
+            "model_ownership": "apple_os_managed_weights_not_exposed",
+            "os_version": "Version 27.0 (Build 26A428)",
+            "request_revision": "3",
+            "worker_protocol": "infer.apple-image-worker@20260926.2",
+            "worker_sha256": "337337473711cf0784da35bc1dc813a1a2b711535fcb7aec459a3468e96d0901"
+          },
+          "provider": "node_b",
+          "result": {
+            "height": 180,
+            "lines": [
+              {
+                "box": {
+                  "height": 0.5196208106146919,
+                  "width": 0.7056909942626952,
+                  "x": 0.04465450309963167,
+                  "y": 0.2235229263528563
+                },
+                "confidence": 1.0,
+                "text": "INFER Z7"
+              }
+            ],
+            "operation": "ocr",
+            "width": 800
+          },
+          "source_revision": "sha256:a98ab8816f83d9df5ff263b6597d50879fe4ed64d908a88d8997ceae11cbefa2"
+        }
+      },
+      {
+        "check": "local_only refuses forced remote image deployment"
+      },
+      {
+        "check": "oversized encoded image fails before remote dispatch"
+      },
+      {
+        "check": "text ALPN cannot carry image protocol envelope"
+      },
+      {
+        "check": "retired image protocol is rejected"
+      },
+      {
+        "check": "revoked peer cannot execute native image work"
+      }
+    ]
+  }
+}

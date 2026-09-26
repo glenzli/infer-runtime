@@ -75,8 +75,8 @@ CLI 默认连接 `http://127.0.0.1:8787`，可通过 `--server` 或 `INFER_URL` 
 节点明确失败时可按已授权的策略回退；任务已发送但结果未知时，Runtime 禁止自动重放。
 
 当前支持 Unix（macOS/Linux）上的非流式文本调用，以及有大小限制的 Apple 原生图片调用。
-macOS 27 的 OCR、评分、主体分割、RAW 9 渲染和图片理解适配见
-[Apple 原生图片能力](docs/APPLE_NATIVE_IMAGES.md)，其中 RAW 仅限本机，图片理解受系统可用性限制。
+macOS 27 的 OCR、评分、主体分割和 RAW 9 渲染适配见
+[Apple 原生图片能力](docs/APPLE_NATIVE_IMAGES.md)，其中 RAW 仅限本机。
 远端流式、background、音频、大图片传输和自动局域网发现尚未支持。
 配对和请求示例见 [可信节点配置](docs/TRUSTED_NODES.md)。
 

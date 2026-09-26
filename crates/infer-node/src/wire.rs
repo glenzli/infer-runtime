@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-pub const IMAGE_PROTOCOL: &str = "infer.node.apple-image@20260926.1";
+pub const IMAGE_PROTOCOL: &str = "infer.node.apple-image@20260926.2";
 pub const MAX_NODE_IMAGE_BYTES: usize = 192 * 1024;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

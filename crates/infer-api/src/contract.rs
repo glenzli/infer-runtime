@@ -303,7 +303,7 @@ macro_rules! capability {
 
 macro_rules! capability_schema_digest {
     ("infer.vision.apple-native") => {
-        "38d311aed57823caaf52b93f8ba0873b9c1aec49be3e57685eab21a407736ce9"
+        "b5f381c4d7b16bd53c3884b8f21c2417756e0b95d2ab4eeb94c5efe302f43ade"
     };
     ("infer.agent.task") => {
         "947a276a16b65d11251f984aabbeaeb3a002cde156baac3a7c4344a595d70cb3"
@@ -385,7 +385,7 @@ macro_rules! capability_schema_digest {
 pub const CAPABILITIES: &[CapabilityEntry] = &[
     capability!(
         "infer.vision.apple-native",
-        "20260926.1",
+        "20260926.2",
         "experimental",
         [route!("POST", "/infer/v1/vision/apple-images", &["unary"]),]
     ),
@@ -746,6 +746,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn apple_image_catalog_exposes_only_verified_operations() {
+        assert!(capability_schema_document("infer.vision.apple-native", "20260926.1").is_none());
+        let schema: Value = serde_json::from_str(
+            capability_schema_document("infer.vision.apple-native", "20260926.2").unwrap(),
+        )
+        .unwrap();
+        for (kind, field) in [
+            ("AppleImageParameters", "options"),
+            ("AppleImageResponse", "result"),
+        ] {
+            let operations: std::collections::BTreeSet<_> =
+                schema["components"]["schemas"][kind]["properties"][field]["oneOf"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|variant| {
+                        variant["properties"]["operation"]["const"]
+                            .as_str()
+                            .unwrap()
+                    })
+                    .collect();
+            assert_eq!(
+                operations,
+                std::collections::BTreeSet::from(["segment", "raw_render", "ocr", "aesthetics"])
+            );
+        }
+    }
+
+    #[test]
     fn embedded_openapi_matches_the_runtime_contract_identity() {
         use sha2::{Digest, Sha256};
 
@@ -817,7 +846,7 @@ mod tests {
         }
 
         let apple_extension: Value = serde_json::from_str(include_str!(
-            "../../../contracts/schema-source/apple-native-20260926.1.json"
+            "../../../contracts/schema-source/apple-native-20260926.2.json"
         ))
         .unwrap();
         for capability in CAPABILITIES {

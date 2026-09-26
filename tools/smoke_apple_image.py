@@ -4,7 +4,7 @@ import argparse,base64,hashlib,json,os,socket,struct,subprocess,tempfile,time,ur
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 CORE='infer-runtime.consumer-core@20260813.1'
-CAP='infer.vision.apple-native@20260926.1'
+CAP='infer.vision.apple-native@20260926.2'
 def png_fixture(path):
     # Deliberately legible bitmap text; no external imaging dependency.
     glyphs={'I':['11111','00100','00100','00100','00100','00100','11111'],'N':['10001','11001','11001','10101','10011','10011','10001'],'F':['11111','10000','10000','11110','10000','10000','10000'],'E':['11111','10000','10000','11110','10000','10000','11111'],'R':['11110','10001','10001','11110','10100','10010','10001'],'2':['11111','00001','00001','11111','10000','10000','11111'],'7':['11111','00001','00010','00100','01000','01000','01000'],' ':['00000']*7}
@@ -51,14 +51,22 @@ def main():
                         with urllib.request.urlopen(request,timeout=125) as response:status=response.status;value=json.load(response)
                     except urllib.error.HTTPError as error:status=error.code;value=json.load(error)
                     return status,value,int((time.monotonic()-started)*1000)
-                for label,kwargs,expected in [('authentication',{'auth':False},401),('capability',{'cap':'wrong@1'},426),('privacy',{'metadata':{'infer.placement':'anywhere'}},400)]:
+                for label,kwargs,expected in [('authentication',{'auth':False},401),('capability',{'cap':'wrong@1'},426),('retired_capability',{'cap':'infer.vision.apple-native@20260926.1'},426),('privacy',{'metadata':{'infer.placement':'anywhere'}},400)]:
                     status,value,elapsed=call({'operation':'ocr'},**kwargs)
                     assert status==expected,(label,status,value)
                     report['checks'].append({'check':label,'status':status})
-                for operation in ['ocr','aesthetics','segment','describe']+['raw_render']*len(args.raw):
+                removed={'operation':'describe','prompt':'Describe this image.'}
+                status,value,_=call(removed)
+                assert status==400 and value['error']['code']=='invalid_request_error',(status,value)
+                assert value['error']['message']=='invalid Apple image parameters',value
+                report['checks'].append({'check':'removed_description_rejected_before_admission','status':status})
+                worker_result=subprocess.run([str(worker)],input=json.dumps(removed),capture_output=True,text=True,check=True)
+                envelope=json.loads(worker_result.stdout)
+                assert envelope['protocol']=='infer.apple-image-worker@20260926.2' and envelope['ok'] is False and envelope['error']=='invalid_request',envelope
+                report['checks'].append({'check':'removed_description_rejected_by_worker','error':envelope['error']})
+                for operation in ['ocr','aesthetics','segment']+['raw_render']*len(args.raw):
                     options={'operation':operation};photo=fixture
                     if operation=='segment':options['points']=[{'x':.3,'y':.5,'include':True}];photo=args.photo or fixture
-                    if operation=='describe':options['prompt']='Describe the image in one short sentence.';photo=args.photo or fixture
                     if operation=='raw_render':options.update(exposure=0,noise_reduction=1);photo=args.raw.pop(0)
                     status,value,elapsed=call(options,photo)
                     receipt={'operation':operation,'http_status':status,'round_trip_ms':elapsed}
@@ -73,11 +81,7 @@ def main():
                             receipt['recognized_text']=text
                         if operation=='aesthetics':assert -1<=result['overall_score']<=1;receipt['overall_score']=result['overall_score']
                     else:receipt['error']=value
-                    if operation in ('ocr','aesthetics','segment','raw_render'):assert status==200,(operation,status,value)
-                    if operation=='describe':
-                        assert status==400 and value['error']['code']=='invalid_request_error', (operation,status,value)
-                        assert call({'operation':'ocr'})[0]==200
-                        receipt['reason']='description_not_registered_on_ineligible_host'
+                    assert status==200,(operation,status,value)
                     if operation=='raw_render':
                         assert result['decoder_version'] in ('9','9.dng'),result['decoder_version']
                         assert raster['semantics']=='display_referred_srgb_8bit'

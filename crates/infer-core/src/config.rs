@@ -1744,7 +1744,6 @@ impl RuntimeConfig {
                         | "image.apple_raw_render"
                         | "vision.apple_ocr"
                         | "vision.apple_aesthetics"
-                        | "vision.apple_description"
                         | "audio.voice_clone"
                         | "vision.face_detection"
                         | "vision.face_embedding"
@@ -2046,7 +2045,6 @@ impl RuntimeConfig {
                         "raw_render" => "image.apple_raw_render",
                         "ocr" => "vision.apple_ocr",
                         "aesthetics" => "vision.apple_aesthetics",
-                        "describe" => "vision.apple_description",
                         _ => "",
                     };
                     if data_plane != expected
@@ -2499,7 +2497,6 @@ fn provider_serves_data_plane(provider: &ProviderConfig, data_plane: &str) -> bo
                 | "image.apple_raw_render"
                 | "vision.apple_ocr"
                 | "vision.apple_aesthetics"
-                | "vision.apple_description"
         ),
         ProviderKind::Responses => {
             data_plane == "responses"

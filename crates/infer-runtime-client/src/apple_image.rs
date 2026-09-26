@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::Path;
-pub const APPLE_IMAGE_CONTRACT: &str = "infer.vision.apple-native@20260926.1";
+pub const APPLE_IMAGE_CONTRACT: &str = "infer.vision.apple-native@20260926.2";
 pub const MAX_APPLE_IMAGE_BYTES: usize = 100 * 1024 * 1024;
 pub const MAX_APPLE_OUTPUT_BYTES: usize = 128 * 1024 * 1024;
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -39,9 +39,6 @@ pub enum AppleImageOperation {
     },
     Ocr {},
     Aesthetics {},
-    Describe {
-        prompt: String,
-    },
 }
 impl AppleImageOperation {
     pub fn model_id(&self) -> &'static str {
@@ -50,7 +47,6 @@ impl AppleImageOperation {
             Self::RawRender { .. } => "raw_render",
             Self::Ocr {} => "ocr",
             Self::Aesthetics {} => "aesthetics",
-            Self::Describe { .. } => "describe",
         }
     }
     pub fn data_plane(&self) -> &'static str {
@@ -59,7 +55,6 @@ impl AppleImageOperation {
             Self::RawRender { .. } => "image.apple_raw_render",
             Self::Ocr {} => "vision.apple_ocr",
             Self::Aesthetics {} => "vision.apple_aesthetics",
-            Self::Describe { .. } => "vision.apple_description",
         }
     }
     pub fn validate(&self) -> Result<()> {
@@ -88,7 +83,6 @@ impl AppleImageOperation {
                     && noise_reduction.is_finite()
                     && (0.0..=1.0).contains(noise_reduction)
             }
-            Self::Describe { prompt } => !prompt.trim().is_empty() && prompt.len() <= 4096,
             _ => true,
         };
         if valid {
@@ -179,9 +173,6 @@ pub enum AppleImageResult {
     Aesthetics {
         overall_score: f32,
         is_utility: bool,
-    },
-    Describe {
-        text: String,
     },
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -315,7 +306,7 @@ impl AppleImageResponse {
             .any(|s| s.is_empty() || s.len() > 256)
             || p.os_version.is_empty()
             || p.os_version.len() > 256
-            || p.worker_protocol != "infer.apple-image-worker@20260926.1"
+            || p.worker_protocol != "infer.apple-image-worker@20260926.2"
             || p.execution_location != "device"
             || p.worker_sha256.len() != 64
             || !p.worker_sha256.bytes().all(|b| b.is_ascii_hexdigit())
@@ -389,8 +380,6 @@ impl AppleImageResponse {
                 AppleImageOperation::Aesthetics {},
                 AppleImageResult::Aesthetics { overall_score, .. },
             ) if overall_score.is_finite() && (-1.0..=1.0).contains(overall_score) => {}
-            (AppleImageOperation::Describe { .. }, AppleImageResult::Describe { text })
-                if !text.is_empty() && text.len() <= 32768 => {}
             _ => return Err(malformed("Apple image operation mismatch")),
         }
         Ok(())

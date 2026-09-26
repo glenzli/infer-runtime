@@ -11,7 +11,7 @@ fn response() -> AppleImageResponse {
     serde_json::from_value(serde_json::json!({
     "id":"job-1", "source_revision":"photo-edit-3", "provider":"apple", "deployment":"apple_aesthetics", "model_build":"apple_aesthetics",
     "result":{"operation":"aesthetics", "overall_score":0.3, "is_utility":false},
-    "provenance":{"os_version":"27.0", "worker_protocol":"infer.apple-image-worker@20260926.1", "worker_sha256":"a".repeat(64), "execution_location":"device", "execution_node":null, "elapsed_ms":12, "model_ownership":"apple_os_managed_weights_not_exposed", "request_revision":"1"}
+    "provenance":{"os_version":"27.0", "worker_protocol":"infer.apple-image-worker@20260926.2", "worker_sha256":"a".repeat(64), "execution_location":"device", "execution_node":null, "elapsed_ms":12, "model_ownership":"apple_os_managed_weights_not_exposed", "request_revision":"1"}
 })).unwrap()
 }
 #[test]
@@ -19,6 +19,9 @@ fn refuses_stale_wrong_operation_remote_and_unbounded_results() {
     let request = request();
     let mut r = response();
     r.validate_for(&request).unwrap();
+    r.provenance.worker_protocol = "infer.apple-image-worker@20260926.1".into();
+    assert!(r.validate_for(&request).is_err());
+    r = response();
     r.source_revision = "stale".into();
     assert!(r.validate_for(&request).is_err());
     r.source_revision = request.source_revision.clone();
@@ -30,8 +33,10 @@ fn refuses_stale_wrong_operation_remote_and_unbounded_results() {
         .insert("infer.placement".into(), "private".into());
     r.validate_for(&private).unwrap();
     r.provenance.execution_node = None;
-    r.result = AppleImageResult::Describe {
-        text: "wrong operation".into(),
+    r.result = AppleImageResult::Ocr {
+        width: 1,
+        height: 1,
+        lines: vec![],
     };
     assert!(r.validate_for(&request).is_err());
     r.result = AppleImageResult::Aesthetics {
@@ -86,4 +91,20 @@ fn verifies_png_digest_geometry_and_raw_decoder() {
         };
         assert_eq!(r.validate_for(&request).is_ok(), decoder != "8");
     }
+}
+
+#[test]
+fn rejects_removed_description_wire_types() {
+    assert!(
+        serde_json::from_str::<AppleImageOperation>(
+            r#"{"operation":"describe","prompt":"What is here?"}"#
+        )
+        .is_err()
+    );
+    assert!(
+        serde_json::from_str::<AppleImageResult>(
+            r#"{"operation":"describe","text":"Unsupported"}"#
+        )
+        .is_err()
+    );
 }

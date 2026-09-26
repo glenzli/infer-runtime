@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "contracts/schema-source/consumer-api-20260813.1.json"
 AGENT_TASK_SOURCE = ROOT / "contracts/schema-source/agent-task-20260925.1.json"
 SOUND_GENERATION_SOURCE = ROOT / "contracts/schema-source/sound-generation-20260926.2.json"
-APPLE_IMAGE_SOURCE = ROOT / "contracts/schema-source/apple-native-20260926.1.json"
+APPLE_IMAGE_SOURCE = ROOT / "contracts/schema-source/apple-native-20260926.2.json"
 OUTPUT = ROOT / "contracts/capabilities"
 IMMUTABLE_DIGESTS = ROOT / "contracts/immutable-contract-digests.json"
 CHECK_ONLY = "--check" in sys.argv[1:]
@@ -42,7 +42,7 @@ CORE_ROUTES = (
 )
 
 CAPABILITIES: dict[str, tuple[str, tuple[str, ...]]] = {
-    "infer.vision.apple-native": ("20260926.1", ("/infer/v1/vision/apple-images",)),
+    "infer.vision.apple-native": ("20260926.2", ("/infer/v1/vision/apple-images",)),
     "infer.agent.task": ("20260925.1", ("/infer/v1/agent/tasks",)),
     "infer.responses": (
         "20260812.1",

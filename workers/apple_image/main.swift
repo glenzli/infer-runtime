@@ -4,7 +4,6 @@ import Vision
 import CoreImage
 import ImageIO
 import UniformTypeIdentifiers
-import FoundationModels
 
 struct Point: Decodable { let x: Double; let y: Double; let include: Bool }
 struct Box: Decodable { let x: Double; let y: Double; let width: Double; let height: Double }
@@ -16,7 +15,6 @@ struct Request: Decodable {
     let box: Box?
     let exposure: Float?
     let noise_reduction: Float?
-    let prompt: String?
 }
 enum Failure: String, Error {
     case invalid_request, invalid_image, pixel_limit, unsupported_raw9, assets_not_ready
@@ -148,21 +146,10 @@ func aesthetics(_ r: Request) throws -> [String: Any] {
     return ["overall_score": result.overallScore, "is_utility": result.isUtility,
             "request_revision": request.revision]
 }
-func describe(_ r: Request) async throws -> [String: Any] {
-    guard SystemLanguageModel.default.isAvailable else { throw Failure.unavailable }
-    let cg = try image(r)
-    let prompt = r.prompt ?? "Describe this image concisely."
-    guard !prompt.isEmpty, prompt.utf8.count <= 4096 else { throw Failure.invalid_request }
-    let session = LanguageModelSession(model: SystemLanguageModel.default)
-    let response = try await session.respond(to: Prompt { prompt; Attachment(cg) })
-    guard response.content.utf8.count <= 32768 else { throw Failure.invalid_output }
-    return ["text": response.content, "model": "apple_system_on_device", "cloud": false]
-}
 func execute(_ r: Request) async throws -> [String: Any] {
     switch r.operation {
     case "probe":
         return ["segmentation": await status(GenerateIterativeSegmentationRequest(seedPoint: .zero)),
-                "foundation_models": String(describing: SystemLanguageModel.default.availability),
                 "ocr": "supported", "aesthetics": "supported", "raw9": "per_input_probe_required"]
     case "probe_raw":
         guard let filter = CIRAWFilter(imageURL: try inputURL(r)) else { throw Failure.invalid_image }
@@ -177,7 +164,6 @@ func execute(_ r: Request) async throws -> [String: Any] {
     case "raw_render": return try raw(r)
     case "ocr": return try ocr(r)
     case "aesthetics": return try aesthetics(r)
-    case "describe": return try await describe(r)
     default: throw Failure.invalid_request
     }
 }
@@ -196,7 +182,7 @@ func execute(_ r: Request) async throws -> [String: Any] {
             response = ["ok": false, "error": (error as? Failure)?.rawValue ?? "execution_failed",
                         "error_domain": (error as NSError).domain, "error_code": (error as NSError).code]
         }
-        response["protocol"] = "infer.apple-image-worker@20260926.1"
+        response["protocol"] = "infer.apple-image-worker@20260926.2"
         response["os_version"] = ProcessInfo.processInfo.operatingSystemVersionString
         response["elapsed_ms"] = Int(Date().timeIntervalSince(started) * 1000)
         // System models are OS-owned: no invented weight hash or unload claim.

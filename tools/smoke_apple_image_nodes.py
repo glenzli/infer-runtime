@@ -21,7 +21,7 @@ import urllib.request
 from smoke_trusted_nodes import certificates, free_port, tls_config, write_private, wait_for, file_sha256
 from smoke_apple_image import png_fixture, CORE, CAP, ROOT
 
-IMAGE_PROTOCOL = 'infer.node.apple-image@20260926.1'
+IMAGE_PROTOCOL = 'infer.node.apple-image@20260926.2'
 TEXT_PROTOCOL = 'infer.node.text@20260922.1'
 OPERATIONS = ('ocr', 'aesthetics', 'segment')
 
@@ -188,6 +188,9 @@ build = "remote_{op}"
             mismatch = rpc({'op': 'catalog'}, alpn=TEXT_PROTOCOL)
             assert mismatch['reply'] == {'kind': 'error', 'value': 'protocol'}
             passed('text ALPN cannot carry image protocol envelope')
+            retired = rpc({'op': 'catalog'}, protocol='infer.node.apple-image@20260926.1')
+            assert retired['reply'] == {'kind': 'error', 'value': 'protocol'}
+            passed('retired image protocol is rejected')
             write_private(peers, {})
             assert call('ocr', fixture.read_bytes())[0] != 200
             passed('revoked peer cannot execute native image work')

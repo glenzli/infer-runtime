@@ -13,7 +13,6 @@ request revision without inventing a model-weight digest or claiming unload cont
 | `raw_render` | Core Image `CIRAWFilter`, decoder version 9 / 9.dng | Display-referred sRGB 8-bit PNG, exposure and luminance noise reduction; decoder support checked per file; local only |
 | `ocr` | Vision `VNRecognizeTextRequest` | Bounded text lines, confidence and normalized boxes |
 | `aesthetics` | Vision `VNCalculateImageAestheticsScoresRequest` | Native overall score and utility flag; not a calibrated photographic ranking |
-| `describe` | Foundation Models with image attachment | Optional only on eligible hosts; absent from the default example after this host failed regional eligibility |
 
 Input points and boxes use normalized top-left coordinates on the EXIF-normalized
 display image. Orientation is applied once. Native images are limited to 80 million
@@ -55,7 +54,7 @@ apply; Infer never accepts system license terms on the user's behalf.
 
 - Endpoint: `POST /infer/v1/vision/apple-images`
 - Core: `infer-runtime.consumer-core@20260813.1`
-- Capability: `infer.vision.apple-native@20260926.1`
+- Capability: `infer.vision.apple-native@20260926.2`
 - Multipart fields: exactly `request` (JSON, at most 16 KiB) and `image`
   (encoded bytes, at most 100 MiB locally).
 - Default placement: `local_only`. Explicit `private` permits approved paired nodes.
@@ -84,13 +83,13 @@ For example, put this in `request.json` and use an app credential authorized for
 curl http://127.0.0.1:8788/infer/v1/vision/apple-images \
   -H "Authorization: Bearer $INFER_APPLE_IMAGE_TOKEN" \
   -H 'Infer-Consumer-Contract: infer-runtime.consumer-core@20260813.1' \
-  -H 'Infer-Capability-Contract: infer.vision.apple-native@20260926.1' \
+  -H 'Infer-Capability-Contract: infer.vision.apple-native@20260926.2' \
   -F 'request=<request.json;type=application/json' \
   -F 'image=@photo.jpg;type=image/jpeg'
 ```
 
 The generated capability schema is checked in under
-`contracts/capabilities/infer.vision.apple-native/20260926.1/openapi.json`.
+`contracts/capabilities/infer.vision.apple-native/20260926.2/openapi.json`.
 The official Rust client exposes `infer_runtime_client::apple_image` with
 `Client::apple_image` (file) and `Client::apple_image_bytes` (encoded preview).
 It negotiates the immutable capability schema, uses existing Discovery and owner-only
@@ -117,14 +116,14 @@ before applying them. Never reuse this native mask as a SAM calibrated-probabili
 ## Paired nodes
 
 Images have a separate ALPN and envelope version,
-`infer.node.apple-image@20260926.1`. Existing text protocol bytes retain
+`infer.node.apple-image@20260926.2`. Existing text protocol bytes retain
 `infer.node.text@20260922.1`. Both share the existing explicit pairing, mTLS,
 certificate pinning, App/export grants, leases, admission, cancellation and
 unknown-outcome replay suppression. No routing metadata or host paths are forwarded.
 
 This first image transport deliberately retains the existing 1 MiB frame and
 512 KiB serialized result limits. It accepts at most **192 KiB of encoded input**.
-It supports OCR, aesthetics, segmentation and description; it excludes RAW,
+It supports OCR, aesthetics and segmentation; it excludes RAW,
 large-photo transfer, remote durable Jobs, streaming and multi-hop relay. A large
 PNG mask can exceed the result bound and fail. Consumers must explicitly supply an
 appropriately sized preview; Infer does not silently resize and alter coordinates.
@@ -176,6 +175,16 @@ and daemon processes. They preserve the running production service. Receipts inc
 binary and native worker digests. Two processes on one host demonstrate transport and
 real native execution, not cross-machine LAN availability or firewall compatibility.
 
+The current narrowed `20260926.2` capability is verified in
+[description-removal receipts](../workers/apple_image/validation-removal-20260926.json):
+29 focused Rust tests, 13 local checks and 10 paired-node checks passed. Real OCR,
+aesthetics, segmentation, RAW 9 / 9.dng and linked SDK calls succeeded. Removed
+`describe` requests fail before admission and in the native worker; retired capability
+and node protocol requests fail explicitly. The rebuilt worker no longer links
+Foundation Models. All 28 earlier frozen contract digests and bytes remain unchanged.
+These are focused validation results; the earlier full-suite limitations below were
+not re-run or reclassified.
+
 On macOS 27.0 (26A428), Apple M1 Pro, the worker and full Consumer API succeeded
 with local OCR, aesthetics, segmentation and real RAW files. Follow-up evidence is
 in [RAW 9 / SDK receipts](../workers/apple_image/validation-raw9-20260926.json);
@@ -205,10 +214,13 @@ identify the device-region input as the denial, and the machine's sales-region c
 is mainland China. Apple documents that M1-or-later Macs meet the chip requirement
 but mainland-purchased devices are currently ineligible for Apple Intelligence.
 This is a regional eligibility restriction, not inadequate M1 Pro hardware.
-The example therefore removes `apple.describe` from intents, deployments and App ACL;
-requesting it returns unknown intent (400) without starting a native description job.
-Implementation remains available for eligible hosts following an explicit successful
-probe. System license/region settings were not modified. Shadow's existing Qwen image
+Apple image description is therefore temporarily removed from the worker, provider,
+configuration registry, SDK and current capability schema. A `describe` request is
+rejected as an unsupported operation (400), before admission or native execution.
+The worker no longer imports or links Foundation Models. Contract, worker and image
+node protocols advance to `20260926.2`; both paired daemons and the SDK must be updated.
+Frozen v1 schema files and receipts are retained only as history; the current capability catalog does not advertise v1.
+System license/region settings were not modified. Shadow's existing Qwen image
 understanding is a separate capability and was not removed.
 
 Two isolated nodes also completed real OCR, aesthetics and segmentation over mTLS;
@@ -261,7 +273,7 @@ The source review identifies these product boundaries:
   `raw.foundation` / RawNIND and original-file identity. Current paired transport does
   not carry full RAWs; remote RAW requires a separately bounded artifact-transfer
   contract before it can become a Windows editing route.
-- **Description** remains absent on this host. Other established Shadow image
+- **Description** is temporarily removed from this adapter. Other established Shadow image
   understanding providers continue independently.
 
 The intended route is Shadow → local Infer SDK/daemon → explicitly paired Mac →

@@ -2,7 +2,7 @@
 use crate::{ContractError, Fallback, PlacementScope, RequestConstraints};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-pub const APPLE_IMAGE_CONTRACT: &str = "infer.vision.apple-native@20260926.1";
+pub const APPLE_IMAGE_CONTRACT: &str = "infer.vision.apple-native@20260926.2";
 pub const MAX_APPLE_IMAGE_BYTES: usize = 100 * 1024 * 1024;
 pub const MAX_APPLE_OUTPUT_BYTES: usize = 128 * 1024 * 1024;
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -34,9 +34,6 @@ pub enum AppleImageOperation {
     },
     Ocr {},
     Aesthetics {},
-    Describe {
-        prompt: String,
-    },
 }
 impl AppleImageOperation {
     pub fn model_id(&self) -> &'static str {
@@ -45,7 +42,6 @@ impl AppleImageOperation {
             Self::RawRender { .. } => "raw_render",
             Self::Ocr {} => "ocr",
             Self::Aesthetics {} => "aesthetics",
-            Self::Describe { .. } => "describe",
         }
     }
     pub fn data_plane(&self) -> &'static str {
@@ -54,7 +50,6 @@ impl AppleImageOperation {
             Self::RawRender { .. } => "image.apple_raw_render",
             Self::Ocr {} => "vision.apple_ocr",
             Self::Aesthetics {} => "vision.apple_aesthetics",
-            Self::Describe { .. } => "vision.apple_description",
         }
     }
     pub fn validate(&self) -> Result<(), ContractError> {
@@ -83,7 +78,6 @@ impl AppleImageOperation {
                     && noise_reduction.is_finite()
                     && (0.0..=1.0).contains(noise_reduction)
             }
-            Self::Describe { prompt } => !prompt.trim().is_empty() && prompt.len() <= 4096,
             _ => true,
         };
         if valid {
@@ -98,10 +92,7 @@ impl AppleImageOperation {
 pub fn is_apple_image_plane(plane: &str) -> bool {
     matches!(
         plane,
-        "vision.apple_segmentation"
-            | "vision.apple_ocr"
-            | "vision.apple_aesthetics"
-            | "vision.apple_description"
+        "vision.apple_segmentation" | "vision.apple_ocr" | "vision.apple_aesthetics"
     )
 }
 fn finite_unit(v: f64) -> bool {
@@ -193,9 +184,6 @@ pub enum AppleImageResult {
         overall_score: f32,
         is_utility: bool,
     },
-    Describe {
-        text: String,
-    },
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -224,6 +212,32 @@ pub struct AppleImageResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn rejects_removed_description_wire_types() {
+        assert!(
+            serde_json::from_str::<AppleImageOperation>(
+                r#"{"operation":"describe","prompt":"What is here?"}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<AppleImageResult>(
+                r#"{"operation":"describe","text":"Unsupported"}"#
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn rejects_removed_description_registration() {
+        assert!(!is_apple_image_plane("vision.apple_description"));
+        let mut config: crate::RuntimeConfig =
+            toml::from_str(include_str!("../../../config/apple-image.example.toml")).unwrap();
+        config.model_builds.get_mut("apple_ocr").unwrap().model_id = "describe".into();
+        assert!(config.validate().is_err());
+        config.model_builds.get_mut("apple_ocr").unwrap().model_id = "ocr".into();
+        config.intents.get_mut("apple.ocr").unwrap().data_plane = "vision.apple_description".into();
+        assert!(config.validate().is_err());
+    }
     #[test]
     fn apple_registry_binds_operation_and_provider() {
         let mut config: crate::RuntimeConfig =

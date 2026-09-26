@@ -10,7 +10,7 @@ use tokio::{
     process::Command,
 };
 use tokio_util::sync::CancellationToken;
-const PROTOCOL: &str = "infer.apple-image-worker@20260926.1";
+const PROTOCOL: &str = "infer.apple-image-worker@20260926.2";
 pub struct AppleImageExecutor {
     command: String,
     args: Vec<String>,
@@ -57,7 +57,6 @@ impl AppleImageExecutor {
             AppleImageResult::RawRender { .. } => "raw_render",
             AppleImageResult::Ocr { .. } => "ocr",
             AppleImageResult::Aesthetics { .. } => "aesthetics",
-            AppleImageResult::Describe { .. } => "describe",
         };
         if response.source_revision != source
             || output_operation != operation
@@ -166,8 +165,8 @@ impl AppleImageExecutor {
                 envelope["error"].as_str(),
                 Some("unavailable" | "assets_not_ready")
             ) {
-                // Unavailable OS assets/eligibility are operation-scoped. Reuse the
-                // model-unavailable path so description cannot trip OCR's circuit.
+                // Unavailable OS assets are operation-scoped. Reuse the
+                // model-unavailable path to preserve other operations' health.
                 return Err(ProviderError::ModelMissing {
                     model: physical_model.into(),
                 });
@@ -229,9 +228,6 @@ impl AppleImageExecutor {
                 is_utility: value["is_utility"]
                     .as_bool()
                     .ok_or_else(|| invalid("invalid aesthetics result"))?,
-            },
-            AppleImageOperation::Describe { .. } => AppleImageResult::Describe {
-                text: bounded_string(value, "text", 32768)?,
             },
         };
         Ok(AppleImageExecution {
@@ -323,7 +319,6 @@ fn validate_remote_response(response: &AppleImageResponse) -> Result<(), Provide
         }
         AppleImageResult::Aesthetics { overall_score, .. }
             if overall_score.is_finite() && (-1.0..=1.0).contains(overall_score) => {}
-        AppleImageResult::Describe { text } if !text.is_empty() && text.len() <= 32768 => {}
         _ => return Err(invalid("invalid or unsupported remote image result")),
     }
     Ok(())

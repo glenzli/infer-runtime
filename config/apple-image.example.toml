@@ -111,9 +111,8 @@ upstream = "apple:macos27:aesthetics"
 provider = "apple"
 build = "apple_aesthetics"
 
-# Foundation Models description is intentionally not admitted by this default config.
-# This host fails the system device-region eligibility check. A different eligible
-# Mac can explicitly register the describe operation after a successful native probe.
+# Apple Foundation Models image description is temporarily removed from this adapter.
+# Only the four verified operations above can be registered.
 
 [apps.apple-example]
 credential = { source = "environment", variable = "INFER_APPLE_IMAGE_TOKEN" }
