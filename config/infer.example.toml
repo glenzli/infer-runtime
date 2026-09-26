@@ -2339,7 +2339,7 @@ max_cost_usd = { min = 0.0, max = 0.0 }
 [apps.echo]
 credential = { source = "managed" }
 resource_admin = false
-allowed_intents = ["audio.detect_events", "audio.generate_sound"]
+allowed_intents = ["audio.detect_events", "audio.generate_sound", "text.edit"]
 max_pending_jobs = 16
 default_policy = "local-first"
 allowed_policies = ["local-first"]
@@ -2407,7 +2407,7 @@ max_cost_usd = { min = 0.0, max = 0.0 }
 [apps.example-shape-consumer]
 credential = { source = "managed" }
 resource_admin = false
-allowed_intents = ["text.edit", "speech.synthesize", "image.generate"]
+allowed_intents = ["text.edit", "speech.synthesize", "image.generate", "audio.generate_sound"]
 allowed_builtin_tools = []
 # File-bearing Agent tasks have a separate grant and remain execution-blocked.
 allow_agent_file_tasks = false
@@ -2429,7 +2429,7 @@ default_policy = "local-first"
 allowed_policies = ["local-first", "balanced"]
 
 [apps.example-shape-consumer.request_overrides]
-priority = ["interactive", "normal"]
+priority = ["interactive", "normal", "background"]
 placement = ["local_only", "cloud_only"]
 prefer = ["local", "cloud"]
 offline_required = true
@@ -2454,4 +2454,20 @@ named_deployment_ids = ["codex_gpt_6_luna", "codex_gpt_6_sol"]
 
 [apps.example-shape-consumer.routing.intents."speech.synthesize"]
 deployment_ids = ["mlx_qwen3_tts_custom_voice_1_7b"]
+model_profile_ids = []
+
+# Text-only local sound creation; reserved unavailable models are not granted.
+[apps.example-shape-consumer.routing.intents."audio.generate_sound"]
+deployment_ids = ["stable_audio_3_sm_sfx_mlx", "stable_audio_3_sm_music_mlx"]
+model_profile_ids = []
+
+# Preserve the current compatible routes when enabling exact named prompt preparation.
+[apps.echo.routing.intents."audio.detect_events"]
+deployment_ids = ["yamnet_audio_events_tfhub_v1"]
+model_profile_ids = []
+[apps.echo.routing.intents."audio.generate_sound"]
+deployment_ids = ["stable_audio_3_sm_music_mlx", "stable_audio_3_sm_sfx_mlx"]
+model_profile_ids = []
+[apps.echo.routing.intents."text.edit"]
+deployment_ids = ["ollama_qwen3_5_4b"]
 model_profile_ids = []

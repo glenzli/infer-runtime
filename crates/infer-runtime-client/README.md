@@ -54,3 +54,20 @@ The SDK validates the response SHA-256, WAV shape, local placement, and model
 identity headers; Consumers save `SoundGenerationResponse.wav` into their own
 artifact store and decide whether to accept or discard the candidate. The
 result's Job ID can be read with `Client::job` for routing and attempt evidence.
+
+### Explicit sound-prompt preparation
+
+`Client::prepare_sound_prompt(original_prompt)` is an opt-in client helper under
+`infer.sound-prompt-preparation@20260926.1`. English is returned byte-for-byte without a
+request. Chinese or mixed descriptions use one `text.edit` Responses request to the
+named local `ollama_qwen3_5_4b` deployment: background priority, balanced latency,
+foundational floor, local-only/offline, no fallback and zero cost. It translates
+faithfully without creative expansion. This does not alter `generate_sound_effect`.
+
+Call the helper once per product batch, validate the result with
+`PreparedSoundPrompt::validate_for(original_prompt, app_id)`, retain it for retries,
+and explicitly pass `effective_prompt` to sound generation. Persist the original,
+effective prompt, rule revision, preparation latency and optional text Job together
+with the independent sound Job. The SDK does not own UI, caching, history or acceptance.
+Changing the original invalidates reuse; preparation errors must stop generation.
+Dropping the future stops waiting but does not claim provider-side cancellation.

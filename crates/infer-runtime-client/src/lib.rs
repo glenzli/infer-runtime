@@ -15,6 +15,8 @@ mod jobs;
 mod ocr;
 mod raw_foundation;
 mod responses;
+mod sound_prompt;
+pub use sound_prompt::{PreparedSoundPrompt, SOUND_PROMPT_RULES_REVISION};
 mod retrieval;
 mod transport;
 mod vision;
