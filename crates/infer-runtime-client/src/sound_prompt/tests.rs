@@ -161,3 +161,86 @@ fn restored_preparation_binds_original_app_and_local_job() {
         assert!(p.validate_for("雨声，不要音乐", "shape").is_err());
     }
 }
+
+#[test]
+fn recorded_music_regression_rejects_invented_music_exclusion() {
+    let original = "轻柔的 guqin 和 sparse piano，舒缓节奏，不要人声，不要鼓点。";
+    let mut prepared = PreparedSoundPrompt {
+        original_prompt: original.into(),
+        effective_prompt:
+            "soft guqin and sparse piano, relaxed tempo, no speech, no music, no vocals, no drum beats"
+                .into(),
+        rules_revision: SOUND_PROMPT_RULES_REVISION.into(),
+        text_job: Some(local_job()),
+        preparation_elapsed_ms: 3042,
+    };
+    assert!(prepared.validate_for_generation(original, "shape").is_err());
+    prepared.effective_prompt =
+        "Soft guqin and sparse piano, relaxed tempo, no vocals, no drum beats.".into();
+    prepared.validate_for_generation(original, "shape").unwrap();
+}
+
+#[test]
+fn common_exclusions_must_be_present_in_the_source_and_preserved() {
+    for (source, target) in [
+        (
+            "轻柔的钢琴音乐，不要人声",
+            "Soft piano music, no vocals, no music",
+        ),
+        ("柔和的配乐，不要鼓点", "Soft music without music or drums"),
+        ("雨声，不要讲话和音乐", "Rain, no speech"),
+        ("古筝，不要鼓点", "Guzheng, no percussion"),
+        ("钢琴，无缝循环", "Piano, no music"),
+        ("不要去掉音乐", "No music"),
+        ("No speech，但保留音乐", "No speech or music"),
+    ] {
+        assert!(
+            !fidelity::preserves_exclusions(source, target),
+            "{source} -> {target}"
+        );
+    }
+    for (source, target) in [
+        (
+            "窗外雨声，不要讲话和音乐",
+            "Rain outside, no speech or music",
+        ),
+        (
+            "窗外雨声，没有音乐，没有人声",
+            "Rain outside, without music or vocals",
+        ),
+        ("无音乐的雨声", "Rain, music-free"),
+        (
+            "雨声，不要有音乐，不要加入任何人声",
+            "Rain, no music or voices",
+        ),
+        (
+            "轻柔钢琴，不要人声，不要鼓点",
+            "Soft piano, no vocals and no drum beats",
+        ),
+        ("安静的房间，不要打击乐", "Quiet room, no percussion"),
+        ("轻柔的音乐，没有雨声", "Soft music, no rain"),
+        ("无缝循环的音乐", "Seamless looping music"),
+        ("不要去掉音乐", "Keep the music"),
+    ] {
+        assert!(
+            fidelity::preserves_exclusions(source, target),
+            "{source} -> {target}"
+        );
+    }
+}
+
+#[test]
+fn historical_v1_evidence_is_readable_but_not_reusable_for_new_generation() {
+    let original = "轻柔的音乐，不要人声";
+    let legacy = PreparedSoundPrompt {
+        original_prompt: original.into(),
+        // Even a flawed historical translation is evidence of what ran. Do not
+        // rewrite it or make an accepted audio project impossible to reopen.
+        effective_prompt: "Soft music, no vocals, no music".into(),
+        rules_revision: LEGACY_RULES_REVISION.into(),
+        text_job: Some(local_job()),
+        preparation_elapsed_ms: 50,
+    };
+    legacy.validate_for(original, "shape").unwrap();
+    assert!(legacy.validate_for_generation(original, "shape").is_err());
+}
