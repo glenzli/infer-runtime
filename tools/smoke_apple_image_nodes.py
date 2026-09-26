@@ -56,7 +56,7 @@ def main():
             if name == 'a':
                 grants += ['remote_' + op for op in OPERATIONS]
             configs[name] += '\n[apps.apple-example.routing]\ndeployment_ids = ' + json.dumps(grants) + '\n'
-        peers = root / 'peers.json' 
+        peers = root / 'peers.json'
         write_private(peers, {fingerprints['a']: {'node_id': 'a', 'apps': {'apple-example': 'apple-example'}, 'exports': list(OPERATIONS)}})
         configs['b'] += f'\n[node_server]\nnode_id = "b"\nbind = "127.0.0.1:{node_port}"\npeers_file = "{peers}"\nmax_active = 2\n[node_server.tls]\n{tls_config(root, "b")}\n'
         for op in OPERATIONS:
