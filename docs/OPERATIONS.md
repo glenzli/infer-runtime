@@ -359,6 +359,17 @@ SAM worker 使用 owner-only Python 3.12 venv 和
 fail closed 为 `sam_model_not_prepared`。Console/readiness 会显示“需要准备”，不能把分钟级编译
 或 specialization 隐藏到首个 Consumer 请求。缓存是派生物，不得写回不可变 ArtifactStore。
 
+系统或 Python/Core ML Tools 升级后，先核验已登记的 source artifact，再按上述命令显式准备
+当前宿主缓存。随后用同一 worker、cache root 和 artifact identity 执行 `--verify-model`；
+通过后，确认没有活跃 Job/reservation，通过拥有 daemon 的 Console 重启并读取 provider
+readiness，最后做一次真实软蒙版请求及同图第二次请求。旧宿主缓存可以保留，不需要删除权重。
+启动探测超时与缓存失配是独立证据：当前 `sam_model_not_prepared` 不能解释历史 timeout，
+也不能把 `/health` 或能力目录正常当作已恢复推理。
+
+大型 artifact 的完整性检查发生在 daemon 监听前。若开发构建长期停留在这一阶段，先采样确认
+耗时位置；本机运维可构建当前源码的优化版 `infer`/`inferd`，经原 Console 停止后，由新 Console
+用 `--daemon-bin` 指向该优化版启动。保留 Console ownership，不能另起一个 daemon 抢占服务。
+
 当前 macOS 实测默认固定 `runtimes.coreml_sam.compute_units = "cpu_and_gpu"`。同一已编译
 SAM 2.1 Small 使用 `coreml_all` 时触发 405–539 秒的异常 ANE 首请求；`cpu_and_gpu` 的正式
 HTTP cold 为 1.26 秒，同图第二次点击因 image embedding cache 为 48.5 ms。改变 compute

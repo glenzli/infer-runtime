@@ -743,28 +743,6 @@ status = "provisional"
 level = "capable"
 status = "provisional"
 
-# Example registration for a QAT Q4_0 artifact behind a Runtime-owned 8K
-# Ollama alias. Keep vision, tools, and thinking out of the Build until those
-# independent execution contracts have been validated.
-[model_profiles.gemma4_26b_a4b]
-family = "gemma4"
-
-[model_profiles.gemma4_26b_a4b.ratings."text.summarize"]
-level = "advanced"
-status = "provisional"
-
-[model_profiles.gemma4_26b_a4b.ratings."text.proofread"]
-level = "advanced"
-status = "provisional"
-
-[model_profiles.gemma4_26b_a4b.ratings."language.respond"]
-level = "capable"
-status = "provisional"
-
-[model_profiles.gemma4_26b_a4b.ratings."reasoning.solve"]
-level = "capable"
-status = "provisional"
-
 # Cloud ratings are deliberately provisional until the runtime's own
 # workload-specific evaluation suite replaces these initial registrations.
 [model_profiles.deepseek_v4_flash]
@@ -1337,20 +1315,6 @@ source_kind = "provider_managed"
 upstream = "ollama:qwen3-vl:8b"
 
 [model_builds.qwen3_vl_8b.license]
-status = "unreviewed"
-
-[model_builds.gemma4_26b_a4b_qat_q4_0_8k]
-profile = "gemma4_26b_a4b"
-model_id = "infer-gemma4:26b-a4b-it-qat-8k"
-variant = "qat-q4_0-gguf-8k"
-input_modalities = ["text"]
-output_modalities = ["text"]
-
-[model_builds.gemma4_26b_a4b_qat_q4_0_8k.provenance]
-source_kind = "provider_managed"
-upstream = "ollama:infer-gemma4:26b-a4b-it-qat-8k"
-
-[model_builds.gemma4_26b_a4b_qat_q4_0_8k.license]
 status = "unreviewed"
 
 [model_builds.deepseek_v4_flash]
@@ -2067,14 +2031,6 @@ supported_execution_modes = ["unary", "server_stream"]
 provider = "ollama-local"
 build = "qwen3_vl_8b"
 resource_class = "heavy"
-estimated_cost_usd = 0.0
-supported_execution_modes = ["unary", "server_stream"]
-
-[deployments.ollama_gemma4_26b_a4b_qat]
-provider = "ollama-local"
-build = "gemma4_26b_a4b_qat_q4_0_8k"
-resource_class = "heavy"
-supported_efforts = ["none"]
 estimated_cost_usd = 0.0
 supported_execution_modes = ["unary", "server_stream"]
 

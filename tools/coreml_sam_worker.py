@@ -240,10 +240,13 @@ def _prompt_arrays(request: dict) -> tuple[np.ndarray, np.ndarray]:
     if box is not None:
         if set(box) != {"x", "y", "width", "height"}:
             raise StableWorkerError("sam_invalid_request")
-        x = float(box["x"])
-        y = float(box["y"])
-        width = float(box["width"])
-        height = float(box["height"])
+        # The public rectangle and Rust validation use f32. Shortest-decimal
+        # JSON round trips can put an edge slightly beyond 1 in float64 even
+        # though its f32 sum is exactly 1. Keep the same arithmetic contract.
+        x = np.float32(box["x"])
+        y = np.float32(box["y"])
+        width = np.float32(box["width"])
+        height = np.float32(box["height"])
         if (
             not all(np.isfinite(value) for value in (x, y, width, height))
             or x < 0
