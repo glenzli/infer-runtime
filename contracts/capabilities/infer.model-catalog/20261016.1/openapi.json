@@ -1,0 +1,144 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.model-catalog",
+    "version": "20261016.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.model-catalog@20261016.1",
+  "paths": {
+    "/infer/v1/model-catalog": {
+      "get": {
+        "operationId": "consumerModelCatalog",
+        "description": "Lists only named unary text routes granted to the authenticated App. Observation is not admission or an inference readiness guarantee. No provider-native inventory or account metadata.",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized text deployment catalog",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "deployments"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "deployments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "deployment_id",
+                          "model_profile",
+                          "provider_access_class",
+                          "placement",
+                          "supported_efforts",
+                          "intents",
+                          "availability",
+                          "observation_stale"
+                        ],
+                        "properties": {
+                          "deployment_id": {
+                            "type": "string"
+                          },
+                          "model_profile": {
+                            "type": "string"
+                          },
+                          "provider_access_class": {
+                            "type": "string",
+                            "enum": [
+                              "standard",
+                              "subscription"
+                            ]
+                          },
+                          "placement": {
+                            "type": "string",
+                            "enum": [
+                              "local",
+                              "trusted_node",
+                              "cloud"
+                            ]
+                          },
+                          "supported_efforts": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": [
+                                "none",
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max",
+                                "ultra"
+                              ]
+                            }
+                          },
+                          "intents": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "string",
+                              "enum": [
+                                "foundational",
+                                "capable",
+                                "advanced",
+                                "exceptional"
+                              ]
+                            }
+                          },
+                          "availability": {
+                            "type": "string",
+                            "enum": [
+                              "available",
+                              "unavailable",
+                              "unknown"
+                            ]
+                          },
+                          "observation_stale": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid credential"
+          },
+          "403": {
+            "description": "Observer-only identity"
+          },
+          "426": {
+            "description": "Unsupported contract"
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ModelCatalogCapability"
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "ModelCatalogCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.model-catalog@20261016.1"
+        }
+      }
+    }
+  }
+}

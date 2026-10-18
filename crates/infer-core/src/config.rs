@@ -601,6 +601,7 @@ string_enum!(ProviderKind {
     CodexAppServer => "codex_app_server",
     AudioWorker => "audio_worker",
     RetrievalWorker => "retrieval_worker",
+    MediaEmbeddingWorker => "media_embedding_worker",
     OcrWorker => "ocr_worker",
     CoremlWorker => "coreml_worker",
     Onnx => "onnx",
@@ -616,6 +617,7 @@ impl std::fmt::Display for ProviderKind {
             Self::CodexAppServer => "codex_app_server",
             Self::AudioWorker => "audio_worker",
             Self::RetrievalWorker => "retrieval_worker",
+            Self::MediaEmbeddingWorker => "media_embedding_worker",
             Self::OcrWorker => "ocr_worker",
             Self::CoremlWorker => "coreml_worker",
             Self::Onnx => "onnx",
@@ -942,6 +944,7 @@ pub struct AudioEventModelBuildConfig {
 
 string_enum!(LocalWorkerAdapterKind {
     Qwen3Embedding => "qwen3_embedding",
+    EmbeddingGemma2 => "embedding_gemma2",
     Qwen3Reranker => "qwen3_reranker",
     PpOcrv6 => "pp_ocrv6",
     YamnetAudioEvents => "yamnet_audio_events",
@@ -953,6 +956,7 @@ impl std::fmt::Display for LocalWorkerAdapterKind {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(match self {
             Self::Qwen3Embedding => "qwen3_embedding",
+            Self::EmbeddingGemma2 => "embedding_gemma2",
             Self::Qwen3Reranker => "qwen3_reranker",
             Self::PpOcrv6 => "pp_ocrv6",
             Self::YamnetAudioEvents => "yamnet_audio_events",
@@ -1474,6 +1478,11 @@ impl RuntimeConfig {
             if provider.kind == ProviderKind::AppleImage && provider.placement != Placement::Local {
                 return Err(configuration("Apple image worker must execute locally"));
             }
+            if provider.kind == ProviderKind::MediaEmbeddingWorker
+                && provider.placement != Placement::Local
+            {
+                return Err(configuration("media embedding worker must execute locally"));
+            }
             match provider.kind {
                 ProviderKind::Responses
                     if provider.base_url.as_deref().is_none_or(str::is_empty) =>
@@ -1483,6 +1492,7 @@ impl RuntimeConfig {
                 ProviderKind::AppleImage
                 | ProviderKind::AudioWorker
                 | ProviderKind::RetrievalWorker
+                | ProviderKind::MediaEmbeddingWorker
                 | ProviderKind::OcrWorker
                 | ProviderKind::CoremlWorker
                     if provider.command.as_deref().is_none_or(str::is_empty) =>
@@ -1506,6 +1516,7 @@ impl RuntimeConfig {
                 ProviderKind::CodexAppServer => ProviderProtocol::CodexAppServer,
                 ProviderKind::AudioWorker => ProviderProtocol::AudioWorker,
                 ProviderKind::RetrievalWorker => ProviderProtocol::RetrievalWorker,
+                ProviderKind::MediaEmbeddingWorker => ProviderProtocol::MediaEmbeddingWorker,
                 ProviderKind::OcrWorker => ProviderProtocol::OcrWorker,
                 ProviderKind::CoremlWorker => ProviderProtocol::CoremlWorker,
                 ProviderKind::Onnx => ProviderProtocol::Onnx,
@@ -1547,6 +1558,7 @@ impl RuntimeConfig {
                 ProviderProtocol::AppleImage
                     | ProviderProtocol::AudioWorker
                     | ProviderProtocol::RetrievalWorker
+                    | ProviderProtocol::MediaEmbeddingWorker
                     | ProviderProtocol::OcrWorker
                     | ProviderProtocol::CoremlWorker
                     | ProviderProtocol::Onnx
@@ -1583,9 +1595,12 @@ impl RuntimeConfig {
                 )));
             }
             if let Some(ffmpeg) = &provider.runtime_dependencies.ffmpeg {
-                if provider.kind != ProviderKind::AudioWorker {
+                if !matches!(
+                    provider.kind,
+                    ProviderKind::AudioWorker | ProviderKind::MediaEmbeddingWorker
+                ) {
                     return Err(configuration(format!(
-                        "provider {id} may declare the ffmpeg runtime dependency only for an audio_worker"
+                        "provider {id} may declare the ffmpeg runtime dependency only for an audio or media embedding worker"
                     )));
                 }
                 if ffmpeg.trim().is_empty() || ffmpeg.contains('\0') {
@@ -1756,6 +1771,7 @@ impl RuntimeConfig {
                         | "vision.image_description"
                         | "vision.classification_review"
                         | "text.embedding"
+                        | "media.embedding"
                         | "text.rerank"
                         | "document.ocr"
                         | "agent.task"
@@ -2081,6 +2097,7 @@ impl RuntimeConfig {
             let worker_provider = matches!(
                 provider.kind,
                 ProviderKind::RetrievalWorker
+                    | ProviderKind::MediaEmbeddingWorker
                     | ProviderKind::OcrWorker
                     | ProviderKind::CoremlWorker
             ) || (provider.kind == ProviderKind::AudioWorker
@@ -2105,6 +2122,10 @@ impl RuntimeConfig {
                         LocalWorkerAdapterKind::Qwen3Embedding
                             | LocalWorkerAdapterKind::Qwen3Reranker
                     ) | (ProviderKind::OcrWorker, LocalWorkerAdapterKind::PpOcrv6)
+                        | (
+                            ProviderKind::MediaEmbeddingWorker,
+                            LocalWorkerAdapterKind::EmbeddingGemma2
+                        )
                         | (
                             ProviderKind::AudioWorker,
                             LocalWorkerAdapterKind::YamnetAudioEvents
@@ -2522,6 +2543,9 @@ fn provider_serves_data_plane(provider: &ProviderConfig, data_plane: &str) -> bo
         }
         ProviderKind::AudioWorker => data_plane.starts_with("audio."),
         ProviderKind::RetrievalWorker => matches!(data_plane, "text.embedding" | "text.rerank"),
+        ProviderKind::MediaEmbeddingWorker => {
+            provider.placement == Placement::Local && data_plane == "media.embedding"
+        }
         ProviderKind::OcrWorker => data_plane == "document.ocr",
         ProviderKind::CoremlWorker => data_plane == "vision.subject_segmentation",
         ProviderKind::Onnx => {
@@ -2584,6 +2608,38 @@ fn validate_build_supply_chain(id: &str, build: &ModelBuildConfig) -> Result<(),
             )));
         }
         match worker.adapter {
+            LocalWorkerAdapterKind::EmbeddingGemma2 => {
+                let valid_space = worker.embedding_space.as_ref().is_some_and(|space| {
+                    !space.identity.trim().is_empty()
+                        && space.dimensions == 768
+                        && space.normalized
+                        && space.distance_metric == "cosine"
+                });
+                if !valid_space
+                    || worker.runtime != "mlx-vlm@3d87e884+mlx0.32.3+transformers@e880ddc5:metal"
+                    || worker.precision != "bf16"
+                    || worker.preprocessing_identity.as_deref() != Some(crate::MEDIA_PREPROCESSING)
+                    || worker.postprocessing_identity != "embeddinggemma2-mean-project-l2-fp32-v1"
+                    || worker.instruction_revision.as_deref()
+                        != Some(crate::MEDIA_QUERY_INSTRUCTION)
+                    || worker
+                        .tokenizer_identity
+                        .as_deref()
+                        .is_none_or(str::is_empty)
+                    || worker.audio_text_query_normalizer.is_some()
+                    || build.input_modalities
+                        != vec![
+                            Modality::Text,
+                            Modality::Image,
+                            Modality::Audio,
+                            Modality::Video,
+                        ]
+                {
+                    return Err(configuration(format!(
+                        "EmbeddingGemma 2 build {id} requires its pinned BF16 Metal runtime, four modalities and 768d normalized cosine space"
+                    )));
+                }
+            }
             LocalWorkerAdapterKind::Qwen3Embedding => {
                 if worker.embedding_space.is_none()
                     || worker
@@ -3232,7 +3288,7 @@ mod tests {
     }
 
     #[test]
-    fn tracked_shape_fixture_freezes_the_minimum_text_edit_and_tts_grants() {
+    fn tracked_shape_fixture_freezes_explicit_text_speech_and_media_grants() {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../config/infer.example.toml");
         let config = RuntimeConfig::load(path).unwrap();
@@ -3251,13 +3307,26 @@ mod tests {
         let app = &config.apps["example-shape-consumer"];
         assert_eq!(
             app.allowed_intents.as_deref(),
-            Some(&["text.edit".into(), "speech.synthesize".into()][..])
+            Some(
+                &[
+                    "text.edit".into(),
+                    "speech.synthesize".into(),
+                    "image.generate".into(),
+                    "audio.generate_sound".into()
+                ][..]
+            )
         );
         assert_eq!(
             app.allowed_provider_access_classes,
-            BTreeSet::from([crate::ProviderAccessClass::Standard])
+            BTreeSet::from([
+                crate::ProviderAccessClass::Standard,
+                crate::ProviderAccessClass::Subscription
+            ])
         );
-        assert!(app.allowed_cloud_input_modalities.is_empty());
+        assert_eq!(
+            app.allowed_cloud_input_modalities,
+            BTreeSet::from([crate::Modality::Text])
+        );
         assert!(app.allowed_builtin_tools.is_empty());
         assert_eq!(
             app.request_overrides.capability_floor,
@@ -3278,6 +3347,11 @@ mod tests {
             BTreeSet::from(["ollama_qwen3_5_4b".into()])
         );
         assert!(edit.model_profile_ids.is_empty());
+        assert_eq!(
+            edit.named_deployment_ids,
+            BTreeSet::from(["codex_gpt_6_luna".into(), "codex_gpt_6_sol".into()])
+        );
+        assert!(!edit.allows_named_deployment("codex_gpt_6_1_sol", "codex_gpt_6_1_sol"));
         let speech = app.routing.as_ref().unwrap().grant_for("speech.synthesize");
         assert_eq!(
             speech.deployment_ids,
@@ -3656,6 +3730,41 @@ supported_execution_modes = ["unary"]
         assert!(!provider_serves_data_plane(onnx, "audio.transcription"));
         assert!(provider_serves_data_plane(raw, "raw.foundation"));
         assert!(!provider_serves_data_plane(raw, "vision.image_embedding"));
+    }
+
+    #[test]
+    fn optional_media_rejects_unsafe_precision_and_cloud_placement() {
+        let mut config: RuntimeConfig =
+            toml::from_str(include_str!("../../../config/infer.example.toml")).unwrap();
+        config.validate().unwrap();
+        assert!(
+            !config.model_profiles["embeddinggemma2"]
+                .ratings
+                .contains_key("semantic.embed_query")
+        );
+        config
+            .model_builds
+            .get_mut("embeddinggemma2_bf16_mlx_1a4ffddb")
+            .unwrap()
+            .local_worker
+            .as_mut()
+            .unwrap()
+            .precision = "fp16".into();
+        assert!(config.validate().is_err());
+        config
+            .model_builds
+            .get_mut("embeddinggemma2_bf16_mlx_1a4ffddb")
+            .unwrap()
+            .local_worker
+            .as_mut()
+            .unwrap()
+            .precision = "bf16".into();
+        config
+            .providers
+            .get_mut("embeddinggemma2-local")
+            .unwrap()
+            .placement = super::Placement::Cloud;
+        assert!(config.validate().is_err());
     }
 
     #[test]

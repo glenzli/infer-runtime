@@ -30,6 +30,8 @@
     "contracts/capabilities/infer.vision.text-embedding/20260811.1/openapi.json": "b1bc536f7ded5f1397c739c2b1a282d460ff4b59923fb4f6fd3c564a8627be71",
     "contracts/consumer-core/20260813.1/openapi.json": "08dcb1cc800b3eb5a8f63d45e8767404a40e8d36d7be391f5e7dd73c085f5801",
     "contracts/capabilities/infer.vision.apple-native/20260926.1/openapi.json": "38d311aed57823caaf52b93f8ba0873b9c1aec49be3e57685eab21a407736ce9",
-    "contracts/capabilities/infer.vision.apple-native/20260926.2/openapi.json": "b5f381c4d7b16bd53c3884b8f21c2417756e0b95d2ab4eeb94c5efe302f43ade"
+    "contracts/capabilities/infer.vision.apple-native/20260926.2/openapi.json": "b5f381c4d7b16bd53c3884b8f21c2417756e0b95d2ab4eeb94c5efe302f43ade",
+    "contracts/capabilities/infer.media.embedding/20261013.1/openapi.json": "692fefb6b44d089e776963ff5470652bb67936648d30771f7b364df6042dab1d",
+    "contracts/capabilities/infer.model-catalog/20261016.1/openapi.json": "bcf9c70f6a708731e9655f135052b0dfe8cbf0b828c78b9c001e89c2c8f6cc32"
   }
 }

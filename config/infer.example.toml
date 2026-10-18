@@ -2427,3 +2427,147 @@ model_profile_ids = []
 [apps.echo.routing.intents."text.edit"]
 deployment_ids = ["ollama_qwen3_5_4b"]
 model_profile_ids = []
+
+# Optional unified media retrieval. Qwen3 retains its existing text intents.
+# Install the pinned isolated runtime and exact Build before enabling locally.
+[providers.embeddinggemma2-local]
+kind = "media_embedding_worker"
+command = ".infer-runtime/runtimes/embeddinggemma2/bin/python"
+args = ["workers/embeddinggemma2_worker.py"]
+placement = "local"
+max_concurrency = 1
+max_queue = 16
+priority_aging_ms = 10000
+
+[providers.embeddinggemma2-local.runtime_dependencies]
+ffmpeg = "ffmpeg"
+
+[providers.embeddinggemma2-local.capability_profile]
+version = 1
+protocol = "media_embedding_worker"
+
+[intents."semantic.media_query"]
+data_plane = "media.embedding"
+input_modalities = ["text"]
+output_modalities = ["json"]
+required_features = ["embeddinggemma2_unified_768d"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[intents."semantic.media_image"]
+data_plane = "media.embedding"
+input_modalities = ["image"]
+output_modalities = ["json"]
+required_features = ["embeddinggemma2_unified_768d"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[intents."semantic.media_audio"]
+data_plane = "media.embedding"
+input_modalities = ["audio"]
+output_modalities = ["json"]
+required_features = ["embeddinggemma2_unified_768d"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[intents."semantic.media_video"]
+data_plane = "media.embedding"
+input_modalities = ["video"]
+output_modalities = ["json"]
+required_features = ["embeddinggemma2_unified_768d"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[model_profiles.embeddinggemma2]
+family = "embeddinggemma2"
+
+[model_profiles.embeddinggemma2.ratings."semantic.media_query"]
+level = "foundational"
+status = "provisional"
+eval_profile = "operator_real_media_eval_required"
+
+[model_profiles.embeddinggemma2.ratings."semantic.media_image"]
+level = "foundational"
+status = "provisional"
+eval_profile = "operator_real_media_eval_required"
+
+[model_profiles.embeddinggemma2.ratings."semantic.media_audio"]
+level = "foundational"
+status = "provisional"
+eval_profile = "operator_real_media_eval_required"
+
+[model_profiles.embeddinggemma2.ratings."semantic.media_video"]
+level = "foundational"
+status = "provisional"
+eval_profile = "operator_real_media_eval_required"
+
+[model_builds.embeddinggemma2_bf16_mlx_1a4ffddb]
+profile = "embeddinggemma2"
+model_id = "embeddinggemma2_bf16_mlx_1a4ffddb"
+variant = "mlx-bf16"
+context_window = 8192
+input_modalities = ["text", "image", "audio", "video"]
+output_modalities = ["json"]
+features = ["embeddinggemma2_unified_768d", "multilingual_text", "cross_modal_retrieval"]
+
+[model_builds.embeddinggemma2_bf16_mlx_1a4ffddb.provenance]
+source_kind = "runtime_downloadable"
+upstream = "https://huggingface.co/mlx-community/embeddinggemma-2-bf16"
+source_revision = "1a4ffddb7905d3f63486748deabe091a01fb6201"
+artifact_sha256 = "b61556c9a6fc78532be5d55753b3e31d4619d2877a0071268e4a6e7870e71ea2"
+
+[model_builds.embeddinggemma2_bf16_mlx_1a4ffddb.license]
+status = "declared"
+expression = "Apache-2.0"
+license_url = "https://ai.google.dev/gemma/docs/embeddinggemma/model_card_2"
+reviewed_at = "2026-10-13"
+
+[model_builds.embeddinggemma2_bf16_mlx_1a4ffddb.local_worker]
+adapter = "embedding_gemma2"
+artifact_set_sha256 = "b61556c9a6fc78532be5d55753b3e31d4619d2877a0071268e4a6e7870e71ea2"
+runtime = "mlx-vlm@3d87e884+mlx0.32.3+transformers@e880ddc5:metal"
+precision = "bf16"
+postprocessing_identity = "embeddinggemma2-mean-project-l2-fp32-v1"
+tokenizer_identity = "embeddinggemma2-tokenizer@4d777ef5bdc1aa36"
+instruction_revision = "embeddinggemma2-search-query-v1"
+preprocessing_identity = "embeddinggemma2-processor@e880ddc5:image-rgb:audio-mono16k-max30s:video-visual1fps-max16s-16frames:v1"
+requested_execution_provider = "metal"
+actual_execution_provider = "metal"
+embedding_space = { identity = "embeddinggemma2@1a4ffddb:mlx@3d87e884:processor@e880ddc5:media-v1:bf16:l2_768_fp32:v1", dimensions = 768, normalized = true, distance_metric = "cosine" }
+
+[deployments.embeddinggemma2_bf16_local]
+provider = "embeddinggemma2-local"
+build = "embeddinggemma2_bf16_mlx_1a4ffddb"
+resource_class = "heavy"
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary"]
+
+# Newly discovered models require explicit deployment admission and App grants.
+# Text-only admission; ratings are provisional until independently evaluated.
+[model_profiles.codex_gpt_6_1_sol]
+family = "gpt-6.1"
+[model_profiles.codex_gpt_6_1_sol.ratings."language.respond"]
+level = "exceptional"
+status = "provisional"
+[model_profiles.codex_gpt_6_1_sol.ratings."reasoning.solve"]
+level = "exceptional"
+status = "provisional"
+[model_builds.codex_gpt_6_1_sol_subscription]
+profile = "codex_gpt_6_1_sol"
+model_id = "gpt-6.1-sol"
+variant = "codex-subscription"
+input_modalities = ["text"]
+output_modalities = ["text"]
+features = ["reasoning"]
+[model_builds.codex_gpt_6_1_sol_subscription.provenance]
+source_kind = "provider_managed"
+upstream = "codex-subscription:gpt-6.1-sol"
+[model_builds.codex_gpt_6_1_sol_subscription.license]
+status = "unreviewed"
+[deployments.codex_gpt_6_1_sol]
+provider = "codex-subscription"
+build = "codex_gpt_6_1_sol_subscription"
+resource_class = "standard"
+supported_efforts = ["low", "medium", "high", "xhigh", "max", "ultra"]
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary"]

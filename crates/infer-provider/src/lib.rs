@@ -8,12 +8,17 @@ mod audio_stream;
 mod audio_worker;
 mod codex_app_server;
 mod coreml_sam;
+mod media_embedding_worker;
 mod ocr_worker;
 mod ollama_vision;
 mod onnx;
 mod probe;
 mod runtime_dependency;
 mod text_retrieval_worker;
+pub use media_embedding_worker::{
+    DynMediaEmbeddingExecutor, MediaBuildContract, MediaEmbeddingExecutionOutput,
+    MediaEmbeddingExecutor, MediaEmbeddingWorkerExecutor, verify_media_worker,
+};
 
 use std::{pin::Pin, sync::Arc, time::Duration};
 

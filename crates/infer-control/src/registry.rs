@@ -1189,20 +1189,17 @@ mod tests {
             .get_mut("deepseek-cloud")
             .unwrap()
             .api_key_env = Some("INFER_RUNTIME_TEST_UNSET_DEEPSEEK_KEY".into());
-        let local_without_credential = select_candidate(
+        let without_credential = select_candidate(
             &config,
             "language.respond",
             config.intent("language.respond").unwrap(),
             &config.profiles["balanced"],
             &RequestConstraints::default(),
             None,
-        )
-        .unwrap();
-        assert_eq!(local_without_credential.placement, Placement::Local);
-        assert_ne!(
-            config.deployments[&local_without_credential.deployment_id].provider,
-            "deepseek-cloud"
         );
+        // The retired local Gemma build must not be silently restored or
+        // replaced by a model below language.respond's capability floor.
+        assert!(without_credential.is_none());
 
         config
             .providers
@@ -1233,13 +1230,8 @@ mod tests {
                 ..Default::default()
             },
             None,
-        )
-        .unwrap();
-        assert_eq!(local.placement, Placement::Local);
-        assert_ne!(
-            config.deployments[&local.deployment_id].provider,
-            "deepseek-cloud"
         );
+        assert!(local.is_none());
     }
 
     #[test]
@@ -1288,11 +1280,13 @@ mod tests {
                 "codex_gpt_5_6_terra",
                 "codex_gpt_6_luna",
                 "codex_gpt_6_sol",
+                "codex_gpt_6_1_sol",
             ])
         );
         for (deployment, model, ultra) in [
             ("codex_gpt_6_luna", "gpt-6-luna", false),
             ("codex_gpt_6_sol", "gpt-6-sol", true),
+            ("codex_gpt_6_1_sol", "gpt-6.1-sol", true),
         ] {
             let configured = &config.deployments[deployment];
             assert_eq!(config.model_builds[&configured.build].model_id, model);
@@ -1588,8 +1582,14 @@ mod tests {
                 unavailable_deployments: &empty,
             },
         );
-        assert_eq!(admitted.candidates.len(), 1);
-        assert_eq!(admitted.candidates[0].deployment_id, "codex_gpt_5_6_luna");
+        assert_eq!(
+            admitted
+                .candidates
+                .iter()
+                .map(|candidate| candidate.deployment_id.as_str())
+                .collect::<BTreeSet<_>>(),
+            BTreeSet::from(["codex_gpt_5_6_luna", "codex_gpt_6_luna", "codex_gpt_6_sol"])
+        );
     }
 
     #[test]

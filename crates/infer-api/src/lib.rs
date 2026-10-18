@@ -5,6 +5,8 @@ mod apple_image;
 mod audio_streaming;
 pub mod contract;
 mod image_understanding;
+mod media_embedding;
+mod model_catalog;
 mod observer;
 mod ocr;
 pub mod raw_foundation;
@@ -17,6 +19,8 @@ mod agent_task_tests;
 mod audio_contract_tests;
 #[cfg(test)]
 mod contract_tests;
+#[cfg(test)]
+mod media_embedding_tests;
 #[cfg(test)]
 mod observer_tests;
 #[cfg(test)]
@@ -88,6 +92,7 @@ fn base_router(runtime: Arc<Runtime>) -> Router {
         .route("/health", get(health))
         .route("/infer/v1/contract", get(get_contract))
         .route("/infer/v1/capabilities", get(get_capabilities))
+        .route("/infer/v1/model-catalog", get(model_catalog::get))
         .route("/infer/v1/openapi.json", get(get_openapi))
         .route(
             "/infer/v1/capability-schemas/{capability_id}/{version}/openapi.json",
@@ -171,6 +176,22 @@ fn base_router(runtime: Arc<Runtime>) -> Router {
             post(retrieval::create_document_embeddings),
         )
         .route("/infer/v1/text/rerank", post(retrieval::create_rerank))
+        .route(
+            "/infer/v1/media/query-embeddings",
+            post(media_embedding::create_query),
+        )
+        .route(
+            "/infer/v1/media/image-embeddings",
+            post(media_embedding::create_image),
+        )
+        .route(
+            "/infer/v1/media/audio-embeddings",
+            post(media_embedding::create_audio),
+        )
+        .route(
+            "/infer/v1/media/video-embeddings",
+            post(media_embedding::create_video),
+        )
         .route("/infer/v1/documents/ocr", post(ocr::create_document_ocr))
         .route("/infer/v1/agent/tasks", post(agent_task::create_agent_task))
         .route("/infer/v1/jobs", get(get_jobs))
@@ -270,6 +291,7 @@ async fn enforce_consumer_contract(request: Request, next: Next) -> axum::respon
 fn requires_consumer_contract(path: &str) -> bool {
     path == "/infer/v1/contract"
         || path == "/infer/v1/capabilities"
+        || path == "/infer/v1/model-catalog"
         || path == "/v1/responses"
         || path.starts_with("/v1/responses/")
         || path.starts_with("/v1/audio/")
@@ -278,6 +300,7 @@ fn requires_consumer_contract(path: &str) -> bool {
         || path.starts_with("/infer/v1/explain/")
         || path.starts_with("/infer/v1/vision/")
         || path.starts_with("/infer/v1/text/")
+        || path.starts_with("/infer/v1/media/")
         || path.starts_with("/infer/v1/documents/")
         || path.starts_with("/infer/v1/agent/")
         || path.starts_with("/infer/v1/raw/")
@@ -358,6 +381,7 @@ fn is_polling_endpoint(path: &str) -> bool {
         "/health"
             | "/infer/v1/contract"
             | "/infer/v1/capabilities"
+            | "/infer/v1/model-catalog"
             | "/infer/v1/observer/snapshot"
             | "/infer/v1/metrics"
             | "/infer/v1/telemetry"

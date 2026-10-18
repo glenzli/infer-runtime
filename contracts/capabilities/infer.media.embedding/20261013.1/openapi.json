@@ -1,0 +1,483 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Infer Runtime capability infer.media.embedding",
+    "version": "20261013.1",
+    "description": "Immutable capability-scoped wire schema. Authentication and Consumer Core negotiation are inherited from the Core contract."
+  },
+  "x-infer-capability-contract": "infer.media.embedding@20261013.1",
+  "paths": {
+    "/infer/v1/media/query-embeddings": {
+      "post": {
+        "operationId": "create_media_query_embedding",
+        "description": "SearchQuery task prefix; encoded in the media index space. Text at most 16 KiB and 8192 tokens.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MediaQueryEmbeddingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One finite L2-normalized 768-dimensional vector with exact space and processing provenance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaEmbeddingResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MediaEmbeddingCapability"
+          }
+        ],
+        "x-infer-stability": "experimental"
+      }
+    },
+    "/infer/v1/media/image-embeddings": {
+      "post": {
+        "operationId": "create_media_image_embedding",
+        "description": "JPEG/PNG normalized display pixels, at most 16 megapixels.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/MediaImageEmbeddingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One finite L2-normalized 768-dimensional vector with exact space and processing provenance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaEmbeddingResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MediaEmbeddingCapability"
+          }
+        ],
+        "x-infer-stability": "experimental"
+      }
+    },
+    "/infer/v1/media/audio-embeddings": {
+      "post": {
+        "operationId": "create_media_audio_embedding",
+        "description": "Natural audio decoded to mono 16 kHz FP32, at most 30 seconds. Unknown duration is rejected.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/MediaAudioEmbeddingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One finite L2-normalized 768-dimensional vector with exact space and processing provenance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaEmbeddingResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MediaEmbeddingCapability"
+          }
+        ],
+        "x-infer-stability": "experimental"
+      }
+    },
+    "/infer/v1/media/video-embeddings": {
+      "post": {
+        "operationId": "create_media_video_embedding",
+        "description": "Video up to 16 seconds. Visual frames only: 1 fps, at most 16 frames; no soundtrack embedding or implicit truncation.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/MediaVideoEmbeddingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "One finite L2-normalized 768-dimensional vector with exact space and processing provenance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MediaEmbeddingResponse"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/MediaEmbeddingCapability"
+          }
+        ],
+        "x-infer-stability": "experimental"
+      }
+    }
+  },
+  "components": {
+    "parameters": {
+      "MediaEmbeddingCapability": {
+        "name": "Infer-Capability-Contract",
+        "in": "header",
+        "required": true,
+        "schema": {
+          "const": "infer.media.embedding@20261013.1"
+        }
+      }
+    },
+    "schemas": {
+      "MediaAudioEmbeddingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model",
+          "source_revision",
+          "file"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "description": "One file, at most 25 MiB. No URL, path or tensor input."
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON string map"
+          }
+        }
+      },
+      "MediaEmbeddingProcessing": {
+        "type": "object",
+        "required": [
+          "input_tokens",
+          "video_audio_included"
+        ],
+        "properties": {
+          "input_tokens": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8192
+          },
+          "decoded_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 30
+          },
+          "video_frames": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16
+          },
+          "video_audio_included": {
+            "const": false
+          }
+        }
+      },
+      "MediaEmbeddingProvenance": {
+        "type": "object",
+        "required": [
+          "job_id",
+          "provider",
+          "deployment",
+          "model_build",
+          "model_revision",
+          "artifact_set_sha256",
+          "runtime",
+          "precision",
+          "preprocessing_identity",
+          "postprocessing_identity",
+          "tokenizer_identity",
+          "instruction_revision"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "provider": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "deployment": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "model_build": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "model_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "artifact_set_sha256": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "runtime": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "precision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "preprocessing_identity": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "postprocessing_identity": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "tokenizer_identity": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "instruction_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          }
+        }
+      },
+      "MediaEmbeddingResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "object",
+          "created_at",
+          "model",
+          "input_kind",
+          "input_revision",
+          "embedding",
+          "embedding_space",
+          "processing",
+          "provenance"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "object": {
+            "const": "media.embedding"
+          },
+          "created_at": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "input_kind": {
+            "enum": [
+              "text",
+              "image",
+              "audio",
+              "video"
+            ]
+          },
+          "input_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "embedding": {
+            "type": "array",
+            "minItems": 768,
+            "maxItems": 768,
+            "items": {
+              "type": "number"
+            }
+          },
+          "embedding_space": {
+            "$ref": "#/components/schemas/MediaEmbeddingSpace"
+          },
+          "processing": {
+            "$ref": "#/components/schemas/MediaEmbeddingProcessing"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/MediaEmbeddingProvenance"
+          }
+        }
+      },
+      "MediaEmbeddingSpace": {
+        "type": "object",
+        "required": [
+          "identity",
+          "dimensions",
+          "normalized",
+          "distance_metric"
+        ],
+        "properties": {
+          "identity": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "dimensions": {
+            "const": 768
+          },
+          "normalized": {
+            "const": true
+          },
+          "distance_metric": {
+            "const": "cosine"
+          }
+        }
+      },
+      "MediaImageEmbeddingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model",
+          "source_revision",
+          "file",
+          "image_orientation"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "description": "One file, at most 25 MiB. No URL, path or tensor input."
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON string map"
+          },
+          "image_orientation": {
+            "const": "display_pixels_orientation_normalized"
+          }
+        }
+      },
+      "MediaQueryEmbeddingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model",
+          "text",
+          "query_revision"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16384
+          },
+          "query_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Placement, offline and no-fallback constraints are forced by the server."
+          }
+        }
+      },
+      "MediaVideoEmbeddingRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "model",
+          "source_revision",
+          "file"
+        ],
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "source_revision": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "description": "One file, at most 25 MiB. No URL, path or tensor input."
+          },
+          "metadata": {
+            "type": "string",
+            "description": "JSON string map"
+          }
+        }
+      }
+    }
+  }
+}

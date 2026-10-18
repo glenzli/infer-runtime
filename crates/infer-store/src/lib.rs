@@ -1670,8 +1670,8 @@ mod tests {
         assert_eq!(
             connection
                 .query_row(
-                    "SELECT COUNT(*) FROM schema_migrations WHERE version = 8",
-                    [],
+                    "SELECT COUNT(*) FROM schema_migrations WHERE version = ?1",
+                    params![SCHEMA_VERSION],
                     |row| row.get::<_, i64>(0),
                 )
                 .unwrap(),

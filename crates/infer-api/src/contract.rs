@@ -302,6 +302,12 @@ macro_rules! capability {
 }
 
 macro_rules! capability_schema_digest {
+    ("infer.model-catalog") => {
+        "bcf9c70f6a708731e9655f135052b0dfe8cbf0b828c78b9c001e89c2c8f6cc32"
+    };
+    ("infer.media.embedding") => {
+        "692fefb6b44d089e776963ff5470652bb67936648d30771f7b364df6042dab1d"
+    };
     ("infer.vision.apple-native") => {
         "b5f381c4d7b16bd53c3884b8f21c2417756e0b95d2ab4eeb94c5efe302f43ade"
     };
@@ -383,6 +389,23 @@ macro_rules! capability_schema_digest {
 }
 
 pub const CAPABILITIES: &[CapabilityEntry] = &[
+    capability!(
+        "infer.model-catalog",
+        "20261016.1",
+        "experimental",
+        [route!("GET", "/infer/v1/model-catalog")]
+    ),
+    capability!(
+        "infer.media.embedding",
+        "20261013.1",
+        "experimental",
+        [
+            route!("POST", "/infer/v1/media/query-embeddings", &["unary"]),
+            route!("POST", "/infer/v1/media/image-embeddings", &["unary"]),
+            route!("POST", "/infer/v1/media/audio-embeddings", &["unary"]),
+            route!("POST", "/infer/v1/media/video-embeddings", &["unary"]),
+        ]
+    ),
     capability!(
         "infer.vision.apple-native",
         "20260926.2",
@@ -619,6 +642,18 @@ pub const CAPABILITIES: &[CapabilityEntry] = &[
 ];
 
 pub fn required_capability_id(path: &str) -> Option<&'static str> {
+    if path == "/infer/v1/model-catalog" {
+        return Some("infer.model-catalog");
+    }
+    if matches!(
+        path,
+        "/infer/v1/media/query-embeddings"
+            | "/infer/v1/media/image-embeddings"
+            | "/infer/v1/media/audio-embeddings"
+            | "/infer/v1/media/video-embeddings"
+    ) {
+        return Some("infer.media.embedding");
+    }
     if path == "/infer/v1/vision/apple-images" {
         return Some("infer.vision.apple-native");
     }
@@ -850,7 +885,19 @@ mod tests {
         ))
         .unwrap();
         for capability in CAPABILITIES {
-            let source = if capability.id == "infer.vision.apple-native" {
+            let media_extension: Value = serde_json::from_str(include_str!(
+                "../../../contracts/schema-source/media-embedding-20261013.1.json"
+            ))
+            .unwrap();
+            let model_extension: Value = serde_json::from_str(include_str!(
+                "../../../contracts/schema-source/model-catalog-20261016.1.json"
+            ))
+            .unwrap();
+            let source = if capability.id == "infer.model-catalog" {
+                &model_extension
+            } else if capability.id == "infer.media.embedding" {
+                &media_extension
+            } else if capability.id == "infer.vision.apple-native" {
                 &apple_extension
             } else if capability.id == "infer.agent.task" {
                 &agent_extension

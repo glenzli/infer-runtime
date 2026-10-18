@@ -17,7 +17,13 @@ mod raw_foundation;
 mod responses;
 mod sound_prompt;
 pub use sound_prompt::{PreparedSoundPrompt, SOUND_PROMPT_RULES_REVISION};
+mod media_embedding;
 mod retrieval;
+pub use media_embedding::{
+    MEDIA_EMBEDDING_CAPABILITIES, MediaEmbeddingKind, MediaEmbeddingProcessing,
+    MediaEmbeddingProvenance, MediaEmbeddingResponse, MediaEmbeddingSpace,
+    MediaQueryEmbeddingRequest,
+};
 mod transport;
 mod vision;
 

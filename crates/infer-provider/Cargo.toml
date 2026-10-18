@@ -12,6 +12,7 @@ base64.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
 image.workspace = true
+libc.workspace = true
 httpdate.workspace = true
 infer-artifact = { path = "../infer-artifact" }
 infer-core = { path = "../infer-core" }

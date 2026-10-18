@@ -1,5 +1,58 @@
 # M3/M4 运维与账本
 
+## Optional unified media retrieval
+
+EmbeddingGemma 2 is an explicitly selected experimental option. Qwen3 continues
+to serve the default text query/document intents. The portable configuration
+defines `semantic.media_query`, `semantic.media_image`, `semantic.media_audio`,
+and `semantic.media_video`, backed by one `embeddinggemma2_bf16_local` Deployment.
+Each produces the same 768d Gemma space; keep its index separate from Qwen3,
+SigLIP and CLAP indexes.
+
+Install into a fresh, persistent interpreter directory, using the dedicated
+requirements file rather than the existing retrieval/audio environment:
+
+```bash
+python3 tools/install_embeddinggemma2.py \
+  --runtime .infer-runtime/runtimes/embeddinggemma2 \
+  --artifact-root .infer-runtime/artifacts \
+  --request .infer-runtime/embeddinggemma2-publication.json
+cargo run -p infer-artifact --example publish_local_worker_build -- \
+  .infer-runtime/embeddinggemma2-publication.json
+```
+
+`--snapshot` can reuse an existing download only after all fourteen file hashes
+match. The installer writes a private publication request; ArtifactStore verifies
+and publishes the actual immutable Build. Set the local Provider's interpreter
+and ArtifactStore root to the installed paths. Readiness loads the exact model
+offline and checks the pinned processor, BF16 Metal execution and FFmpeg/FFprobe.
+Do not point production at a temporary evaluation interpreter or model cache.
+
+After source/build validation and a quiet-job check, use the owning Console's
+restart action. Consumer Apps need narrow Intent grants before using it. The
+operator can verify the four routes with `infer.media.embedding@20261013.1`:
+
+| Input | Route | Logical model |
+| --- | --- | --- |
+| Text search query | `/infer/v1/media/query-embeddings` | `semantic.media_query` |
+| JPEG/PNG display pixels | `/infer/v1/media/image-embeddings` | `semantic.media_image` |
+| Audio segment up to 30 seconds | `/infer/v1/media/audio-embeddings` | `semantic.media_audio` |
+| Visual video segment up to 16 seconds | `/infer/v1/media/video-embeddings` | `semantic.media_video` |
+
+Query JSON requires `text` and `query_revision`. File multipart requires `file`,
+`source_revision` and `model`; images also require
+`image_orientation=display_pixels_orientation_normalized`. All routes enforce local-only,
+offline and no fallback. Video starts sampling at time zero at 1 fps, including
+very short clips; it does not embed the soundtrack. Send sound through the audio
+route separately. Results include exact space, preprocessing identity, token
+count, decoded duration and video frame count, where applicable.
+
+Use the SDK `media_search` example for a complete capability-negotiated query/file
+comparison. Freeze source-labelled samples and expected Chinese/English queries
+before evaluating real-photo, natural-audio and video retrieval. A small sanity
+set is not a general retrieval benchmark; retain misses and do not relabel after
+scoring. See ADR-0021 for the fixed Build and lifecycle boundaries.
+
 ## 本地 Operator Console
 
 `infer console` 是本机 operator 的浏览器管理面板，不是新的 daemon 或第二套控制平面。

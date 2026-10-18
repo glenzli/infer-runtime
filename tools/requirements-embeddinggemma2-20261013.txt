@@ -1,0 +1,14 @@
+# Isolated Apple Silicon runtime; never install into the Qwen3 environment.
+# Public immutable implementation revisions supply native Gemma 2 processing.
+mlx==0.32.3
+mlx-metal==0.32.3
+mlx-vlm @ https://github.com/Blaizzy/mlx-vlm/archive/3d87e88402f307efbf68e568971aa887ee7d9ed0.zip
+transformers @ https://github.com/huggingface/transformers/archive/e880ddc57baa4e642c357e7c0a8e77b8d7f1b3f0.zip
+numpy==2.4.6
+pillow==12.3.0
+torch==2.14.1
+torchvision==0.29.1
+librosa==0.11.0
+soundfile==0.14.0
+tokenizers==0.23.3
+safetensors==0.8.0

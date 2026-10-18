@@ -1355,6 +1355,7 @@ dependencies = [
  "infer-core",
  "infer-node",
  "infer-resource",
+ "libc",
  "ndarray",
  "ort",
  "reqwest",

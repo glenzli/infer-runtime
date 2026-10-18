@@ -25,6 +25,8 @@ SOURCE = ROOT / "contracts/schema-source/consumer-api-20260813.1.json"
 AGENT_TASK_SOURCE = ROOT / "contracts/schema-source/agent-task-20260925.1.json"
 SOUND_GENERATION_SOURCE = ROOT / "contracts/schema-source/sound-generation-20260926.2.json"
 APPLE_IMAGE_SOURCE = ROOT / "contracts/schema-source/apple-native-20260926.2.json"
+MODEL_CATALOG_SOURCE = ROOT / "contracts/schema-source/model-catalog-20261016.1.json"
+MEDIA_EMBEDDING_SOURCE = ROOT / "contracts/schema-source/media-embedding-20261013.1.json"
 OUTPUT = ROOT / "contracts/capabilities"
 IMMUTABLE_DIGESTS = ROOT / "contracts/immutable-contract-digests.json"
 CHECK_ONLY = "--check" in sys.argv[1:]
@@ -42,6 +44,8 @@ CORE_ROUTES = (
 )
 
 CAPABILITIES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "infer.model-catalog": ("20261016.1", ("/infer/v1/model-catalog",)),
+    "infer.media.embedding": ("20261013.1", ("/infer/v1/media/query-embeddings", "/infer/v1/media/image-embeddings", "/infer/v1/media/audio-embeddings", "/infer/v1/media/video-embeddings")),
     "infer.vision.apple-native": ("20260926.2", ("/infer/v1/vision/apple-images",)),
     "infer.agent.task": ("20260925.1", ("/infer/v1/agent/tasks",)),
     "infer.responses": (
@@ -227,7 +231,7 @@ def main() -> None:
     source = json.loads(SOURCE.read_text(encoding="utf-8"))
     # New capability schemas may extend the aggregate source without changing
     # the immutable Consumer Core or any previously published capability bytes.
-    for extension_path in (AGENT_TASK_SOURCE, SOUND_GENERATION_SOURCE, APPLE_IMAGE_SOURCE):
+    for extension_path in (AGENT_TASK_SOURCE, SOUND_GENERATION_SOURCE, APPLE_IMAGE_SOURCE, MEDIA_EMBEDDING_SOURCE, MODEL_CATALOG_SOURCE):
         extension = json.loads(extension_path.read_text(encoding="utf-8"))
         source["paths"].update(extension["paths"])
         for section, components in extension["components"].items():

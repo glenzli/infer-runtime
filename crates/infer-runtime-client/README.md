@@ -18,6 +18,14 @@ Applications still own their product data, persistence, stale-result decisions,
 and user-facing workflow. They request an Intent or an ACL-authorized named
 Deployment/Profile; they do not send provider-specific physical model names.
 
+Optional `infer.media.embedding@20261013.1` provides `embed_media_query`,
+`embed_media_image`, `embed_media_audio`, and `embed_media_video`. Its 768d
+EmbeddingGemma 2 space is shared across these four routes. Video uses visual
+frames only; its soundtrack must be requested through the audio route. Existing
+Qwen3 `embed_queries` / `embed_documents` remain the default text retrieval path.
+Compare vectors only when their complete `embedding_space.identity` matches.
+See `examples/media_search.rs` for an explicitly selected media search.
+
 During the coordinated migration, depend on an immutable Git revision:
 
 ```toml

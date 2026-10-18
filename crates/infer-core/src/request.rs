@@ -576,6 +576,7 @@ string_enum!(ProviderProtocol {
     CodexAppServer => "codex_app_server",
     AudioWorker => "audio_worker",
     RetrievalWorker => "retrieval_worker",
+    MediaEmbeddingWorker => "media_embedding_worker",
     OcrWorker => "ocr_worker",
     CoremlWorker => "coreml_worker",
     Onnx => "onnx"

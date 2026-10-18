@@ -12,12 +12,13 @@ use infer_provider::{
     AudioTextQueryNormalizer, AudioWorkerExecutor, CodexAppServerProvider, CoremlSamExecutor,
     DynAudioDuplexExecutor, DynAudioExecutor, DynAudioStreamExecutor, DynFaceDetectionExecutor,
     DynFaceEmbeddingExecutor, DynFaceParsingExecutor, DynImageCompletionExecutor,
-    DynImageEmbeddingExecutor, DynImageUnderstandingExecutor, DynOcrExecutor, DynProvider,
-    DynRetrievalExecutor, DynSemanticGroundingExecutor, DynSubjectSegmentationExecutor,
-    DynTextEmbeddingExecutor, OcrBuildContract, OcrWorkerExecutor, OllamaVisionExecutor,
+    DynImageEmbeddingExecutor, DynImageUnderstandingExecutor, DynMediaEmbeddingExecutor,
+    DynOcrExecutor, DynProvider, DynRetrievalExecutor, DynSemanticGroundingExecutor,
+    DynSubjectSegmentationExecutor, DynTextEmbeddingExecutor, MediaBuildContract,
+    MediaEmbeddingWorkerExecutor, OcrBuildContract, OcrWorkerExecutor, OllamaVisionExecutor,
     OnnxProviderRuntime, ProviderRuntimeReadiness, ResponsesProvider, RetrievalBuildContract,
     RetrievalWorkerExecutor, SamBuildContract, provider_requires_ffmpeg, resolve_provider_process,
-    verify_clap_worker, verify_coreml_sam_worker, verify_yamnet_worker,
+    verify_clap_worker, verify_coreml_sam_worker, verify_media_worker, verify_yamnet_worker,
 };
 use infer_resource::{DynNativeModelController, NativeControllerMap};
 
@@ -38,6 +39,7 @@ pub(super) struct ProviderAssembly {
     pub text_embedding_executors: BTreeMap<String, DynTextEmbeddingExecutor>,
     pub image_understanding_executors: BTreeMap<String, DynImageUnderstandingExecutor>,
     pub retrieval_executors: BTreeMap<String, DynRetrievalExecutor>,
+    pub media_embedding_executors: BTreeMap<String, DynMediaEmbeddingExecutor>,
     pub apple_image_executors: BTreeMap<String, Arc<infer_provider::AppleImageExecutor>>,
     pub ocr_executors: BTreeMap<String, DynOcrExecutor>,
     pub native_controllers: NativeControllerMap,
@@ -56,6 +58,7 @@ impl ProviderAssembly {
                     ProviderKind::Onnx
                         | ProviderKind::AudioWorker
                         | ProviderKind::RetrievalWorker
+                        | ProviderKind::MediaEmbeddingWorker
                         | ProviderKind::OcrWorker
                         | ProviderKind::CoremlWorker
                 )
@@ -318,6 +321,95 @@ impl ProviderAssembly {
                     assembly
                         .audio_duplex_executors
                         .insert(id.clone(), adapter as DynAudioDuplexExecutor);
+                }
+                ProviderKind::MediaEmbeddingWorker => {
+                    let store = artifact_store
+                        .as_ref()
+                        .expect("media worker requires an artifact store");
+                    let mut builds = BTreeMap::new();
+                    for deployment in config
+                        .deployments
+                        .values()
+                        .filter(|deployment| deployment.provider == *id)
+                    {
+                        let build = &config.model_builds[&deployment.build];
+                        let worker = build
+                            .local_worker
+                            .as_ref()
+                            .expect("validated media worker Build");
+                        let resolved = match store.resolve_local_worker_build_identity(
+                            &deployment.build,
+                            &worker.adapter.to_string(),
+                            &worker.artifact_set_sha256,
+                        ) {
+                            Ok(resolved) => resolved,
+                            Err(_) => {
+                                assembly.readiness.get_mut(id).expect("readiness exists").mark_unavailable("artifact_store", "media worker artifact is unavailable or failed verification");
+                                continue 'providers;
+                            }
+                        };
+                        if verify_media_worker(
+                            process.command.as_deref().expect("resolved command"),
+                            &process.args,
+                            &resolved.runtime_root.to_string_lossy(),
+                        )
+                        .is_err()
+                        {
+                            assembly
+                                .readiness
+                                .get_mut(id)
+                                .expect("readiness exists")
+                                .mark_unavailable(
+                                    "media_runtime",
+                                    "pinned media runtime or decoder is unavailable",
+                                );
+                            continue 'providers;
+                        }
+                        builds.insert(
+                            build.model_id.clone(),
+                            MediaBuildContract {
+                                model_path: resolved.runtime_root.to_string_lossy().into_owned(),
+                                model_build: deployment.build.clone(),
+                                model_revision: build
+                                    .provenance
+                                    .source_revision
+                                    .clone()
+                                    .expect("validated revision"),
+                                artifact_set_sha256: worker.artifact_set_sha256.clone(),
+                                embedding_space: worker
+                                    .embedding_space
+                                    .clone()
+                                    .expect("validated space"),
+                                runtime: worker.runtime.clone(),
+                                precision: worker.precision.clone(),
+                                preprocessing_identity: worker
+                                    .preprocessing_identity
+                                    .clone()
+                                    .expect("validated preprocessing"),
+                                postprocessing_identity: worker.postprocessing_identity.clone(),
+                                tokenizer_identity: worker
+                                    .tokenizer_identity
+                                    .clone()
+                                    .expect("validated tokenizer"),
+                                instruction_revision: worker
+                                    .instruction_revision
+                                    .clone()
+                                    .expect("validated instruction"),
+                            },
+                        );
+                    }
+                    let adapter = MediaEmbeddingWorkerExecutor::new(
+                        process.command.clone().expect("resolved command"),
+                        process.args.clone(),
+                        builds,
+                    );
+                    assembly.media_embedding_executors.insert(
+                        id.clone(),
+                        Arc::clone(&adapter) as DynMediaEmbeddingExecutor,
+                    );
+                    assembly
+                        .native_controllers
+                        .insert(id.clone(), adapter as DynNativeModelController);
                 }
                 ProviderKind::RetrievalWorker => {
                     let store = artifact_store
@@ -625,6 +717,7 @@ impl ProviderAssembly {
             text_embedding_executors: BTreeMap::new(),
             image_understanding_executors: BTreeMap::new(),
             retrieval_executors: BTreeMap::new(),
+            media_embedding_executors: BTreeMap::new(),
             apple_image_executors: BTreeMap::new(),
             ocr_executors: BTreeMap::new(),
             native_controllers: BTreeMap::new(),

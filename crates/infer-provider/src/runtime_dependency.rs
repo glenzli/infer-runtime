@@ -213,6 +213,7 @@ pub fn provider_requires_ffmpeg(config: &RuntimeConfig, provider_id: &str) -> bo
                         worker.adapter,
                         LocalWorkerAdapterKind::YamnetAudioEvents
                             | LocalWorkerAdapterKind::ClapAudioTextEmbedding
+                            | LocalWorkerAdapterKind::EmbeddingGemma2
                     )
                 })
     })

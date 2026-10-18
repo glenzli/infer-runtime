@@ -9,7 +9,10 @@ mod attempt_policy;
 mod audio_streaming;
 mod background_jobs;
 mod capacity;
+mod consumer_models;
+pub use consumer_models::ConsumerModelCatalog;
 mod image_understanding;
+mod media_embedding_execution;
 mod metrics;
 mod observer;
 mod ocr_execution;
@@ -49,10 +52,10 @@ use infer_payload::PayloadError;
 use infer_provider::{
     DynAudioDuplexExecutor, DynAudioExecutor, DynAudioStreamExecutor, DynFaceDetectionExecutor,
     DynFaceEmbeddingExecutor, DynFaceParsingExecutor, DynImageCompletionExecutor,
-    DynImageEmbeddingExecutor, DynImageUnderstandingExecutor, DynOcrExecutor, DynProvider,
-    DynRetrievalExecutor, DynSemanticGroundingExecutor, DynSubjectSegmentationExecutor,
-    DynTextEmbeddingExecutor, ProviderError, probe_responses_provider,
-    probe_responses_provider_with_effort,
+    DynImageEmbeddingExecutor, DynImageUnderstandingExecutor, DynMediaEmbeddingExecutor,
+    DynOcrExecutor, DynProvider, DynRetrievalExecutor, DynSemanticGroundingExecutor,
+    DynSubjectSegmentationExecutor, DynTextEmbeddingExecutor, ProviderError,
+    probe_responses_provider, probe_responses_provider_with_effort,
 };
 use infer_resource::{ModelReservation, ResourceError, ResourceManager};
 use infer_store::{
@@ -417,6 +420,7 @@ pub struct Runtime {
     text_embedding_executors: BTreeMap<String, DynTextEmbeddingExecutor>,
     image_understanding_executors: BTreeMap<String, DynImageUnderstandingExecutor>,
     retrieval_executors: BTreeMap<String, DynRetrievalExecutor>,
+    media_embedding_executors: BTreeMap<String, DynMediaEmbeddingExecutor>,
     apple_image_executors: BTreeMap<String, Arc<infer_provider::AppleImageExecutor>>,
     ocr_executors: BTreeMap<String, DynOcrExecutor>,
     schedulers: BTreeMap<String, ProviderScheduler>,
@@ -536,6 +540,7 @@ impl Runtime {
             text_embedding_executors: assembly.text_embedding_executors,
             image_understanding_executors: assembly.image_understanding_executors,
             retrieval_executors: assembly.retrieval_executors,
+            media_embedding_executors: assembly.media_embedding_executors,
             apple_image_executors: assembly.apple_image_executors,
             ocr_executors: assembly.ocr_executors,
             schedulers: assembly.schedulers,
@@ -636,6 +641,7 @@ impl Runtime {
             text_embedding_executors: BTreeMap::new(),
             image_understanding_executors: BTreeMap::new(),
             retrieval_executors: BTreeMap::new(),
+            media_embedding_executors: BTreeMap::new(),
             apple_image_executors: BTreeMap::new(),
             ocr_executors: BTreeMap::new(),
             schedulers,
