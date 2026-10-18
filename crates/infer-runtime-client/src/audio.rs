@@ -818,6 +818,67 @@ impl Client {
         })
     }
 
+    /// Synthesizes new speech from one reference WAV and its exact transcript.
+    /// Uses the independent experimental voice-clone capability. This endpoint
+    /// has no preset, delivery, speed, or streaming controls; reject them before
+    /// discovery instead of silently dropping authored settings.
+    pub async fn clone_voice_wav(
+        &self,
+        request: &SpeechRequest,
+        reference_wav: &[u8],
+        reference_text: &str,
+    ) -> Result<AudioBytesResponse> {
+        if request.model != "speech.clone_voice"
+            || request.input.trim().is_empty()
+            || request.input.len() > 65_536
+            || reference_text.trim().is_empty()
+            || reference_text.len() > 16_384
+            || reference_wav.len() < 44
+            || reference_wav.len() as u64 > MAX_AUDIO_INPUT_BYTES
+            || &reference_wav[..4] != b"RIFF"
+            || &reference_wav[8..12] != b"WAVE"
+            || request.voice.is_some()
+            || request.instructions.is_some()
+            || request.speed != 1.0
+            || request.execution_mode != ExecutionMode::Unary
+            || request.response_format != SpeechFormat::Wav
+        {
+            return Err(Error::Input("voice clone requires bounded WAV, transcript and unary WAV speech without preset, delivery or speed controls".into()));
+        }
+        let metadata =
+            serde_json::to_string(&request.metadata).map_err(|e| Error::Input(e.to_string()))?;
+        let response = self
+            .send_capability_with(&["infer.audio.voice-clone@20260811.1"], |http, endpoint| {
+                let file = Part::bytes(reference_wav.to_vec())
+                    .file_name("reference.wav")
+                    .mime_str("audio/wav")
+                    .expect("static MIME type");
+                let mut form = Form::new()
+                    .text("model", request.model.clone())
+                    .text("input", request.input.clone())
+                    .text("reference_text", reference_text.to_owned())
+                    .text("response_format", "wav")
+                    .text("metadata", metadata.clone())
+                    .part("reference_audio", file);
+                if let Some(language) = &request.language {
+                    form = form.text("language", language.clone());
+                }
+                http.post(format!("{endpoint}/v1/audio/voice-clones"))
+                    .multipart(form)
+            })
+            .await?;
+        let response = ensure_success(response).await?;
+        let content_type = required_header(&response, reqwest::header::CONTENT_TYPE.as_str())?;
+        let job_id = required_header(&response, "x-infer-job-id")?;
+        let logical_model = required_header(&response, "x-infer-model")?;
+        Ok(AudioBytesResponse {
+            bytes: read_bounded(response, MAX_AUDIO_RESPONSE_BYTES).await?,
+            content_type,
+            job_id,
+            logical_model,
+        })
+    }
+
     pub async fn synthesize_speech(&self, request: &SpeechRequest) -> Result<AudioBytesResponse> {
         if request.execution_mode != ExecutionMode::Unary {
             return Err(Error::Input(
@@ -898,6 +959,32 @@ mod tests {
             execution_mode,
             metadata: BTreeMap::new(),
         }
+    }
+
+    #[tokio::test]
+    async fn clone_rejects_untranscribed_or_unsupported_requests_before_discovery() {
+        let client = Client::builder().build().unwrap();
+        let mut request = request(ExecutionMode::Unary);
+        request.model = "speech.clone_voice".into();
+        request.voice = None;
+        let mut wav = vec![0u8; 44];
+        wav[..4].copy_from_slice(b"RIFF");
+        wav[8..12].copy_from_slice(b"WAVE");
+        assert!(matches!(
+            client.clone_voice_wav(&request, &wav, "").await,
+            Err(Error::Input(_))
+        ));
+        request.speed = 1.2;
+        assert!(matches!(
+            client.clone_voice_wav(&request, &wav, "Reference").await,
+            Err(Error::Input(_))
+        ));
+        request.speed = 1.0;
+        request.instructions = Some("ignored?".into());
+        assert!(matches!(
+            client.clone_voice_wav(&request, &wav, "Reference").await,
+            Err(Error::Input(_))
+        ));
     }
 
     #[test]
