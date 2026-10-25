@@ -166,7 +166,9 @@ impl ArtifactLeaseUnixService {
             .name("infer-artifact-lease".into())
             .spawn(move || {
                 while !worker_stop.load(Ordering::Acquire) {
-                    match server.accept_once(unix_time_ms()) {
+                    let now = unix_time_ms();
+                    let _ = server.registry.expire(now);
+                    match server.accept_once(now) {
                         Ok(_) => {}
                         Err(UnixLeaseProtocolError::Io(error))
                             if error.kind() == std::io::ErrorKind::WouldBlock =>

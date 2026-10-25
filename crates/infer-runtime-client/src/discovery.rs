@@ -101,6 +101,59 @@ impl DiscoveryResolver {
                 core_version: SUPPORTED_CONSUMER_CORE_VERSIONS[0].into(),
             });
         }
+        let registration = self.read_current_registration()?;
+        let offer = registration
+            .offers
+            .iter()
+            .find(|offer| {
+                offer.protocol == CONSUMER_CORE_PROTOCOL
+                    && offer.binding == CONSUMER_HTTP_LOOPBACK_BINDING
+            })
+            .ok_or_else(|| Error::Discovery("no compatible Consumer Core offer".into()))?;
+        let core_version = SUPPORTED_CONSUMER_CORE_VERSIONS
+            .iter()
+            .find(|supported| {
+                offer
+                    .protocol_versions
+                    .iter()
+                    .any(|offered| offered == **supported)
+            })
+            .ok_or_else(|| Error::Discovery("no compatible Consumer Core offer".into()))?;
+        validate_loopback_endpoint(&offer.endpoint)?;
+        Ok(ResolvedEndpoint {
+            endpoint: offer.endpoint.clone(),
+            instance_id: registration.service.instance_id,
+            generation: registration.service.generation,
+            core_version: (*core_version).into(),
+        })
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn resolve_raw_foundation_wsl_binding(
+        &self,
+    ) -> Result<crate::RawFoundationWslBridge> {
+        let registration = self.read_current_registration()?;
+        let offers: Vec<_> = registration
+            .offers
+            .iter()
+            .filter(|offer| {
+                offer.protocol == "infer-runtime.artifact-lease"
+                    && offer.binding == "infer-runtime.wsl-stdio-scm-rights"
+                    && offer
+                        .protocol_versions
+                        .iter()
+                        .any(|version| version == "20260811.1")
+            })
+            .collect();
+        if offers.len() != 1 {
+            return Err(Error::Discovery(
+                "exactly one compatible WSL artifact-lease offer is required".into(),
+            ));
+        }
+        crate::RawFoundationWslBridge::from_discovery_endpoint(&offers[0].endpoint)
+    }
+
+    fn read_current_registration(&self) -> Result<Registration> {
         validate_file_token(&self.instance_id, 96)?;
         let root = match &self.runtime_root {
             Some(root) => root.clone(),
@@ -130,30 +183,7 @@ impl DiscoveryResolver {
             ));
         }
         validate_file_token(&registration.service.generation, 96)?;
-        let offer = registration
-            .offers
-            .iter()
-            .find(|offer| {
-                offer.protocol == CONSUMER_CORE_PROTOCOL
-                    && offer.binding == CONSUMER_HTTP_LOOPBACK_BINDING
-            })
-            .ok_or_else(|| Error::Discovery("no compatible Consumer Core offer".into()))?;
-        let core_version = SUPPORTED_CONSUMER_CORE_VERSIONS
-            .iter()
-            .find(|supported| {
-                offer
-                    .protocol_versions
-                    .iter()
-                    .any(|offered| offered == **supported)
-            })
-            .ok_or_else(|| Error::Discovery("no compatible Consumer Core offer".into()))?;
-        validate_loopback_endpoint(&offer.endpoint)?;
-        Ok(ResolvedEndpoint {
-            endpoint: offer.endpoint.clone(),
-            instance_id: registration.service.instance_id,
-            generation: registration.service.generation,
-            core_version: (*core_version).into(),
-        })
+        Ok(registration)
     }
 }
 

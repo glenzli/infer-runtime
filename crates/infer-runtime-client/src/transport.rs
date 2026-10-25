@@ -58,6 +58,8 @@ impl CredentialSource {
 pub struct ClientBuilder {
     resolver: DiscoveryResolver,
     credential: Option<CredentialSource>,
+    #[cfg(windows)]
+    raw_foundation_wsl: Option<crate::RawFoundationWslBridge>,
 }
 
 impl ClientBuilder {
@@ -65,11 +67,21 @@ impl ClientBuilder {
         Self {
             resolver,
             credential: None,
+            #[cfg(windows)]
+            raw_foundation_wsl: None,
         }
     }
 
     pub fn credential_file(mut self, path: impl Into<PathBuf>) -> Self {
         self.credential = Some(CredentialSource::File(path.into()));
+        self
+    }
+
+    /// Bind RAW file-object transfers to an explicitly installed, same-user
+    /// WSL bridge. The HTTP Consumer contract remains unchanged.
+    #[cfg(windows)]
+    pub fn raw_foundation_wsl_bridge(mut self, bridge: crate::RawFoundationWslBridge) -> Self {
+        self.raw_foundation_wsl = Some(bridge);
         self
     }
 
@@ -83,6 +95,10 @@ impl ClientBuilder {
             credential: self.credential,
             http,
             capability_catalog: tokio::sync::RwLock::new(None),
+            #[cfg(windows)]
+            raw_foundation_wsl: crate::raw_foundation::WslRawFoundationState::new(
+                self.raw_foundation_wsl,
+            ),
         })
     }
 }
@@ -93,9 +109,18 @@ pub struct Client {
     credential: Option<CredentialSource>,
     http: reqwest::Client,
     capability_catalog: tokio::sync::RwLock<Option<CatalogCache>>,
+    #[cfg(windows)]
+    pub(crate) raw_foundation_wsl: crate::raw_foundation::WslRawFoundationState,
 }
 
 impl Client {
+    #[cfg(windows)]
+    pub(crate) fn raw_foundation_wsl_binding(&self) -> Result<crate::RawFoundationWslBridge> {
+        match self.raw_foundation_wsl.configured_binding() {
+            Some(binding) => Ok(binding.clone()),
+            None => self.resolver.resolve_raw_foundation_wsl_binding(),
+        }
+    }
     pub fn builder() -> ClientBuilder {
         ClientBuilder::discovery(DiscoveryResolver::local())
     }

@@ -184,7 +184,7 @@ impl Drop for SecurityDescriptor {
     }
 }
 
-fn validate_security(file: &File) -> io::Result<()> {
+pub(crate) fn validate_security(file: &File) -> io::Result<()> {
     let mut owner: PSID = null_mut();
     let mut dacl: *mut ACL = null_mut();
     let mut descriptor = SecurityDescriptor(null_mut());
@@ -290,4 +290,4 @@ fn unsafe_path<T>(message: &str) -> io::Result<T> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

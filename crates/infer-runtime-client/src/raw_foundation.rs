@@ -11,6 +11,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Client, Error, Result};
 
+#[cfg(windows)]
+mod wsl;
+#[cfg(windows)]
+pub use wsl::RawFoundationWslBridge;
+#[cfg(windows)]
+pub(crate) use wsl::WslRawFoundationState;
+
 pub const RAW_FOUNDATION_CAPABILITIES: &[&str] = &["infer.raw-foundation@20260811.1"];
 pub const RAW_FOUNDATION_INTENT: &str = "raw.materialize_foundation";
 pub const RAW_FOUNDATION_LEASE_ENDPOINT: &str = "/infer/v1/raw/foundations/leases";
@@ -81,7 +88,7 @@ pub struct RawFoundationLeaseBinding {
     pub endpoint: String,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RawFoundationArtifactReceipt {
     pub cache_key_sha256: String,
     pub artifact_identity_sha256: String,
@@ -98,7 +105,7 @@ pub struct RawFoundationArtifactReceipt {
     pub cache_identity: String,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct RawFoundationProvenance {
     pub provider: String,
@@ -115,7 +122,7 @@ pub struct RawFoundationProvenance {
     pub precision: String,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct RawFoundationExecuteResponse {
     pub id: String,
@@ -184,7 +191,18 @@ impl Client {
         Ok(lease_id)
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    pub fn register_raw_foundation_handles(
+        &self,
+        grant: &RawFoundationLeaseGrant,
+        input: &File,
+        output: &File,
+    ) -> Result<String> {
+        self.raw_foundation_wsl
+            .register(&self.raw_foundation_wsl_binding()?, grant, input, output)
+    }
+
+    #[cfg(not(any(unix, windows)))]
     pub fn register_raw_foundation_handles(
         &self,
         _grant: &RawFoundationLeaseGrant,
@@ -201,26 +219,36 @@ impl Client {
         job_id: &str,
         lease_id: &str,
     ) -> Result<RawFoundationExecuteResponse> {
-        self.send_capability_json(
-            RAW_FOUNDATION_CAPABILITIES,
-            Method::POST,
-            RAW_FOUNDATION_ENDPOINT,
-            Some(&RawFoundationExecuteRequest { job_id, lease_id }),
-        )
-        .await
+        #[cfg(windows)]
+        let bridge = self.raw_foundation_wsl.begin(job_id, lease_id)?;
+        let response: RawFoundationExecuteResponse = self
+            .send_capability_json(
+                RAW_FOUNDATION_CAPABILITIES,
+                Method::POST,
+                RAW_FOUNDATION_ENDPOINT,
+                Some(&RawFoundationExecuteRequest { job_id, lease_id }),
+            )
+            .await?;
+        #[cfg(windows)]
+        bridge.finish(&response).await?;
+        Ok(response)
     }
 
     pub async fn cancel_raw_foundation(&self, job_id: &str) -> Result<RawFoundationCancellation> {
         if job_id.is_empty() || job_id.contains('/') {
             return Err(Error::MalformedResponse("invalid RAW Job id".into()));
         }
-        self.send_capability_json(
-            RAW_FOUNDATION_CAPABILITIES,
-            Method::POST,
-            &format!("/infer/v1/raw/foundations/{job_id}/cancel"),
-            Option::<&()>::None,
-        )
-        .await
+        let result = self
+            .send_capability_json(
+                RAW_FOUNDATION_CAPABILITIES,
+                Method::POST,
+                &format!("/infer/v1/raw/foundations/{job_id}/cancel"),
+                Option::<&()>::None,
+            )
+            .await;
+        #[cfg(windows)]
+        self.raw_foundation_wsl.discard_job(job_id);
+        result
     }
 }
 

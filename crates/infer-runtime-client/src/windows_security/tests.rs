@@ -45,7 +45,7 @@ fn user_sid_string() -> String {
     value
 }
 
-fn set_acl(path: &Path, additional_ace: &str) {
+pub(crate) fn set_acl(path: &Path, additional_ace: &str) {
     let sid = user_sid_string();
     let descriptor = descriptor(&format!("O:{sid}D:P(A;;FA;;;{sid}){additional_ace}"));
     let path: Vec<_> = path.as_os_str().encode_wide().chain(Some(0)).collect();

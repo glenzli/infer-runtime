@@ -57,7 +57,8 @@ namespace InferWslHost
             {
                 var credential = Path.Combine(root, "observer.token");
                 PrivateFiles.Publish(credential, Encoding.UTF8.GetBytes(new string('a', 64)));
-                var settings = new HostSettings { CredentialFile = credential, DiscoveryRoot = Path.Combine(root, "canonical"),
+                var settings = new HostSettings { Distribution = "Ubuntu-24.04", LinuxInstall = "/home/test/.local/lib/infer-runtime",
+                    CredentialFile = credential, DiscoveryRoot = Path.Combine(root, "canonical"),
                     LegacyDiscoveryRoot = Path.Combine(root, "legacy"), Endpoint = provider.Endpoint };
                 PrivateFiles.EnsureDirectory(settings.DiscoveryRoot);
                 PrivateFiles.EnsureDirectory(settings.LegacyDiscoveryRoot);
@@ -72,6 +73,11 @@ namespace InferWslHost
                     var service = (Dictionary<string, object>)manifest["service"];
                     var generation = (string)service["generation"];
                     var offers = (System.Collections.ArrayList)manifest["offers"];
+                    Require(offers.Count == 3, "Expected status, Consumer Core and typed artifact-lease offers.");
+                    var raw = (Dictionary<string, object>)offers[2];
+                    Require((string)raw["binding"] == "infer-runtime.wsl-stdio-scm-rights" &&
+                        (string)raw["endpoint"] == "wsl-stdio://Ubuntu-24.04/home/test/.local/lib/infer-runtime/current/raw_foundation_wsl_bridge.py",
+                        "RAW binding must reference installed code, never a source or artifact path.");
                     var pipe = ((string)((Dictionary<string, object>)offers[0])["endpoint"]).Substring(@"\\.\pipe\".Length);
                     var modified = File.GetLastWriteTimeUtc(file);
                     await bridge.Reconcile();

@@ -58,6 +58,8 @@ pub use jobs::{
     JobSnapshot, NamedRouteDecision, RoutingDecision,
 };
 pub use ocr::{DocumentOcrResponse, OcrProvenance, OcrTextLine};
+#[cfg(windows)]
+pub use raw_foundation::RawFoundationWslBridge;
 pub use raw_foundation::{
     RAW_FOUNDATION_CAPABILITIES, RAW_FOUNDATION_ENDPOINT, RAW_FOUNDATION_INTENT,
     RAW_FOUNDATION_LEASE_ENDPOINT, RAW_FOUNDATION_STAGING_SCHEMA, RawFoundationArtifactReceipt,

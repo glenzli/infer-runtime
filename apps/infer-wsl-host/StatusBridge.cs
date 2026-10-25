@@ -100,7 +100,10 @@ namespace InferWslHost
                     new { protocol = "infer-runtime.status", protocol_versions = new[] { "20260810.1" },
                         binding = "infra.local.windows-named-pipe", endpoint = @"\\.\pipe\infra-protocol\" + pipeName },
                     new { protocol = "infer-runtime.consumer-core", protocol_versions = new[] { "20260813.1" },
-                        binding = "infer-runtime.http-loopback", endpoint = settings.Endpoint }
+                        binding = "infer-runtime.http-loopback", endpoint = settings.Endpoint },
+                    new { protocol = "infer-runtime.artifact-lease", protocol_versions = new[] { "20260811.1" },
+                        binding = "infer-runtime.wsl-stdio-scm-rights",
+                        endpoint = "wsl-stdio://" + settings.Distribution + settings.LinuxInstall.TrimEnd('/') + "/current/raw_foundation_wsl_bridge.py" }
                 }
             };
             // Response identity changes before publication: an in-flight old-generation

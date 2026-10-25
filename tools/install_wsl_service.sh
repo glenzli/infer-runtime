@@ -24,6 +24,7 @@ done
 for script in runtime-env.sh runtime-service.sh keepalive.sh; do
     install -m 700 -- "$script_root/service/$script" "$release/$script"
 done
+install -m 500 -- "$script_root/raw_foundation_wsl_bridge.py" "$release/raw_foundation_wsl_bridge.py"
 python3 - "$release" "$bin_directory" "$runtime_root" "$release_id" <<'PY'
 import hashlib, json, pathlib, sys
 release, source, runtime, identity = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sys.argv[3], sys.argv[4]
