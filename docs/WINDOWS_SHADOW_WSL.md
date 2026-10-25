@@ -93,6 +93,10 @@ Discovery、命令行或日志。Credential 轮换后重新执行此命令；单
 Discovery，不复制 token。Shadow 使用包含 Windows ACL 支持的 SDK revision，沿现有
 credential/Discovery 默认路径连接，不需要设置固定 endpoint override。
 
+桥接先在用户目录的 `.infer-runtime/windows-bridge` 中创建带 Windows ACL 的私有对象，
+再由 WSL 在同一 NTFS 卷原子重命名到实际 AppData。这样从 MSIX 应用内运行时，接入文件
+也不会只落入该应用的虚拟 AppData；普通方式启动的 Shadow 能读取同一份文件。
+
 在 WSL 的另一个终端中补齐 Qwen 模型；运行时不自动下载模型：
 
 ```bash

@@ -102,11 +102,15 @@ $health = Invoke-RestMethod -Uri ($offers[0].endpoint + '/health') -NoProxy -Tim
 if ($health.status -ne 'ok' -or $health.service -ne 'inferd') { throw 'The WSL Runtime is not healthy.' }
 
 $discoveryRoot = Join-Path $env:LOCALAPPDATA 'infra-protocol'
-Protect-Directory $discoveryRoot
+$stagingParent = Join-Path $env:USERPROFILE '.infer-runtime\windows-bridge'
+Protect-Directory $stagingParent
+$stagingRoot = Join-Path $stagingParent ([guid]::NewGuid().ToString('N'))
+Protect-Directory $stagingRoot
+Protect-Directory (Join-Path $stagingRoot 'infra-protocol')
 $manifest.offers = $offers
 $manifestPath = Join-Path $discoveryRoot 'registrations\infer-runtime--local.json'
 $encodedManifest = [Text.UTF8Encoding]::new($false).GetBytes(($manifest | ConvertTo-Json -Depth 8) + "`n")
-Write-PrivateFile $manifestPath $encodedManifest
+Write-PrivateFile (Join-Path $stagingRoot 'infra-protocol\registrations\infer-runtime--local.json') $encodedManifest
 
 $credentialPath = Join-Path $env:LOCALAPPDATA 'Shadow\credentials\infer-runtime-shadow.token'
 if (-not $RefreshDiscoveryOnly) {
@@ -118,9 +122,18 @@ if (-not $RefreshDiscoveryOnly) {
     $token = Invoke-WslText @('cat', '--', $sourceCredential)
     if ($token -notmatch '^[a-f0-9]{64}$') { throw 'The managed Shadow credential has an invalid format.' }
     $tokenBytes = [Text.UTF8Encoding]::new($false).GetBytes($token + "`n")
-    try { Write-PrivateFile $credentialPath $tokenBytes }
+    Protect-Directory (Join-Path $stagingRoot 'Shadow')
+    try { Write-PrivateFile (Join-Path $stagingRoot 'Shadow\credentials\infer-runtime-shadow.token') $tokenBytes }
     finally { [Array]::Clear($tokenBytes); $token = $null }
 }
+
+# WSL renames the same NTFS objects, so their protected Windows ACLs survive.
+# This also publishes into the real AppData when the caller is an MSIX app.
+$publisher = Join-Path $PSScriptRoot 'publish_windows_bridge.py'
+$linuxPublisher = Invoke-WslText @('wslpath', '-a', '-u', $publisher.Replace('\', '/'))
+$linuxStaging = Invoke-WslText @('wslpath', '-a', '-u', $stagingRoot.Replace('\', '/'))
+$linuxDestination = Invoke-WslText @('wslpath', '-a', '-u', $env:LOCALAPPDATA.Replace('\', '/'))
+Invoke-WslText @('python3', $linuxPublisher, '--source', $linuxStaging, '--destination', $linuxDestination) | Out-Null
 
 [pscustomobject]@{DiscoveryRoot=$discoveryRoot;Generation=$manifest.service.generation;
     Endpoint=$offers[0].endpoint;CredentialFile=$credentialPath;CredentialUpdated=(-not $RefreshDiscoveryOnly)} | ConvertTo-Json
