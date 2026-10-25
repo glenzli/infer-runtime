@@ -639,7 +639,7 @@ impl Client {
             image,
             content_type,
             vec![
-                ("model", "vision.review_classification".into()),
+                ("model", "vision.classify_closed_set".into()),
                 ("source_revision", source_revision.into()),
                 (
                     "image_orientation",
