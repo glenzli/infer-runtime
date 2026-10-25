@@ -91,12 +91,15 @@ async fn main() -> anyhow::Result<()> {
             unsafe { libc::geteuid() },
             generation,
         )?);
-        let control = infer_control::RawFoundationControl::new(
+        let control = infer_control::RawFoundationControl::new_with_execution_provider(
             Arc::clone(&runtime),
             Arc::clone(&registry),
             socket_path.clone(),
             &graph,
             &runtime_library,
+            raw_config
+                .execution_provider
+                .unwrap_or(infer_core::OnnxExecutionProvider::Cpu),
         )?;
         let service = infer_artifact_lease::ArtifactLeaseUnixService::start(socket_path, registry)?;
         (Some(control), Some(service))

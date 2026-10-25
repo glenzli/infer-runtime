@@ -9,16 +9,16 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 use infer_artifact::ArtifactStore;
 use infer_core::{LocalInventoryKind, LocalWorkerAdapterKind, ProviderKind, RuntimeConfig};
 use infer_provider::{
-    AudioTextQueryNormalizer, AudioWorkerExecutor, CodexAppServerProvider, CoremlSamExecutor,
-    DynAudioDuplexExecutor, DynAudioExecutor, DynAudioStreamExecutor, DynFaceDetectionExecutor,
-    DynFaceEmbeddingExecutor, DynFaceParsingExecutor, DynImageCompletionExecutor,
-    DynImageEmbeddingExecutor, DynImageUnderstandingExecutor, DynMediaEmbeddingExecutor,
-    DynOcrExecutor, DynProvider, DynRetrievalExecutor, DynSemanticGroundingExecutor,
-    DynSubjectSegmentationExecutor, DynTextEmbeddingExecutor, MediaBuildContract,
-    MediaEmbeddingWorkerExecutor, OcrBuildContract, OcrWorkerExecutor, OllamaVisionExecutor,
-    OnnxProviderRuntime, ProviderRuntimeReadiness, ResponsesProvider, RetrievalBuildContract,
-    RetrievalWorkerExecutor, SamBuildContract, provider_requires_ffmpeg, resolve_provider_process,
-    verify_clap_worker, verify_coreml_sam_worker, verify_media_worker, verify_yamnet_worker,
+    AudioTextQueryNormalizer, AudioWorkerExecutor, CodexAppServerProvider, DynAudioDuplexExecutor,
+    DynAudioExecutor, DynAudioStreamExecutor, DynFaceDetectionExecutor, DynFaceEmbeddingExecutor,
+    DynFaceParsingExecutor, DynImageCompletionExecutor, DynImageEmbeddingExecutor,
+    DynImageUnderstandingExecutor, DynMediaEmbeddingExecutor, DynOcrExecutor, DynProvider,
+    DynRetrievalExecutor, DynSemanticGroundingExecutor, DynSubjectSegmentationExecutor,
+    DynTextEmbeddingExecutor, MediaBuildContract, MediaEmbeddingWorkerExecutor, OcrBuildContract,
+    OcrWorkerExecutor, OllamaVisionExecutor, OnnxProviderRuntime, ProviderRuntimeReadiness,
+    ResponsesProvider, RetrievalBuildContract, RetrievalWorkerExecutor, SamBuildContract,
+    SamWorkerExecutor, provider_requires_ffmpeg, resolve_provider_process, verify_clap_worker,
+    verify_coreml_sam_worker, verify_media_worker, verify_torch_sam_worker, verify_yamnet_worker,
 };
 use infer_resource::{DynNativeModelController, NativeControllerMap};
 
@@ -61,6 +61,7 @@ impl ProviderAssembly {
                         | ProviderKind::MediaEmbeddingWorker
                         | ProviderKind::OcrWorker
                         | ProviderKind::CoremlWorker
+                        | ProviderKind::TorchSamWorker
                 )
             })
             .then(|| ArtifactStore::from_config(&config.artifacts))
@@ -536,22 +537,25 @@ impl ProviderAssembly {
                     );
                     assembly.ocr_executors.insert(id.clone(), Arc::new(adapter));
                 }
-                ProviderKind::CoremlWorker => {
+                ProviderKind::CoremlWorker | ProviderKind::TorchSamWorker => {
+                    let torch = provider.kind == ProviderKind::TorchSamWorker;
                     let store = artifact_store
                         .as_ref()
                         .expect("CoreML worker requires an artifact store");
                     let mut worker_args = process.args.clone();
-                    worker_args.push("--compiled-cache-root".into());
-                    worker_args.push(
-                        config
-                            .runtimes
-                            .coreml_sam
-                            .compiled_cache_root
-                            .clone()
-                            .expect("validated CoreML SAM cache root"),
-                    );
-                    worker_args.push("--compute-units".into());
-                    worker_args.push(config.runtimes.coreml_sam.compute_units.as_str().into());
+                    if !torch {
+                        worker_args.push("--compiled-cache-root".into());
+                        worker_args.push(
+                            config
+                                .runtimes
+                                .coreml_sam
+                                .compiled_cache_root
+                                .clone()
+                                .expect("validated CoreML SAM cache root"),
+                        );
+                        worker_args.push("--compute-units".into());
+                        worker_args.push(config.runtimes.coreml_sam.compute_units.as_str().into());
+                    }
                     let mut builds = BTreeMap::new();
                     for deployment in config
                         .deployments
@@ -560,7 +564,14 @@ impl ProviderAssembly {
                     {
                         let build = &config.model_builds[&deployment.build];
                         let worker = build.local_worker.as_ref().expect("validated worker Build");
-                        debug_assert_eq!(worker.adapter, LocalWorkerAdapterKind::Sam21Coreml);
+                        debug_assert_eq!(
+                            worker.adapter,
+                            if torch {
+                                LocalWorkerAdapterKind::Sam21Torch
+                            } else {
+                                LocalWorkerAdapterKind::Sam21Coreml
+                            }
+                        );
                         let resolved = match store.resolve_local_worker_build_identity(
                             &deployment.build,
                             &worker.adapter.to_string(),
@@ -579,7 +590,12 @@ impl ProviderAssembly {
                                 continue 'providers;
                             }
                         };
-                        match verify_coreml_sam_worker(
+                        let verify = if torch {
+                            verify_torch_sam_worker
+                        } else {
+                            verify_coreml_sam_worker
+                        };
+                        match verify(
                             process.command.as_deref().expect("resolved command"),
                             &worker_args,
                             &resolved.runtime_root.to_string_lossy(),
@@ -632,7 +648,7 @@ impl ProviderAssembly {
                             },
                         );
                     }
-                    let adapter = CoremlSamExecutor::new(
+                    let adapter = SamWorkerExecutor::new(
                         id,
                         process.command.clone().expect("resolved command"),
                         worker_args,

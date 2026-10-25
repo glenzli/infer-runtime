@@ -6,7 +6,10 @@ use infer_core::{
     VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS,
 };
 use ort::{session::RunOptions, value::Tensor};
-use tokenizers::{Tokenizer, TruncationDirection, TruncationParams, TruncationStrategy};
+use tokenizers::{
+    PaddingDirection, PaddingParams, PaddingStrategy, Tokenizer, TruncationDirection,
+    TruncationParams, TruncationStrategy,
+};
 
 use super::{
     SemanticGroundingExecutionOutput, SessionEntry, decode_image, execution_provenance, parameter,
@@ -42,7 +45,20 @@ pub(super) fn load_tokenizer(
             direction: TruncationDirection::Right,
         }))
         .map_err(|error| ProviderError::Protocol(error.to_string()))?;
-    tokenizer.with_padding(None);
+    tokenizer.with_padding(
+        if contract.identity == "grounding_dino_bert_uncased_period_pad256_v1" {
+            Some(PaddingParams {
+                strategy: PaddingStrategy::Fixed(LOGIT_TOKEN_COUNT),
+                direction: PaddingDirection::Right,
+                pad_to_multiple_of: None,
+                pad_id: contract.pad_token_id,
+                pad_type_id: 0,
+                pad_token: "[PAD]".into(),
+            })
+        } else {
+            None
+        },
+    );
     Ok(Some(tokenizer))
 }
 
@@ -66,8 +82,15 @@ pub(super) fn run(
     let encoding = tokenizer
         .encode(query, true)
         .map_err(|error| ProviderError::InvalidInput(error.to_string()))?;
-    let token_count = encoding.len();
-    if !(3..=LOGIT_TOKEN_COUNT).contains(&token_count) {
+    let tensor_token_count = encoding.len();
+    // Padding belongs to the fixed CUDA graph ABI. Phrase scoring must still
+    // exclude the terminal SEP token and every padding token.
+    let token_count = encoding
+        .get_attention_mask()
+        .iter()
+        .take_while(|&&value| value == 1)
+        .count();
+    if !(3..=LOGIT_TOKEN_COUNT).contains(&token_count) || tensor_token_count > LOGIT_TOKEN_COUNT {
         return Err(ProviderError::InvalidInput(
             "semantic query produced an unsupported token count".into(),
         ));
@@ -78,13 +101,15 @@ pub(super) fn run(
             .map(|value| i64::from(*value))
             .collect::<Vec<_>>()
     };
-    let input_ids = Tensor::from_array(([1_usize, token_count], as_i64(encoding.get_ids())))
+    let input_ids = Tensor::from_array(([1_usize, tensor_token_count], as_i64(encoding.get_ids())))
         .map_err(|error| ProviderError::NativeRuntime(error.to_string()))?;
-    let token_type_ids =
-        Tensor::from_array(([1_usize, token_count], as_i64(encoding.get_type_ids())))
-            .map_err(|error| ProviderError::NativeRuntime(error.to_string()))?;
+    let token_type_ids = Tensor::from_array((
+        [1_usize, tensor_token_count],
+        as_i64(encoding.get_type_ids()),
+    ))
+    .map_err(|error| ProviderError::NativeRuntime(error.to_string()))?;
     let attention_mask = Tensor::from_array((
-        [1_usize, token_count],
+        [1_usize, tensor_token_count],
         as_i64(encoding.get_attention_mask()),
     ))
     .map_err(|error| ProviderError::NativeRuntime(error.to_string()))?;
@@ -272,12 +297,17 @@ fn validate_build_contract(entry: &SessionEntry) -> Result<(), ProviderError> {
         dtype: dtype.into(),
         shape: shape.iter().map(|value| (*value).into()).collect(),
     };
+    let fixed_text = text.identity == "grounding_dino_bert_uncased_period_pad256_v1"
+        && text.padding == "max_length";
+    let dynamic_text = text.identity == "grounding_dino_bert_uncased_period_truncate256_v1"
+        && text.padding == "longest";
+    let sequence = if fixed_text { "256" } else { "sequence_length" };
     let valid = onnx.inputs
         == [
             tensor("pixel_values", "float32", &["1", "3", "800", "800"]),
-            tensor("input_ids", "int64", &["1", "sequence_length"]),
-            tensor("token_type_ids", "int64", &["1", "sequence_length"]),
-            tensor("attention_mask", "int64", &["1", "sequence_length"]),
+            tensor("input_ids", "int64", &["1", sequence]),
+            tensor("token_type_ids", "int64", &["1", sequence]),
+            tensor("attention_mask", "int64", &["1", sequence]),
             tensor("pixel_mask", "int64", &["1", "800", "800"]),
         ]
         && onnx.outputs
@@ -293,10 +323,11 @@ fn validate_build_contract(entry: &SessionEntry) -> Result<(), ProviderError> {
         && image.dtype == "float32"
         && image.mean == [0.485, 0.456, 0.406]
         && image.scale == [0.229, 0.224, 0.225]
-        && text.identity == "grounding_dino_bert_uncased_period_truncate256_v1"
+        && (fixed_text || dynamic_text)
         && text.max_length == LOGIT_TOKEN_COUNT
         && text.lowercase
-        && text.padding == "longest"
+        && text.pad_token_id == 0
+        && text.eos_token_id == 102
         && text.truncation
         && onnx.postprocessing_identity == "sigmoid_phrase_score_box_clip_nms_normalized_v1";
     if valid {
@@ -311,6 +342,19 @@ fn validate_build_contract(entry: &SessionEntry) -> Result<(), ProviderError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn padded_tokens_and_terminal_sep_do_not_inflate_phrase_score() {
+        let mut logits = vec![-100.0; QUERY_COUNT * LOGIT_TOKEN_COUNT];
+        logits[1] = 0.0;
+        logits[5] = 100.0; // SEP for a six-token phrase.
+        logits[6..LOGIT_TOKEN_COUNT].fill(100.0); // Right padding.
+        let mut boxes = vec![0.0; QUERY_COUNT * 4];
+        boxes[..4].copy_from_slice(&[0.5, 0.5, 0.25, 0.25]);
+        let regions = decode_regions(&logits, &boxes, 6, 0.25, 0.8, 8);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].score, 0.5);
+    }
 
     #[test]
     fn overlap_suppression_uses_normalized_boxes() {

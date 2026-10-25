@@ -1,0 +1,4 @@
+# Separate CPU-only build-time environment; does not replace the CUDA runtime.
+onnx==1.19.0
+onnxruntime==1.27.0
+numpy==2.5.4

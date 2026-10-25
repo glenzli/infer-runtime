@@ -8,6 +8,7 @@ use std::{
 };
 
 use ort::{
+    ep,
     session::{RunOptions, Session},
     value::{Tensor, ValueType},
 };
@@ -104,11 +105,45 @@ impl RawNindModel {
         )
     }
 
+    pub fn open_experimental_cuda(
+        graph: &Path,
+        runtime_version: &str,
+    ) -> Result<Self, RawFoundationError> {
+        if runtime_version != "1.27.0" {
+            return Err(RawFoundationError::ModelContract(
+                "CUDA RawNIND Build requires ONNX Runtime 1.27.0".into(),
+            ));
+        }
+        Self::open(
+            graph,
+            runtime_version,
+            "rawnind-public-bayer-foundation-ort127-cuda-exp1",
+            "rawnind-cuda-ort127-exp1",
+            true,
+        )
+    }
+
     fn open_cpu(
         graph: &Path,
         runtime_version: &str,
         implementation_revision: &str,
         cache_identity: &str,
+    ) -> Result<Self, RawFoundationError> {
+        Self::open(
+            graph,
+            runtime_version,
+            implementation_revision,
+            cache_identity,
+            false,
+        )
+    }
+
+    fn open(
+        graph: &Path,
+        runtime_version: &str,
+        implementation_revision: &str,
+        cache_identity: &str,
+        cuda: bool,
     ) -> Result<Self, RawFoundationError> {
         let metadata = graph.metadata()?;
         if !metadata.is_file() || metadata.len() != GRAPH_BYTES {
@@ -122,10 +157,19 @@ impl RawNindModel {
                 "RawNIND graph digest changed".into(),
             ));
         }
-        let session = Session::builder()
-            .map_err(native)?
-            .commit_from_file(graph)
-            .map_err(native)?;
+        let mut builder = Session::builder().map_err(native)?;
+        if cuda {
+            builder = builder
+                .with_execution_providers([ep::CUDA::default()
+                    .with_tf32(false)
+                    .with_conv_algorithm_search(ep::cuda::ConvAlgorithmSearch::Heuristic)
+                    .build()
+                    .error_on_failure()])
+                .map_err(native)?
+                .with_disable_cpu_fallback()
+                .map_err(native)?;
+        }
+        let session = builder.commit_from_file(graph).map_err(native)?;
         validate_outlet(session.inputs(), "input", &[1, 4, 512, 512])?;
         validate_outlet(session.outputs(), "output", &[1, 3, 1024, 1024])?;
         Ok(Self {
@@ -135,7 +179,12 @@ impl RawNindModel {
                 exact_revision: "release-5.6.0@5454d7aa6d89a67054fd4a83343b09e69acaf76a".into(),
                 graph_sha256: GRAPH_SHA256.into(),
                 runtime: format!("onnxruntime-{runtime_version}"),
-                execution_provider: "CPUExecutionProvider".into(),
+                execution_provider: if cuda {
+                    "CUDAExecutionProvider"
+                } else {
+                    "CPUExecutionProvider"
+                }
+                .into(),
                 precision: "float32".into(),
                 implementation_revision: implementation_revision.into(),
                 cache_identity: cache_identity.into(),

@@ -15,7 +15,8 @@ use infer_artifact_lease::{
 };
 use infer_core::{
     AttemptTrigger, CapabilityLevel, ExecutionMode, ExecutionRequirements, Fallback, JobState,
-    Latency, Modality, PlacementPreference, PlacementScope, Priority, RequestConstraints,
+    Latency, Modality, OnnxExecutionProvider, PlacementPreference, PlacementScope, Priority,
+    RequestConstraints,
 };
 use infer_raw_foundation::{
     RawFoundationArtifactReceipt, RawFoundationExecuteRequest, RawFoundationLeaseRequest,
@@ -24,6 +25,7 @@ use infer_raw_foundation::{
 use serde::Serialize;
 use thiserror::Error;
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::{JobPreparation, PreparedRun, Runtime, RuntimeError, unix_time_ms};
 
@@ -99,12 +101,53 @@ struct PendingRawJob {
     expires_at_unix_ms: u64,
 }
 
+struct DisconnectWatcher(tokio::task::JoinHandle<()>);
+
+impl Drop for DisconnectWatcher {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+struct RevokeRawScope {
+    registry: Arc<ArtifactLeaseRegistry>,
+    app: String,
+    job: String,
+}
+
+impl Drop for RevokeRawScope {
+    fn drop(&mut self) {
+        let _ = self
+            .registry
+            .revoke_scope(&self.app, &self.job, self.registry.daemon_generation());
+    }
+}
+
 pub struct RawFoundationControl {
     runtime: Arc<Runtime>,
     registry: Arc<ArtifactLeaseRegistry>,
-    model: Arc<StdMutex<RawNindModel>>,
+    model: Arc<StdMutex<RawModelOwner>>,
     socket_path: PathBuf,
     pending: Mutex<HashMap<String, PendingRawJob>>,
+}
+
+/// One immutable graph and its execution-specific session lifetime. CUDA is
+/// released after every foundation job so it cannot retain VRAM across Qwen
+/// or interactive editing work. The original CPU Build keeps its warm session.
+struct RawModelOwner {
+    graph: PathBuf,
+    cuda: bool,
+    loaded: Option<RawNindModel>,
+}
+
+impl RawModelOwner {
+    fn load(&self) -> Result<RawNindModel, infer_raw_foundation::RawFoundationError> {
+        if self.cuda {
+            RawNindModel::open_experimental_cuda(&self.graph, "1.27.0")
+        } else {
+            RawNindModel::open_experimental_cpu(&self.graph, "1.27.0")
+        }
+    }
 }
 
 impl RawFoundationControl {
@@ -115,8 +158,42 @@ impl RawFoundationControl {
         graph: &Path,
         runtime_library: &Path,
     ) -> Result<Arc<Self>, RawFoundationControlError> {
+        Self::new_with_execution_provider(
+            runtime,
+            registry,
+            socket_path,
+            graph,
+            runtime_library,
+            OnnxExecutionProvider::Cpu,
+        )
+    }
+
+    pub fn new_with_execution_provider(
+        runtime: Arc<Runtime>,
+        registry: Arc<ArtifactLeaseRegistry>,
+        socket_path: PathBuf,
+        graph: &Path,
+        runtime_library: &Path,
+        execution_provider: OnnxExecutionProvider,
+    ) -> Result<Arc<Self>, RawFoundationControlError> {
+        if execution_provider == OnnxExecutionProvider::Coreml {
+            return Err(infer_raw_foundation::RawFoundationError::ModelContract(
+                "RawNIND Core ML execution is not supported".into(),
+            )
+            .into());
+        }
         RawNindModel::initialize_runtime(runtime_library)?;
-        let model = RawNindModel::open_experimental_cpu(graph, "1.27.0")?;
+        let mut model = RawModelOwner {
+            graph: graph.to_owned(),
+            cuda: execution_provider == OnnxExecutionProvider::Cuda,
+            loaded: None,
+        };
+        // Fail closed on a bad graph, unavailable EP or tensor mismatch before
+        // listening; a CUDA startup check does not retain a residency claim.
+        let verified = model.load()?;
+        if !model.cuda {
+            model.loaded = Some(verified);
+        }
         Ok(Arc::new(Self {
             runtime,
             registry,
@@ -215,6 +292,17 @@ impl RawFoundationControl {
         job_id: &str,
         request: RawFoundationExecuteRequest,
     ) -> Result<RawFoundationResponse, RawFoundationControlError> {
+        self.execute_cancellable(app_id, job_id, request, CancellationToken::new())
+            .await
+    }
+
+    pub async fn execute_cancellable(
+        &self,
+        app_id: &str,
+        job_id: &str,
+        request: RawFoundationExecuteRequest,
+        disconnected: CancellationToken,
+    ) -> Result<RawFoundationResponse, RawFoundationControlError> {
         let pending = self
             .pending
             .lock()
@@ -225,6 +313,19 @@ impl RawFoundationControl {
             self.pending.lock().await.insert(job_id.into(), pending);
             return Err(RawFoundationControlError::UnknownJob);
         }
+        let _scope = RevokeRawScope {
+            registry: Arc::clone(&self.registry),
+            app: app_id.into(),
+            job: job_id.into(),
+        };
+        // Only the request which acquired the pending Job may link its own
+        // connection lifetime to that Job. A rejected duplicate cannot cancel
+        // another execution. Retain this link through admission and cleanup.
+        let job_cancellation = pending.prepared.cancellation.clone();
+        let _disconnect = DisconnectWatcher(tokio::spawn(async move {
+            disconnected.cancelled().await;
+            job_cancellation.cancel();
+        }));
         if pending.prepared.cancellation.is_cancelled() {
             let _ =
                 self.registry
@@ -248,35 +349,69 @@ impl RawFoundationControl {
         let job = job_id.to_owned();
         let generation = self.registry.daemon_generation().to_owned();
         let cancellation = prepared.cancellation.clone();
-        let result = tokio::task::spawn_blocking(move || {
+        let mut worker = tokio::task::spawn_blocking(move || {
             let mut model = model
                 .lock()
                 .map_err(|_| RawFoundationControlError::Worker)?;
-            materialize_foundation_to_lease(
+            if model.loaded.is_none() {
+                model.loaded = Some(model.load()?);
+            }
+            let loaded = model.loaded.as_mut().expect("loaded RawNIND session");
+            let identity = loaded.identity().clone();
+            let result = materialize_foundation_to_lease(
                 &registry,
                 &raw_request,
                 &app,
                 &job,
                 &generation,
                 now_ms(),
-                &mut model,
+                loaded,
                 &cancellation,
             )
-            .map_err(Into::into)
-        })
-        .await
-        .map_err(|_| RawFoundationControlError::Worker)?;
+            .map_err(Into::into);
+            if model.cuda {
+                model.loaded = None;
+            }
+            result.map(|artifact| (artifact, identity))
+        });
+        let result = match prepared.deadline {
+            Some(deadline) => tokio::select! {
+                result = &mut worker => result.map_err(|_| RawFoundationControlError::Worker)?,
+                _ = tokio::time::sleep_until(deadline) => {
+                    prepared.cancellation.cancel();
+                    let _ = worker.await;
+                    Err(RawFoundationControlError::Runtime(RuntimeError::DeadlineExpired))
+                },
+                _ = prepared.cancellation.cancelled() => {
+                    let _ = worker.await;
+                    Err(RawFoundationControlError::Runtime(RuntimeError::Cancelled))
+                },
+            },
+            None => tokio::select! {
+                result = &mut worker => result.map_err(|_| RawFoundationControlError::Worker)?,
+                _ = prepared.cancellation.cancelled() => {
+                    let _ = worker.await;
+                    Err(RawFoundationControlError::Runtime(RuntimeError::Cancelled))
+                },
+            },
+        };
+        let result = if prepared
+            .deadline
+            .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
+        {
+            Err(RawFoundationControlError::Runtime(
+                RuntimeError::DeadlineExpired,
+            ))
+        } else if prepared.cancellation.is_cancelled() {
+            Err(RawFoundationControlError::Runtime(RuntimeError::Cancelled))
+        } else {
+            result
+        };
         match result {
-            Ok(artifact) => {
+            Ok((artifact, identity)) => {
                 self.runtime
                     .complete_vision_success(&prepared, attempt)
                     .await?;
-                let identity = self
-                    .model
-                    .lock()
-                    .map_err(|_| RawFoundationControlError::Worker)?
-                    .identity()
-                    .clone();
                 let snapshot = self
                     .runtime
                     .snapshot(&prepared.job_id)
@@ -305,7 +440,16 @@ impl RawFoundationControl {
                 })
             }
             Err(error) => {
+                let _ =
+                    self.registry
+                        .revoke_scope(app_id, job_id, self.registry.daemon_generation());
                 let runtime_error = match &error {
+                    RawFoundationControlError::Runtime(RuntimeError::DeadlineExpired) => {
+                        RuntimeError::DeadlineExpired
+                    }
+                    RawFoundationControlError::Runtime(RuntimeError::Cancelled) => {
+                        RuntimeError::Cancelled
+                    }
                     RawFoundationControlError::Lease(ArtifactLeaseError::Cancelled)
                     | RawFoundationControlError::Raw(
                         infer_raw_foundation::RawFoundationError::Lease(

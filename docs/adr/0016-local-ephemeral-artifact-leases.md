@@ -168,3 +168,18 @@ HTTP error code、终态 `cancelled` 和空 pending partial。响应 provenance 
 graph SHA-256；Shadow strict client 同时验证专用 Provider 与这些 immutable identities。production
 assembly 只把上述已验证 wire 接到 composition root；不改变 Shadow cache-before-runtime、独立
 verifier/publisher 或 stale-result owner。
+
+### Windows WSL 与独立 CUDA checkpoint
+
+Windows 官方 SDK 的 owner-only open-handle binding 现通过私有 WSL stdio 通道，
+以固定 64 KiB transfer buffer 将 staging 接入原有 SCM_RIGHTS registry；HTTP 仍只有
+bounded descriptor 与 lease identity。该实现属于 copying bridge，不宣称零拷贝。
+Windows DACL/owner/access/file identity、Unix UID/private socket、App/Job/generation/TTL
+分别保持各自 owner。详见 `WINDOWS_RAW_FOUNDATION.md`。
+
+ORT 1.27 CUDA Build 独立使用 `rawnind_ort127_cuda_exp1`、
+`rawnind-public-bayer-foundation-ort127-cuda-exp1` 与 `rawnind-cuda-ort127-exp1`。
+同一 graph 的 CUDA 路径禁用 TF32 与 CPU fallback，产物精确记录单一
+`CUDAExecutionProvider`。已有 CPU experimental 与 legacy 1.24.4 身份均不改变。
+公开 Nikon D3S 全图在 native Windows SDK 已执行并与 CPU 逐 stripe 比对；结果、
+样本范围和数值限制保存在 Windows RAW 文档，不能扩张为全部相机支持结论。

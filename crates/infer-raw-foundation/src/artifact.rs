@@ -89,7 +89,7 @@ pub fn materialize_foundation_to_lease(
             "execution": {
                 "engine": "onnxruntime",
                 "runtime_version": model.identity().runtime,
-                "requested_provider": "cpu",
+                "requested_provider": if model.identity().execution_provider == "CUDAExecutionProvider" { "cuda" } else { "cpu" },
                 "active_providers": [model.identity().execution_provider],
                 "platform": std::env::consts::OS,
                 "machine": std::env::consts::ARCH,

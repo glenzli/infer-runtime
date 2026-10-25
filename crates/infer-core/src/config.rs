@@ -84,6 +84,9 @@ pub struct RawFoundationConfig {
     pub runtime_library: Option<String>,
     pub runtime_version: Option<String>,
     pub socket_directory: Option<String>,
+    /// Omission retains the immutable CPU experimental Build. CUDA uses a
+    /// distinct Build, implementation revision and cache identity.
+    pub execution_provider: Option<OnnxExecutionProvider>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, serde::Serialize)]
@@ -115,6 +118,9 @@ pub struct OnnxRuntimeConfig {
     /// is explicit. Actual routing is always disclosed in result provenance.
     #[serde(default)]
     pub allow_cpu_fallback: bool,
+    /// Opt-in release of unused sessions; active inference references are never
+    /// evicted. Omission preserves existing native lifecycle policy.
+    pub idle_timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, serde::Serialize)]
@@ -604,6 +610,7 @@ string_enum!(ProviderKind {
     MediaEmbeddingWorker => "media_embedding_worker",
     OcrWorker => "ocr_worker",
     CoremlWorker => "coreml_worker",
+    TorchSamWorker => "torch_sam_worker",
     Onnx => "onnx",
     RawFoundation => "raw_foundation"
 });
@@ -620,6 +627,7 @@ impl std::fmt::Display for ProviderKind {
             Self::MediaEmbeddingWorker => "media_embedding_worker",
             Self::OcrWorker => "ocr_worker",
             Self::CoremlWorker => "coreml_worker",
+            Self::TorchSamWorker => "torch_sam_worker",
             Self::Onnx => "onnx",
             Self::RawFoundation => "raw_foundation",
         })
@@ -949,7 +957,8 @@ string_enum!(LocalWorkerAdapterKind {
     PpOcrv6 => "pp_ocrv6",
     YamnetAudioEvents => "yamnet_audio_events",
     ClapAudioTextEmbedding => "clap_audio_text_embedding",
-    Sam21Coreml => "sam21_coreml"
+    Sam21Coreml => "sam21_coreml",
+    Sam21Torch => "sam21_torch"
 });
 
 impl std::fmt::Display for LocalWorkerAdapterKind {
@@ -962,6 +971,7 @@ impl std::fmt::Display for LocalWorkerAdapterKind {
             Self::YamnetAudioEvents => "yamnet_audio_events",
             Self::ClapAudioTextEmbedding => "clap_audio_text_embedding",
             Self::Sam21Coreml => "sam21_coreml",
+            Self::Sam21Torch => "sam21_torch",
         })
     }
 }
@@ -1285,6 +1295,27 @@ impl RuntimeConfig {
             return Ok(());
         }
         let raw = &self.raw_foundation;
+        if raw.execution_provider == Some(OnnxExecutionProvider::Coreml) {
+            return Err(configuration(
+                "RawNIND supports only the fixed CPU or CUDA experimental Build",
+            ));
+        }
+        let cuda = raw.execution_provider == Some(OnnxExecutionProvider::Cuda);
+        let build_id = if cuda {
+            "rawnind_ort127_cuda_exp1"
+        } else {
+            "rawnind_ort127_exp1"
+        };
+        let feature = if cuda {
+            "rawnind_foundation_ort127_cuda_exp1"
+        } else {
+            "rawnind_foundation_ort127_exp1"
+        };
+        let variant = if cuda {
+            "onnxruntime-1.27.0-cuda12-fp32"
+        } else {
+            "onnxruntime-1.27.0-cpu-fp32"
+        };
         let required = [
             raw.graph.as_deref(),
             raw.graph_sha256.as_deref(),
@@ -1325,7 +1356,7 @@ impl RuntimeConfig {
             || !intent
                 .required_features
                 .iter()
-                .any(|feature| feature == "rawnind_foundation_ort127_exp1")
+                .any(|value| value == feature)
         {
             return Err(configuration(
                 "raw.materialize_foundation must preserve the frozen RAW data-plane, modalities, and feature identity",
@@ -1349,31 +1380,29 @@ impl RuntimeConfig {
                 "RawNIND activation requires a benchmarked foundational rating with eval_profile evidence",
             ));
         }
-        let build = self
-            .model_builds
-            .get("rawnind_ort127_exp1")
-            .ok_or_else(|| {
-                configuration("enabled raw_foundation requires model build rawnind_ort127_exp1")
-            })?;
+        let build = self.model_builds.get(build_id).ok_or_else(|| {
+            configuration(format!(
+                "enabled raw_foundation requires model build {build_id}"
+            ))
+        })?;
         if build.profile != "rawnind"
             || build.model_id != "darktable-ai/rawnind-public-bayer"
-            || build.variant.as_deref() != Some("onnxruntime-1.27.0-cpu-fp32")
+            || build.variant.as_deref() != Some(variant)
             || build.input_modalities != [Modality::Image]
             || build.output_modalities != [Modality::Image]
-            || !build
-                .features
-                .iter()
-                .any(|feature| feature == "rawnind_foundation_ort127_exp1")
+            || !build.features.iter().any(|value| value == feature)
         {
-            return Err(configuration(
-                "RawNIND activation requires the exact rawnind_ort127_exp1 Build identity",
-            ));
+            return Err(configuration(format!(
+                "RawNIND activation requires the exact {build_id} Build identity"
+            )));
         }
-        let deployment = self.deployments.get("rawnind_ort127_exp1").ok_or_else(|| {
-            configuration("enabled raw_foundation requires deployment rawnind_ort127_exp1")
+        let deployment = self.deployments.get(build_id).ok_or_else(|| {
+            configuration(format!(
+                "enabled raw_foundation requires deployment {build_id}"
+            ))
         })?;
         if deployment.provider != "raw-foundation-local"
-            || deployment.build != "rawnind_ort127_exp1"
+            || deployment.build != build_id
             || deployment.resource_class != ResourceClass::Heavy
             || deployment.estimated_cost_usd != 0.0
             || !deployment
@@ -1473,13 +1502,25 @@ impl RuntimeConfig {
     }
 
     fn validate_providers(&self) -> Result<(), ContractError> {
+        if self
+            .runtimes
+            .onnx
+            .idle_timeout_ms
+            .is_some_and(|value| !(1_000..=3_600_000).contains(&value))
+        {
+            return Err(configuration(
+                "runtimes.onnx.idle_timeout_ms must be 1000..3600000",
+            ));
+        }
         for (id, provider) in &self.providers {
             crate::node::validate_provider(id, provider)?;
             if provider.kind == ProviderKind::AppleImage && provider.placement != Placement::Local {
                 return Err(configuration("Apple image worker must execute locally"));
             }
-            if provider.kind == ProviderKind::MediaEmbeddingWorker
-                && provider.placement != Placement::Local
+            if matches!(
+                provider.kind,
+                ProviderKind::MediaEmbeddingWorker | ProviderKind::TorchSamWorker
+            ) && provider.placement != Placement::Local
             {
                 return Err(configuration("media embedding worker must execute locally"));
             }
@@ -1495,6 +1536,7 @@ impl RuntimeConfig {
                 | ProviderKind::MediaEmbeddingWorker
                 | ProviderKind::OcrWorker
                 | ProviderKind::CoremlWorker
+                | ProviderKind::TorchSamWorker
                     if provider.command.as_deref().is_none_or(str::is_empty) =>
                 {
                     return Err(configuration(format!(
@@ -1519,6 +1561,7 @@ impl RuntimeConfig {
                 ProviderKind::MediaEmbeddingWorker => ProviderProtocol::MediaEmbeddingWorker,
                 ProviderKind::OcrWorker => ProviderProtocol::OcrWorker,
                 ProviderKind::CoremlWorker => ProviderProtocol::CoremlWorker,
+                ProviderKind::TorchSamWorker => ProviderProtocol::TorchSamWorker,
                 ProviderKind::Onnx => ProviderProtocol::Onnx,
                 // The specialized RawFoundationControl owns graph execution;
                 // this provider contributes only scheduling/admission and
@@ -1561,6 +1604,7 @@ impl RuntimeConfig {
                     | ProviderProtocol::MediaEmbeddingWorker
                     | ProviderProtocol::OcrWorker
                     | ProviderProtocol::CoremlWorker
+                    | ProviderProtocol::TorchSamWorker
                     | ProviderProtocol::Onnx
             ) && !provider.capability_profile.capabilities.is_empty()
             {
@@ -1951,6 +1995,9 @@ impl RuntimeConfig {
                                 }
                                 OnnxAdapterKind::GroundingDinoSemanticGrounding => {
                                     text.padding == "longest"
+                                        || (text.padding == "max_length"
+                                            && text.identity
+                                                == "grounding_dino_bert_uncased_period_pad256_v1")
                                 }
                                 _ => unreachable!("validated text ONNX adapter"),
                             }
@@ -2100,6 +2147,7 @@ impl RuntimeConfig {
                     | ProviderKind::MediaEmbeddingWorker
                     | ProviderKind::OcrWorker
                     | ProviderKind::CoremlWorker
+                    | ProviderKind::TorchSamWorker
             ) || (provider.kind == ProviderKind::AudioWorker
                 && build.local_worker.is_some());
             if worker_provider && build.local_worker.is_none() {
@@ -2134,6 +2182,10 @@ impl RuntimeConfig {
                         | (
                             ProviderKind::CoremlWorker,
                             LocalWorkerAdapterKind::Sam21Coreml
+                        )
+                        | (
+                            ProviderKind::TorchSamWorker,
+                            LocalWorkerAdapterKind::Sam21Torch
                         )
                 );
                 if !adapter_matches {
@@ -2548,6 +2600,7 @@ fn provider_serves_data_plane(provider: &ProviderConfig, data_plane: &str) -> bo
         }
         ProviderKind::OcrWorker => data_plane == "document.ocr",
         ProviderKind::CoremlWorker => data_plane == "vision.subject_segmentation",
+        ProviderKind::TorchSamWorker => data_plane == "vision.subject_segmentation",
         ProviderKind::Onnx => {
             data_plane.starts_with("vision.") && !crate::is_apple_image_plane(data_plane)
         }
@@ -2750,7 +2803,7 @@ fn validate_build_supply_chain(id: &str, build: &ModelBuildConfig) -> Result<(),
                     )));
                 }
             }
-            LocalWorkerAdapterKind::Sam21Coreml => {
+            LocalWorkerAdapterKind::Sam21Coreml | LocalWorkerAdapterKind::Sam21Torch => {
                 if worker
                     .preprocessing_identity
                     .as_deref()
@@ -2768,7 +2821,21 @@ fn validate_build_supply_chain(id: &str, build: &ModelBuildConfig) -> Result<(),
                     || worker.instruction_revision.is_some()
                 {
                     return Err(configuration(format!(
-                        "SAM 2.1 CoreML build {id} needs preprocessing and execution-provider identity"
+                        "SAM 2.1 build {id} needs preprocessing and execution-provider identity"
+                    )));
+                }
+                if worker.adapter == LocalWorkerAdapterKind::Sam21Torch
+                    && (worker.runtime != "transformers-4.56.2-torch-2.8.0-cu128"
+                        || worker.precision != "float32"
+                        || worker.preprocessing_identity.as_deref()
+                            != Some("sam21_transformers_exact1024_rgb_imagenet_v1")
+                        || worker.postprocessing_identity
+                            != "sam21_torch_best_iou_native256_sigmoid_binary_bilinear_v1"
+                        || worker.requested_execution_provider.as_deref() != Some("cuda")
+                        || worker.actual_execution_provider.as_deref() != Some("cuda"))
+                {
+                    return Err(configuration(format!(
+                        "SAM Torch build {id} requires its fixed CUDA runtime, preprocessing, postprocessing and FP32 contract"
                     )));
                 }
             }
@@ -3150,7 +3217,7 @@ mod tests {
 
     #[test]
     fn configuration_rejects_unknown_keys_at_root_and_nested_levels() {
-        let source = include_str!("../../../config/infer.example.toml");
+        let source = include_str!("../../../config/infer.example.toml").replace("\r\n", "\n");
         let root_error =
             toml::from_str::<RuntimeConfig>(&format!("unknown_root = true\n{source}")).unwrap_err();
         assert!(root_error.to_string().contains("unknown_root"));
@@ -3362,7 +3429,7 @@ mod tests {
 
     #[test]
     fn routing_config_rejects_unknown_nested_fields() {
-        let source = include_str!("../../../config/infer.example.toml");
+        let source = include_str!("../../../config/infer.example.toml").replace("\r\n", "\n");
         let invalid = source.replacen(
             "[apps.example-shape-consumer.routing]\n",
             "[apps.example-shape-consumer.routing]\nphysical_models = [\"forbidden\"]\n",
@@ -3708,6 +3775,35 @@ supported_execution_modes = ["unary"]
         config.raw_foundation.runtime_version = Some("1.27.0".into());
         config.raw_foundation.socket_directory = Some("/tmp/infer-runtime/raw".into());
         assert!(config.validate().is_ok());
+
+        let mut cuda = config.clone();
+        cuda.raw_foundation.execution_provider = Some(super::OnnxExecutionProvider::Cuda);
+        assert!(
+            cuda.validate().is_err(),
+            "a CPU identity must not become CUDA"
+        );
+        let mut build = cuda.model_builds["rawnind_ort127_exp1"].clone();
+        build.variant = Some("onnxruntime-1.27.0-cuda12-fp32".into());
+        build.features = vec!["rawnind_foundation_ort127_cuda_exp1".into()];
+        cuda.model_builds
+            .insert("rawnind_ort127_cuda_exp1".into(), build);
+        let mut deployment = cuda.deployments["rawnind_ort127_exp1"].clone();
+        deployment.build = "rawnind_ort127_cuda_exp1".into();
+        cuda.deployments
+            .insert("rawnind_ort127_cuda_exp1".into(), deployment);
+        cuda.intents
+            .get_mut("raw.materialize_foundation")
+            .unwrap()
+            .required_features = vec!["rawnind_foundation_ort127_cuda_exp1".into()];
+        assert!(cuda.validate().is_ok());
+        cuda.model_builds
+            .get_mut("rawnind_ort127_cuda_exp1")
+            .unwrap()
+            .variant = Some("onnxruntime-1.27.0-cpu-fp32".into());
+        assert!(
+            cuda.validate().is_err(),
+            "a CUDA Build must reject CPU relabeling"
+        );
 
         config.raw_foundation.runtime_version = Some("1.24.4".into());
         assert!(config.validate().is_err());

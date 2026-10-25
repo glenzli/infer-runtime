@@ -8,6 +8,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
@@ -232,6 +233,7 @@ struct SessionEntry {
     requested_execution_provider: OnnxExecutionProvider,
     actual_execution_provider: OnnxExecutionProvider,
     execution_provider_fallback_reason: Option<String>,
+    last_used: Mutex<Instant>,
 }
 
 impl OnnxProviderRuntime {
@@ -251,13 +253,48 @@ impl OnnxProviderRuntime {
                 (physical_model, RegisteredBuild { build_id, build })
             })
             .collect();
-        Ok(Arc::new(Self {
+        let idle_timeout_ms = runtime.idle_timeout_ms;
+        if idle_timeout_ms.is_some_and(|value| !(1_000..=3_600_000).contains(&value)) {
+            return Err(ProviderError::Protocol(
+                "ONNX idle timeout must be 1000..3600000 milliseconds".into(),
+            ));
+        }
+        let result = Arc::new(Self {
             id: id.into(),
             runtime,
             store,
             builds: Arc::new(builds),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
-        }))
+        });
+        if let Some(milliseconds) = idle_timeout_ms {
+            let weak = Arc::downgrade(&result.sessions);
+            let timeout = Duration::from_millis(milliseconds);
+            std::thread::spawn(move || {
+                loop {
+                    {
+                        let Some(sessions) = weak.upgrade() else {
+                            break;
+                        };
+                        let Ok(mut sessions) = sessions.lock() else {
+                            break;
+                        };
+                        sessions.retain(|_, entry| {
+                            let Ok(mut last_used) = entry.last_used.lock() else {
+                                return true;
+                            };
+                            if Arc::strong_count(entry) > 1 {
+                                *last_used = Instant::now();
+                                true
+                            } else {
+                                last_used.elapsed() < timeout
+                            }
+                        });
+                    }
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+            });
+        }
+        Ok(result)
     }
 
     fn registered(&self, model: &str) -> Result<&RegisteredBuild, ProviderError> {
@@ -273,6 +310,9 @@ impl OnnxProviderRuntime {
         // registry lock and is serialized only per Session.
         let mut sessions = self.sessions.lock().expect("session registry poisoned");
         if let Some(session) = sessions.get(model) {
+            if let Ok(mut last_used) = session.last_used.lock() {
+                *last_used = Instant::now();
+            }
             return Ok(Arc::clone(session));
         }
         let registered = self.registered(model)?;
@@ -345,6 +385,7 @@ impl OnnxProviderRuntime {
             requested_execution_provider: requested,
             actual_execution_provider: actual,
             execution_provider_fallback_reason: fallback_reason,
+            last_used: Mutex::new(Instant::now()),
         });
         sessions.insert(model.into(), Arc::clone(&entry));
         Ok(entry)
@@ -847,6 +888,7 @@ fn build_session(
         OnnxExecutionProvider::Cpu => {}
         OnnxExecutionProvider::Cuda => {
             let execution_provider = ep::CUDA::default()
+                .with_tf32(false)
                 .with_conv_algorithm_search(ep::cuda::ConvAlgorithmSearch::Heuristic)
                 .build()
                 .error_on_failure();

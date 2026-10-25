@@ -176,12 +176,21 @@ fn validate_build_contract(entry: &SessionEntry) -> Result<(), ProviderError> {
         dtype: dtype.into(),
         shape: shape.iter().map(|value| (*value).into()).collect(),
     };
+    let batch = if onnx
+        .inputs
+        .first()
+        .is_some_and(|input| input.shape.first().is_some_and(|value| value == "1"))
+    {
+        "1"
+    } else {
+        "batch"
+    };
     let valid = onnx.inputs
         == [
-            tensor("image", "float32", &["batch", "3", "512", "512"]),
-            tensor("mask", "float32", &["batch", "1", "512", "512"]),
+            tensor("image", "float32", &[batch, "3", "512", "512"]),
+            tensor("mask", "float32", &[batch, "1", "512", "512"]),
         ]
-        && onnx.outputs == [tensor("output", "float32", &["batch", "3", "512", "512"])]
+        && onnx.outputs == [tensor("output", "float32", &[batch, "3", "512", "512"])]
         && preprocess.identity == "lama_exact_512_rgb_unit_mask_binary_v1"
         && preprocess.orientation == VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS
         && preprocess.resize == "exact_512x512_triangle_image_nearest_mask"

@@ -96,3 +96,39 @@ X-Trans, non-Bayer, floating-point, interleaved or otherwise incompatible stagin
 must fail closed. This D3S result establishes one real camera source; another
 camera's decoder and pixel contract must be independently verified before
 claiming support. Original photos are never modified by this binding.
+
+## Independent ORT 1.27 CUDA Build
+
+The CUDA variant is `rawnind_ort127_cuda_exp1`, implementation
+`rawnind-public-bayer-foundation-ort127-cuda-exp1`, cache
+`rawnind-cuda-ort127-exp1`. It uses the same pinned graph and algorithm with
+FP32, TF32 disabled, and CPU fallback disabled. Artifact execution metadata is
+exactly engine `onnxruntime`, runtime version `onnxruntime-1.27.0`, requested
+provider `cuda` and active providers `["CUDAExecutionProvider"]`. CPU and legacy
+1.24.4 artifacts remain separate and cannot be cross-labeled.
+
+The same D3S source completed through the native Windows SDK in 45.566 seconds,
+producing 146,208,255 bytes with file SHA-256
+`563a9d0231906f25cdb147543603c76dc27fc9ec35f65e633d22d1b862dce90e`.
+Its 80 tile inferences retained the same 824-row accumulator limit and zero
+explicit full-output buffers. The CUDA cache key is
+`e9287ffc4bf43b0901782fe17756116292100c3f1da4f381a164a0f2d19e5f9a`.
+
+An independent reader verified both artifact footers, manifests and every stripe
+digest, then compared all 36,551,088 float values. All were finite; maximum
+absolute CPU/CUDA error was `4.76837158203125e-7`, mean absolute error
+`2.2915429183070495e-9`, and RMSE `5.441726989071746e-9`. No value differed by
+more than `1e-5`. These are measurements for this fixture and machine, not a
+universal numerical tolerance or a camera support claim. CUDA sessions are
+released after each Job so they do not retain the RAW model between requests.
+
+Native Windows lifecycle checks on the same CUDA Build also passed: a 5-second
+deadline ended the running Job as `expired` / `deadline_exceeded` in 5.40 seconds;
+explicit running cancellation ended as `cancelled` in 1.17 seconds; aborting the
+in-flight HTTP operation automatically cancelled its Job in 1.23 seconds. Each
+check verified zero native output bytes and deletion of its unpublished partial.
+An unused lease expired and released its native file lock after approximately
+31 seconds. These times include registration and test setup. A real-model HTTP /
+SCM_RIGHTS regression also verifies that a rejected duplicate execution request
+cannot cancel the original running Job. Reservations remain held until the
+native worker's cancellation cleanup completes.

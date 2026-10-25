@@ -106,16 +106,19 @@ fn validate_build_contract(entry: &SessionEntry) -> Result<(), ProviderError> {
         dtype: dtype.into(),
         shape: shape.iter().map(|value| (*value).into()).collect(),
     };
-    let valid = onnx.inputs == [tensor("input", "float32", &["batch", "3", "512", "512"])]
+    let fixed = onnx.inputs == [tensor("input", "float32", &["1", "3", "512", "512"])];
+    let output_shape = if fixed {
+        ["1", "19", "512", "512"]
+    } else {
+        ["batch", "classes", "height", "width"]
+    };
+    let valid = (fixed
+        || onnx.inputs == [tensor("input", "float32", &["batch", "3", "512", "512"])])
         && onnx.outputs
             == [
-                tensor(
-                    "output",
-                    "float32",
-                    &["batch", "classes", "height", "width"],
-                ),
-                tensor("414", "float32", &["batch", "classes", "height", "width"]),
-                tensor("424", "float32", &["batch", "classes", "height", "width"]),
+                tensor("output", "float32", &output_shape),
+                tensor("414", "float32", &output_shape),
+                tensor("424", "float32", &output_shape),
             ]
         && preprocess.identity == "bisenet_resnet18_celeba_512_rgb_imagenet_v1"
         && preprocess.orientation == VISION_ORIENTATION_NORMALIZED_DISPLAY_PIXELS

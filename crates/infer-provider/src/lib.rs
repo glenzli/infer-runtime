@@ -7,13 +7,13 @@ pub use trusted_node::TrustedNodeProvider;
 mod audio_stream;
 mod audio_worker;
 mod codex_app_server;
-mod coreml_sam;
 mod media_embedding_worker;
 mod ocr_worker;
 mod ollama_vision;
 mod onnx;
 mod probe;
 mod runtime_dependency;
+mod sam_worker;
 mod text_retrieval_worker;
 pub use media_embedding_worker::{
     DynMediaEmbeddingExecutor, MediaBuildContract, MediaEmbeddingExecutionOutput,
@@ -39,11 +39,6 @@ pub use audio_worker::{
     DynAudioExecutor,
 };
 pub use codex_app_server::CodexAppServerProvider;
-pub use coreml_sam::{
-    CoremlSamExecutor, DynSubjectSegmentationExecutor, SamBuildContract,
-    SubjectSegmentationExecutionOutput, SubjectSegmentationExecutor,
-    SubjectSegmentationSoftMaskExecutionOutput,
-};
 pub use ocr_worker::{
     DynOcrExecutor, OcrBuildContract, OcrExecutionOutput, OcrExecutor, OcrWorkerExecutor,
 };
@@ -69,7 +64,13 @@ pub use probe::{
 pub use runtime_dependency::{
     ProviderReadinessStatus, ProviderRuntimeReadiness, ResolvedProviderProcess,
     RuntimeDependencyCheck, preflight_provider_runtime, provider_requires_ffmpeg,
-    resolve_provider_process, verify_clap_worker, verify_coreml_sam_worker, verify_yamnet_worker,
+    resolve_provider_process, verify_clap_worker, verify_coreml_sam_worker,
+    verify_torch_sam_worker, verify_yamnet_worker,
+};
+pub use sam_worker::{
+    CoremlSamExecutor, DynSubjectSegmentationExecutor, SamBuildContract, SamWorkerExecutor,
+    SubjectSegmentationExecutionOutput, SubjectSegmentationExecutor,
+    SubjectSegmentationSoftMaskExecutionOutput,
 };
 pub use text_retrieval_worker::{
     DynRetrievalExecutor, RetrievalBuildContract, RetrievalEmbeddingExecutionOutput,

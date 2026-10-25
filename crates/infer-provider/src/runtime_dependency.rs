@@ -405,8 +405,32 @@ pub fn verify_coreml_sam_worker(
     model_path: &str,
     artifact_sha256: &str,
 ) -> Result<RuntimeDependencyCheck, Box<RuntimeDependencyCheck>> {
+    verify_sam_worker(command, args, model_path, artifact_sha256, "coremltools")
+}
+
+pub fn verify_torch_sam_worker(
+    command: &str,
+    args: &[String],
+    model_path: &str,
+    artifact_sha256: &str,
+) -> Result<RuntimeDependencyCheck, Box<RuntimeDependencyCheck>> {
+    verify_sam_worker(command, args, model_path, artifact_sha256, "transformers")
+}
+
+fn verify_sam_worker(
+    command: &str,
+    args: &[String],
+    model_path: &str,
+    artifact_sha256: &str,
+    expected_runtime: &str,
+) -> Result<RuntimeDependencyCheck, Box<RuntimeDependencyCheck>> {
+    let check_name = if expected_runtime == "coremltools" {
+        "coreml_sam_worker"
+    } else {
+        "torch_sam_worker"
+    };
     let failure = |message: &str| RuntimeDependencyCheck {
-        name: "coreml_sam_worker".into(),
+        name: check_name.into(),
         requested: "admitted_build".into(),
         status: ProviderReadinessStatus::Unavailable,
         resolved_path: None,
@@ -485,6 +509,13 @@ pub fn verify_coreml_sam_worker(
         .get("max_prompts")
         .and_then(serde_json::Value::as_u64);
     if version.is_none_or(str::is_empty)
+        || response.get("runtime").and_then(serde_json::Value::as_str) != Some(expected_runtime)
+        || (expected_runtime == "transformers"
+            && (version != Some("4.56.2/torch-2.8.0+cu128")
+                || response
+                    .get("actual_execution_provider")
+                    .and_then(serde_json::Value::as_str)
+                    != Some("cuda")))
         || components.is_none_or(|items| items.len() != 3)
         || input_size != Some(1024)
         || max_prompts != Some(16)
@@ -494,12 +525,15 @@ pub fn verify_coreml_sam_worker(
         )));
     }
     Ok(RuntimeDependencyCheck {
-        name: "coreml_sam_worker".into(),
+        name: check_name.into(),
         requested: "admitted_build".into(),
         status: ProviderReadinessStatus::Ready,
         resolved_path: None,
         canonical_target: None,
-        version: Some(format!("coremltools {}", version.unwrap_or_default())),
+        version: Some(format!(
+            "{expected_runtime} {}",
+            version.unwrap_or_default()
+        )),
         searched_paths: Vec::new(),
         message: None,
     })

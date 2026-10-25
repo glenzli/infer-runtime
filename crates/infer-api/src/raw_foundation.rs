@@ -10,6 +10,7 @@ use axum::{
 };
 use infer_control::{RawFoundationControl, RawFoundationControlError};
 use infer_raw_foundation::{RawFoundationExecuteRequest, RawFoundationLeaseRequest};
+use tokio_util::sync::CancellationToken;
 
 use crate::{ApiError, ApiState, authenticate, strict_json};
 
@@ -70,13 +71,32 @@ async fn execute(
     let app_id = authenticate(&state.api, &headers)?;
     let request = strict_json(request)?;
     let job_id = request.job_id.clone();
-    Ok(Json(
+    let disconnected = CancellationToken::new();
+    let mut cancellation = CancelRawOnDisconnect(Some(disconnected.clone()));
+    // Retain accounting and reservations until native cleanup finishes even
+    // when the HTTP future is dropped. The frontend guard signals cancellation.
+    let task = tokio::spawn(async move {
         state
             .raw
-            .execute(&app_id, &job_id, request)
+            .execute_cancellable(&app_id, &job_id, request, disconnected)
             .await
-            .map_err(raw_error)?,
-    ))
+    });
+    let result = task.await;
+    cancellation.0 = None;
+    let response = result
+        .map_err(|_| ApiError::internal("RAW execution task failed"))?
+        .map_err(raw_error)?;
+    Ok(Json(response))
+}
+
+struct CancelRawOnDisconnect(Option<CancellationToken>);
+
+impl Drop for CancelRawOnDisconnect {
+    fn drop(&mut self) {
+        if let Some(token) = &self.0 {
+            token.cancel();
+        }
+    }
 }
 
 fn raw_error(error: RawFoundationControlError) -> ApiError {
@@ -539,6 +559,34 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
         assert!(observed_running, "RawNIND Job never entered running state");
+        let duplicate = app
+            .clone()
+            .oneshot(
+                auth(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/infer/v1/raw/foundations"),
+                )
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"job_id":running_job,"lease_id":"lease_duplicate"}).to_string(),
+                ))
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(duplicate.status(), 404);
+        // Rejecting a second request must not cancel the first request's Job.
+        let still_running = app
+            .clone()
+            .oneshot(
+                auth(Request::builder().uri(format!("/infer/v1/jobs/{running_job}")))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(json_body(still_running).await["state"], "running");
         let cancelled = app
             .clone()
             .oneshot(

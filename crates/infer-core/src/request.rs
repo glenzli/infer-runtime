@@ -579,6 +579,7 @@ string_enum!(ProviderProtocol {
     MediaEmbeddingWorker => "media_embedding_worker",
     OcrWorker => "ocr_worker",
     CoremlWorker => "coreml_worker",
+    TorchSamWorker => "torch_sam_worker",
     Onnx => "onnx"
 });
 string_enum!(ProviderCapability {

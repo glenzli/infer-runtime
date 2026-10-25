@@ -1,6 +1,6 @@
-//! Persistent, cancellation-safe bridge for Apple CoreML SAM 2.1 models.
+//! Persistent, cancellation-safe bridge for typed SAM 2.1 workers.
 //!
-//! The worker owns CoreML specialization and a single bounded image-embedding
+//! The worker owns backend specialization and a single bounded image-embedding
 //! cache. This Rust owner keeps image and mask files ephemeral, validates the
 //! returned binary mask, and never exposes worker paths or diagnostics.
 
@@ -82,7 +82,7 @@ pub trait SubjectSegmentationExecutor: Send + Sync {
 
 pub type DynSubjectSegmentationExecutor = Arc<dyn SubjectSegmentationExecutor>;
 
-pub struct CoremlSamExecutor {
+pub struct SamWorkerExecutor {
     id: String,
     command: String,
     args: Vec<String>,
@@ -90,7 +90,10 @@ pub struct CoremlSamExecutor {
     process: Arc<Mutex<Option<WorkerProcess>>>,
 }
 
-impl CoremlSamExecutor {
+/// Compatibility name for existing Apple consumers of this Rust interface.
+pub type CoremlSamExecutor = SamWorkerExecutor;
+
+impl SamWorkerExecutor {
     pub fn new(
         id: impl Into<String>,
         command: String,
@@ -193,7 +196,7 @@ impl CoremlSamExecutor {
 }
 
 #[async_trait]
-impl SubjectSegmentationExecutor for CoremlSamExecutor {
+impl SubjectSegmentationExecutor for SamWorkerExecutor {
     fn id(&self) -> &str {
         &self.id
     }
@@ -279,7 +282,7 @@ impl SubjectSegmentationExecutor for CoremlSamExecutor {
     }
 }
 
-impl CoremlSamExecutor {
+impl SamWorkerExecutor {
     async fn run_segmentation(
         &self,
         physical_model: &str,
@@ -331,6 +334,14 @@ impl CoremlSamExecutor {
         if !result.score.is_finite() || !(0.0..=1.0).contains(&result.score) {
             return Err(ProviderError::Protocol(
                 "SAM worker returned an invalid mask score".into(),
+            ));
+        }
+        if provenance.runtime == "transformers-4.56.2-torch-2.8.0-cu128"
+            && (result.actual_execution_provider.as_deref() != Some("cuda")
+                || result.runtime_version.as_deref() != Some("4.56.2/torch-2.8.0+cu128"))
+        {
+            return Err(ProviderError::Protocol(
+                "SAM worker execution provenance mismatch".into(),
             ));
         }
         let metadata = fs::metadata(&mask_path)
@@ -493,6 +504,10 @@ struct WorkerResponse {
 #[derive(Debug, Deserialize)]
 struct WorkerResult {
     score: f32,
+    #[serde(default)]
+    actual_execution_provider: Option<String>,
+    #[serde(default)]
+    runtime_version: Option<String>,
 }
 
 #[cfg(test)]

@@ -1,0 +1,8 @@
+# Reuse the existing CUDA 12.8 runtime; never install an NVIDIA kernel driver.
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.8.0+cu128
+torchvision==0.23.0+cu128
+transformers==4.56.2
+numpy==2.5.4
+Pillow==11.3.0
+safetensors==0.8.0
