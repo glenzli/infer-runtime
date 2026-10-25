@@ -207,7 +207,9 @@ impl ArtifactStore {
         }
         let runtime_root = self.materialize_local_worker_build(&manifest)?;
         Ok(ResolvedLocalWorkerBuild {
-            runtime_root,
+            // Worker process contracts use an absolute model root even when
+            // the operator configured the store relative to the daemon cwd.
+            runtime_root: fs::canonicalize(runtime_root)?,
             manifest,
         })
     }
@@ -766,7 +768,10 @@ mod tests {
 
     #[test]
     fn publishes_and_reverifies_typed_local_worker_build() {
-        let directory = tempdir().unwrap();
+        let directory = tempfile::Builder::new()
+            .prefix(".infer-artifact-worker-test-")
+            .tempdir_in(".")
+            .unwrap();
         let model = directory.path().join("model.safetensors");
         let tokenizer = directory.path().join("tokenizer.json");
         fs::write(&model, b"model bytes").unwrap();
@@ -798,7 +803,9 @@ mod tests {
                 ),
             ]),
         };
-        let store = ArtifactStore::at(directory.path().join("store")).unwrap();
+        let relative_root = PathBuf::from(directory.path().file_name().unwrap()).join("store");
+        assert!(!relative_root.is_absolute());
+        let store = ArtifactStore::at(relative_root).unwrap();
         let published = store
             .publish_local_worker_build(
                 &manifest,
@@ -809,6 +816,15 @@ mod tests {
             published,
             store.resolve_local_worker_build(&manifest).unwrap()
         );
+        let resolved = store
+            .resolve_local_worker_build_identity(
+                &manifest.build_id,
+                &manifest.adapter,
+                &local_worker_artifact_set_sha256(&manifest),
+            )
+            .unwrap();
+        assert!(resolved.runtime_root.is_absolute());
+        assert_eq!(resolved.runtime_root, fs::canonicalize(&published).unwrap());
 
         fs::write(published.join("model"), b"tampered").unwrap();
         assert!(matches!(
