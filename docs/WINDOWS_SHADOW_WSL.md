@@ -67,6 +67,10 @@ config="$runtime_root/config/infer.toml"
 
 ## 启动与接入
 
+需要登录后常驻运行和 Sentinel 自动发现时，使用
+[Windows / WSL 正式安装](WINDOWS_INSTALL.md)。下面的启动器用于临时开发会话，
+不要与正式后台服务同时运行。
+
 在源码目录的 Windows PowerShell 7 中启动：
 
 ```powershell

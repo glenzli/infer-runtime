@@ -66,6 +66,8 @@ CLI 默认连接 `http://127.0.0.1:8787`，可通过 `--server` 或 `INFER_URL` 
 
 Windows Shadow 的原生 SDK 接入、WSL2 CUDA 环境和固定模型准备见
 [Windows Shadow / WSL2 CUDA](docs/WINDOWS_SHADOW_WSL.md)。
+登录后自动运行、后台恢复及 Infra Sentinel 发现见
+[Windows / WSL 常驻安装](docs/WINDOWS_INSTALL.md)。
 
 ## 可信节点（experimental）
 

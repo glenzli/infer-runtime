@@ -10,6 +10,7 @@ bind = "127.0.0.1:8787"
 enabled = true
 instance_id = "local"
 console_url = "http://127.0.0.1:8790/"
+http_credential_id = "infra-sentinel"
 
 [auth]
 managed_credentials_directory = ".infer-runtime/credentials"
@@ -39,6 +40,14 @@ allow_all_intents = true
 max_pending_jobs = 16
 default_policy = "balanced"
 allowed_policies = ["balanced"]
+
+# The installed Windows status bridge can only read redacted observer summaries.
+[apps.infra-sentinel]
+credential = { source = "managed" }
+observer_access = "summary"
+resource_admin = false
+allowed_intents = []
+max_pending_jobs = 1
 
 [runtimes.onnx]
 library = "@RUNTIME_ROOT@/.infer-runtime/runtimes/onnxruntime-1.27.0-cuda12/lib/libonnxruntime.so.1.27.0"

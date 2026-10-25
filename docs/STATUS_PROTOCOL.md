@@ -249,6 +249,14 @@ name, Console URL, request schema, framing rule, or status metric.
 
 ## Explicit HTTP diagnostic fallback
 
+The installed Windows/WSL facade additionally publishes
+`infra.local.windows-named-pipe` with this exact application version, framing,
+bounds, and errors. Its private byte pipe rejects remote clients and verifies
+the connected client process's user SID before application bytes. Its dedicated
+summary-only HTTP identity accesses the following diagnostic route inside the
+facade; that HTTP route remains absent from automatic status offers. See
+[Windows installation](WINDOWS_INSTALL.md) for publication and generation mapping.
+
 `GET /infer/v1/observer/snapshot` remains available as a separately configured
 diagnostic route. It returns the same snapshot JSON with `Cache-Control:
 no-store`, but HTTP provides its own framing and completion semantics.

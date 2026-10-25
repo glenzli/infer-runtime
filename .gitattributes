@@ -3,3 +3,5 @@
 /tools/start_shadow_wsl.sh text eol=lf
 /tools/install_onnx_cuda.sh text eol=lf
 /tools/install_ollama_wsl.sh text eol=lf
+/tools/install_wsl_service.sh text eol=lf
+/tools/service/*.sh text eol=lf
