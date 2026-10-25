@@ -1,0 +1,485 @@
+# Windows Shadow + WSL2 Runtime. All paths resolve from the Runtime working directory.
+# Install libraries and import verified model artifacts before submitting requests.
+# CUDA Builds retain the pinned graph and semantic spaces, with separate IDs.
+# Replace @RUNTIME_ROOT@ with the absolute Linux Runtime working directory.
+
+[server]
+bind = "127.0.0.1:8787"
+
+[observer]
+enabled = true
+instance_id = "local"
+console_url = "http://127.0.0.1:8790/"
+
+[auth]
+managed_credentials_directory = ".infer-runtime/credentials"
+
+[persistence]
+path = ".infer-runtime/state/infer-runtime.sqlite3"
+
+[artifacts]
+root = ".infer-runtime/artifacts"
+
+[defaults]
+policy = "balanced"
+
+[profiles.balanced]
+order = ["capability_fit", "deadline_fit", "queue_time", "cost", "placement"]
+
+[intents."language.respond"]
+input_modalities = ["text"]
+output_modalities = ["text"]
+default_capability_floor = "capable"
+default_policy = "balanced"
+
+[apps.local-operator]
+credential = { source = "managed" }
+resource_admin = true
+allow_all_intents = true
+max_pending_jobs = 16
+default_policy = "balanced"
+allowed_policies = ["balanced"]
+
+[runtimes.onnx]
+library = "@RUNTIME_ROOT@/.infer-runtime/runtimes/onnxruntime-1.27.0-cuda12/lib/libonnxruntime.so.1.27.0"
+version = "1.27.0"
+preferred_execution_providers = ["cuda"]
+allow_cpu_fallback = false
+
+[profiles.local-first]
+order = ["placement", "deadline_fit", "queue_time", "cost", "capability_fit"]
+
+[intents."vision.detect_faces"]
+data_plane = "vision.face_detection"
+input_modalities = ["image"]
+output_modalities = ["json"]
+required_features = ["five_point_landmarks"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[intents."vision.embed_face"]
+data_plane = "vision.face_embedding"
+input_modalities = ["image"]
+output_modalities = ["json"]
+required_features = ["face_embedding_128d", "sensitive_biometric"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[intents."semantic.embed_image"]
+data_plane = "vision.image_embedding"
+input_modalities = ["image"]
+output_modalities = ["json"]
+required_features = ["siglip2_embedding_768d", "cross_modal_retrieval"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[intents."semantic.embed_text"]
+data_plane = "vision.text_embedding"
+input_modalities = ["text"]
+output_modalities = ["json"]
+required_features = ["siglip2_embedding_768d", "multilingual_text", "cross_modal_retrieval"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[intents."vision.describe_image"]
+data_plane = "vision.image_description"
+input_modalities = ["image"]
+output_modalities = ["json"]
+required_features = ["structured_vision_output"]
+default_capability_floor = "foundational"
+default_policy = "local-first"
+
+[intents."vision.classify_closed_set"]
+data_plane = "vision.classification_review"
+input_modalities = ["image"]
+output_modalities = ["json"]
+required_features = ["structured_vision_output"]
+default_capability_floor = "capable"
+default_policy = "local-first"
+
+[providers.onnx-local]
+kind = "onnx"
+placement = "local"
+max_concurrency = 1
+max_queue = 32
+priority_aging_ms = 10000
+
+[providers.onnx-local.capability_profile]
+version = 1
+protocol = "onnx"
+
+[providers.onnx-local.local_inventory]
+kind = "onnx_sessions"
+
+[providers.ollama-local]
+kind = "responses"
+base_url = "http://127.0.0.1:12434/v1"
+placement = "local"
+max_concurrency = 1
+max_queue = 32
+priority_aging_ms = 10000
+
+[providers.ollama-local.capability_profile]
+version = 1
+protocol = "responses"
+capabilities = ["responses", "instructions", "streaming", "reasoning_effort", "temperature", "top_p", "max_output_tokens", "truncation", "metadata"]
+
+# Native control plane for model presence only. Text execution still uses the
+# shared Responses adapter above; inventory refresh never loads or unloads.
+
+[providers.ollama-local.local_inventory]
+kind = "ollama_tags"
+endpoint = "http://127.0.0.1:12434"
+
+[model_profiles.yunet_2026may]
+family = "yunet"
+
+[model_profiles.yunet_2026may.ratings."vision.detect_faces"]
+level = "foundational"
+status = "provisional"
+
+[model_profiles.sface_2021dec]
+family = "sface"
+
+[model_profiles.sface_2021dec.ratings."vision.embed_face"]
+level = "foundational"
+status = "provisional"
+
+[model_profiles.siglip2_base_patch16_224]
+family = "siglip2"
+
+[model_profiles.siglip2_base_patch16_224.ratings."semantic.embed_image"]
+level = "foundational"
+status = "provisional"
+
+[model_profiles.siglip2_base_patch16_224.ratings."semantic.embed_text"]
+level = "foundational"
+status = "provisional"
+
+[model_profiles.qwen3_vl_4b]
+family = "qwen3-vl"
+
+[model_profiles.qwen3_vl_4b.ratings."vision.describe_image"]
+level = "foundational"
+status = "provisional"
+
+[model_profiles.qwen3_vl_4b.ratings."vision.classify_closed_set"]
+level = "foundational"
+status = "provisional"
+
+[model_builds.yunet_2026may_onnx_cuda_v1]
+profile = "yunet_2026may"
+model_id = "sha256:ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0"
+variant = "onnx-opset11-fp32"
+input_modalities = ["image"]
+output_modalities = ["json"]
+features = ["five_point_landmarks"]
+
+[model_builds.yunet_2026may_onnx_cuda_v1.provenance]
+source_kind = "user_managed"
+upstream = "opencv/opencv_zoo"
+source_revision = "opencv-zoo@47534e27c9851bb1128ccc0102f1145e27f23f98"
+artifact_sha256 = "ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0"
+
+[model_builds.yunet_2026may_onnx_cuda_v1.license]
+status = "declared"
+expression = "MIT"
+license_url = "https://github.com/opencv/opencv_zoo/blob/47534e27c9851bb1128ccc0102f1145e27f23f98/LICENSE"
+
+[model_builds.yunet_2026may_onnx_cuda_v1.onnx]
+adapter = "yunet_face_detection"
+opset = 11
+inputs = [{ name = "input", dtype = "float32", shape = ["1", "3", "height", "width"] }]
+outputs = [
+  { name = "cls_8", dtype = "float32", shape = ["1", "anchors_8", "1"] },
+  { name = "cls_16", dtype = "float32", shape = ["1", "anchors_16", "1"] },
+  { name = "cls_32", dtype = "float32", shape = ["1", "anchors_32", "1"] },
+  { name = "obj_8", dtype = "float32", shape = ["1", "anchors_8", "1"] },
+  { name = "obj_16", dtype = "float32", shape = ["1", "anchors_16", "1"] },
+  { name = "obj_32", dtype = "float32", shape = ["1", "anchors_32", "1"] },
+  { name = "bbox_8", dtype = "float32", shape = ["1", "anchors_8", "4"] },
+  { name = "bbox_16", dtype = "float32", shape = ["1", "anchors_16", "4"] },
+  { name = "bbox_32", dtype = "float32", shape = ["1", "anchors_32", "4"] },
+  { name = "kps_8", dtype = "float32", shape = ["1", "anchors_8", "10"] },
+  { name = "kps_16", dtype = "float32", shape = ["1", "anchors_16", "10"] },
+  { name = "kps_32", dtype = "float32", shape = ["1", "anchors_32", "10"] },
+]
+postprocessing_identity = "opencv_yunet_decode_sqrt_score_nms_v1"
+postprocessing_parameters = { score_threshold = 0.6, nms_threshold = 0.3, top_k = 5000.0 }
+allowed_execution_providers = ["cuda"]
+precision = "fp32"
+
+[model_builds.yunet_2026may_onnx_cuda_v1.onnx.artifact]
+sha256 = "ebafce4e3c118d6554634be5c27ab333b4c047a9a8c3faf1d7cf93101c22f0f0"
+size_bytes = 229738
+source_url = "https://github.com/opencv/opencv_zoo/raw/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/face_detection_yunet_2026may.onnx"
+source_revision = "opencv-zoo@47534e27c9851bb1128ccc0102f1145e27f23f98"
+license_spdx = "MIT"
+
+[model_builds.yunet_2026may_onnx_cuda_v1.onnx.preprocessing]
+identity = "srgb_no_exif_triangle_long_edge_1600_bgr_nchw_pad32_v1"
+orientation = "input_pixels_no_exif_transform"
+resize = "triangle_long_edge_1600_no_upscale_then_pad_bottom_right_to_32"
+color_space = "srgb"
+channel_order = "bgr"
+layout = "nchw"
+dtype = "float32"
+mean = [0.0, 0.0, 0.0]
+scale = [1.0]
+
+[model_builds.sface_2021dec_onnx_cuda_v1]
+profile = "sface_2021dec"
+model_id = "sha256:0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+variant = "onnx-opset11-fp32"
+input_modalities = ["image"]
+output_modalities = ["json"]
+features = ["face_embedding_128d", "sensitive_biometric"]
+
+[model_builds.sface_2021dec_onnx_cuda_v1.provenance]
+source_kind = "user_managed"
+upstream = "opencv/opencv_zoo"
+source_revision = "opencv-zoo@47534e27c9851bb1128ccc0102f1145e27f23f98"
+artifact_sha256 = "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+
+[model_builds.sface_2021dec_onnx_cuda_v1.license]
+status = "declared"
+expression = "Apache-2.0"
+license_url = "https://github.com/opencv/opencv_zoo/blob/47534e27c9851bb1128ccc0102f1145e27f23f98/LICENSE"
+
+[model_builds.sface_2021dec_onnx_cuda_v1.onnx]
+adapter = "sface_embedding"
+opset = 11
+inputs = [{ name = "data", dtype = "float32", shape = ["1", "3", "112", "112"] }]
+outputs = [{ name = "fc1", dtype = "float32", shape = ["1", "128"] }]
+postprocessing_identity = "l2_normalized_embedding_cosine_space_v1"
+allowed_execution_providers = ["cuda"]
+precision = "fp32"
+
+[model_builds.sface_2021dec_onnx_cuda_v1.onnx.artifact]
+sha256 = "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+size_bytes = 38696353
+source_url = "https://github.com/opencv/opencv_zoo/raw/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/face_recognition_sface_2021dec.onnx"
+source_revision = "opencv-zoo@47534e27c9851bb1128ccc0102f1145e27f23f98"
+license_spdx = "Apache-2.0"
+
+[model_builds.sface_2021dec_onnx_cuda_v1.onnx.preprocessing]
+identity = "opencv_sface_similarity_align_112_rgb_nchw_v1"
+orientation = "input_pixels_no_exif_transform"
+resize = "five_point_similarity_transform_to_112x112_inter_linear"
+color_space = "srgb"
+channel_order = "rgb"
+layout = "nchw"
+dtype = "float32"
+mean = [0.0, 0.0, 0.0]
+scale = [1.0]
+
+[model_builds.siglip2_base_patch16_224_image_onnx_cuda_v1]
+profile = "siglip2_base_patch16_224"
+model_id = "sha256:37a4dd33a92af42f9d6ca301fa9ed71ebc28c6fd6036dbb03475c6f703ab69c6"
+variant = "fixres224-image-onnx-opset17-fp32"
+input_modalities = ["image"]
+output_modalities = ["json"]
+features = ["siglip2_embedding_768d", "cross_modal_retrieval"]
+
+[model_builds.siglip2_base_patch16_224_image_onnx_cuda_v1.provenance]
+source_kind = "user_managed"
+upstream = "google/siglip2-base-patch16-224"
+source_revision = "75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2;infer-export-v1"
+artifact_sha256 = "37a4dd33a92af42f9d6ca301fa9ed71ebc28c6fd6036dbb03475c6f703ab69c6"
+
+[model_builds.siglip2_base_patch16_224_image_onnx_cuda_v1.license]
+status = "declared"
+expression = "Apache-2.0"
+license_url = "https://huggingface.co/google/siglip2-base-patch16-224/blob/75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2/LICENSE"
+
+[model_builds.siglip2_base_patch16_224_image_onnx_cuda_v1.onnx]
+adapter = "siglip_image_embedding"
+opset = 17
+inputs = [{ name = "pixel_values", dtype = "float32", shape = ["1", "3", "224", "224"] }]
+outputs = [{ name = "embedding", dtype = "float32", shape = ["1", "768"] }]
+postprocessing_identity = "onnx_graph_l2_eps1e-12_then_runtime_renorm_v1"
+allowed_execution_providers = ["cuda"]
+precision = "fp32"
+
+[model_builds.siglip2_base_patch16_224_image_onnx_cuda_v1.onnx.artifact]
+sha256 = "37a4dd33a92af42f9d6ca301fa9ed71ebc28c6fd6036dbb03475c6f703ab69c6"
+size_bytes = 371694512
+source_url = "https://huggingface.co/google/siglip2-base-patch16-224/tree/75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2"
+source_revision = "google/siglip2-base-patch16-224@75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2;infer-export-v1;torch-2.8.0;transformers-4.56.2;onnx-1.19.0"
+license_spdx = "Apache-2.0"
+
+[model_builds.siglip2_base_patch16_224_image_onnx_cuda_v1.onnx.preprocessing]
+identity = "srgb_orientation_normalized_resize_exact_224_catmullrom_rgb_minus1_1_v1"
+orientation = "display_pixels_orientation_normalized"
+resize = "exact_224x224_catmullrom"
+color_space = "srgb"
+channel_order = "rgb"
+layout = "nchw"
+dtype = "float32"
+mean = [0.5, 0.5, 0.5]
+scale = [0.5, 0.5, 0.5]
+
+[model_builds.siglip2_base_patch16_224_image_onnx_cuda_v1.onnx.embedding_space]
+identity = "siglip2_base_patch16_224@75de2d55:fixres224:lowercase64:l2_768_fp32:v1"
+dimensions = 768
+normalized = true
+distance_metric = "cosine"
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cuda_v1]
+profile = "siglip2_base_patch16_224"
+model_id = "sha256:59a483f782025c5724628100e4dd7b49e96fa47b8b49d963b99932d4ab83199c"
+variant = "fixres224-text-onnx-opset17-fp32"
+input_modalities = ["text"]
+output_modalities = ["json"]
+features = ["siglip2_embedding_768d", "multilingual_text", "cross_modal_retrieval"]
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cuda_v1.provenance]
+source_kind = "user_managed"
+upstream = "google/siglip2-base-patch16-224"
+source_revision = "75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2;infer-export-v1"
+artifact_sha256 = "59a483f782025c5724628100e4dd7b49e96fa47b8b49d963b99932d4ab83199c"
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cuda_v1.license]
+status = "declared"
+expression = "Apache-2.0"
+license_url = "https://huggingface.co/google/siglip2-base-patch16-224/blob/75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2/LICENSE"
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cuda_v1.onnx]
+adapter = "siglip_text_embedding"
+opset = 17
+inputs = [{ name = "input_ids", dtype = "int64", shape = ["1", "64"] }]
+outputs = [{ name = "embedding", dtype = "float32", shape = ["1", "768"] }]
+postprocessing_identity = "onnx_graph_l2_eps1e-12_then_runtime_renorm_v1"
+allowed_execution_providers = ["cuda"]
+precision = "fp32"
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cuda_v1.onnx.artifact]
+sha256 = "59a483f782025c5724628100e4dd7b49e96fa47b8b49d963b99932d4ab83199c"
+size_bytes = 1129352203
+source_url = "https://huggingface.co/google/siglip2-base-patch16-224/tree/75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2"
+source_revision = "google/siglip2-base-patch16-224@75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2;infer-export-v1;torch-2.8.0;transformers-4.56.2;onnx-1.19.0"
+license_spdx = "Apache-2.0"
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cuda_v1.onnx.auxiliary_artifacts.tokenizer]
+sha256 = "cb9140fae3ac5122c972d37adf83e1248471a38147ad76f8215c8872c6fd8322"
+size_bytes = 34363039
+source_url = "https://huggingface.co/google/siglip2-base-patch16-224/resolve/75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2/tokenizer.json"
+source_revision = "google/siglip2-base-patch16-224@75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2"
+license_spdx = "Apache-2.0"
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cuda_v1.onnx.text_preprocessing]
+identity = "gemma_tokenizer_cb9140fa_lowercase_eos_pad_right_truncate64_v1"
+tokenizer_artifact = "tokenizer"
+lowercase = true
+padding = "max_length"
+truncation = true
+max_length = 64
+pad_token_id = 0
+eos_token_id = 1
+
+[model_builds.siglip2_base_patch16_224_text_onnx_cuda_v1.onnx.embedding_space]
+identity = "siglip2_base_patch16_224@75de2d55:fixres224:lowercase64:l2_768_fp32:v1"
+dimensions = 768
+normalized = true
+distance_metric = "cosine"
+
+[model_builds.qwen3_vl_4b]
+profile = "qwen3_vl_4b"
+model_id = "qwen3-vl:4b"
+input_modalities = ["text", "image"]
+output_modalities = ["text", "json"]
+features = ["structured_vision_output"]
+
+[model_builds.qwen3_vl_4b.provenance]
+source_kind = "provider_managed"
+upstream = "ollama:qwen3-vl:4b"
+
+[model_builds.qwen3_vl_4b.license]
+status = "unreviewed"
+
+[deployments.onnx_yunet_2026may]
+provider = "onnx-local"
+build = "yunet_2026may_onnx_cuda_v1"
+resource_class = "light"
+estimated_cost_usd = 0.0
+
+[deployments.onnx_sface_2021dec]
+provider = "onnx-local"
+build = "sface_2021dec_onnx_cuda_v1"
+resource_class = "light"
+estimated_cost_usd = 0.0
+
+[deployments.onnx_siglip2_base_patch16_224_image]
+provider = "onnx-local"
+build = "siglip2_base_patch16_224_image_onnx_cuda_v1"
+resource_class = "heavy"
+estimated_cost_usd = 0.0
+
+[deployments.onnx_siglip2_base_patch16_224_text]
+provider = "onnx-local"
+build = "siglip2_base_patch16_224_text_onnx_cuda_v1"
+resource_class = "heavy"
+estimated_cost_usd = 0.0
+
+[deployments.ollama_qwen3_vl_4b]
+provider = "ollama-local"
+build = "qwen3_vl_4b"
+resource_class = "standard"
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "server_stream"]
+
+[apps.shadow]
+credential = { source = "managed" }
+allowed_intents = ["vision.detect_faces", "vision.embed_face", "semantic.embed_image", "semantic.embed_text", "vision.describe_image", "vision.classify_closed_set"]
+allowed_provider_access_classes = ["standard"]
+max_pending_jobs = 8
+default_policy = "local-first"
+allowed_policies = ["balanced", "local-first"]
+
+[apps.shadow.request_overrides]
+priority = ["interactive", "normal", "background"]
+placement = ["local_only"]
+prefer = ["local"]
+offline_required = true
+capability_floor = ["foundational", "capable"]
+latency = ["interactive", "balanced", "throughput"]
+fallback = ["none"]
+max_cost_usd = { min = 0.0, max = 0.0 }
+[model_profiles.qwen3_vl_8b]
+family = "qwen3-vl"
+
+[model_profiles.qwen3_vl_8b.ratings."vision.describe_image"]
+level = "capable"
+status = "provisional"
+
+[model_profiles.qwen3_vl_8b.ratings."vision.classify_closed_set"]
+level = "capable"
+status = "provisional"
+
+# Cloud ratings are deliberately provisional until the runtime's own
+# workload-specific evaluation suite replaces these initial registrations.
+
+[model_builds.qwen3_vl_8b]
+profile = "qwen3_vl_8b"
+model_id = "qwen3-vl:8b"
+input_modalities = ["text", "image"]
+output_modalities = ["text", "json"]
+features = ["structured_vision_output"]
+
+[model_builds.qwen3_vl_8b.provenance]
+source_kind = "provider_managed"
+upstream = "ollama:qwen3-vl:8b"
+
+[model_builds.qwen3_vl_8b.license]
+status = "unreviewed"
+
+[deployments.ollama_qwen3_vl_8b]
+provider = "ollama-local"
+build = "qwen3_vl_8b"
+resource_class = "heavy"
+estimated_cost_usd = 0.0
+supported_execution_modes = ["unary", "server_stream"]
+
+# These are conservative per-request admission estimates, not token billing.
+# M3 replaces them with token-aware reservations and settlement from provider
+# usage; a request with a lower `infer.max_cost_usd` will stay local.

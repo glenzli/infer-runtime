@@ -845,6 +845,17 @@ fn build_session(
                 .map_err(|error| ProviderError::NativeRuntime(error.to_string()))?;
         }
         OnnxExecutionProvider::Cpu => {}
+        OnnxExecutionProvider::Cuda => {
+            let execution_provider = ep::CUDA::default()
+                .with_conv_algorithm_search(ep::cuda::ConvAlgorithmSearch::Heuristic)
+                .build()
+                .error_on_failure();
+            builder = builder
+                .with_execution_providers([execution_provider])
+                .map_err(|error| ProviderError::NativeRuntime(error.to_string()))?
+                .with_disable_cpu_fallback()
+                .map_err(|error| ProviderError::NativeRuntime(error.to_string()))?;
+        }
     }
     builder
         .commit_from_file(model)
@@ -1011,6 +1022,7 @@ fn execution_provenance(entry: &SessionEntry) -> OnnxExecutionProvenance {
 fn execution_provider_name(provider: OnnxExecutionProvider) -> &'static str {
     match provider {
         OnnxExecutionProvider::Coreml => "coreml",
+        OnnxExecutionProvider::Cuda => "cuda",
         OnnxExecutionProvider::Cpu => "cpu",
     }
 }

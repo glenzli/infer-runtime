@@ -1025,7 +1025,7 @@ string_enum!(OnnxAdapterKind {
     GroundingDinoSemanticGrounding => "grounding_dino_semantic_grounding",
     LamaImageCompletion => "lama_image_completion"
 });
-string_enum!(OnnxExecutionProvider { Coreml => "coreml", Cpu => "cpu" });
+string_enum!(OnnxExecutionProvider { Coreml => "coreml", Cuda => "cuda", Cpu => "cpu" });
 string_enum!(CoremlSamComputeUnits {
     All => "coreml_all",
     CpuAndGpu => "coreml_cpu_and_gpu",

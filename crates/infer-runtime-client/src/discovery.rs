@@ -1,9 +1,12 @@
 use std::{
     collections::BTreeSet,
-    env, fs,
+    env,
     io::Read,
     path::{Path, PathBuf},
 };
+
+#[cfg(not(windows))]
+use std::fs;
 
 use serde::Deserialize;
 
@@ -108,6 +111,7 @@ impl DiscoveryResolver {
         }
         ensure_local_filesystem(&root)?;
         let registrations = root.join("registrations");
+        #[cfg(unix)]
         let sockets = root.join("sockets");
         validate_owner_only_directory(&root)?;
         validate_owner_only_directory(&registrations)?;
@@ -228,22 +232,30 @@ fn valid_contract_version(value: &str) -> bool {
 }
 
 fn read_registration(path: &Path) -> Result<Registration> {
-    let mut options = fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
-    }
-    let file = options
-        .open(path)
+    #[cfg(windows)]
+    let file = crate::windows_security::open_owner_only_file(path)
         .map_err(|error| Error::Discovery(format!("{}: {error}", path.display())))?;
+    #[cfg(not(windows))]
+    let file = {
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+        }
+        let file = options
+            .open(path)
+            .map_err(|error| Error::Discovery(format!("{}: {error}", path.display())))?;
+        file
+    };
     let metadata = file
         .metadata()
         .map_err(|error| Error::Discovery(format!("{}: {error}", path.display())))?;
     if !metadata.is_file() || metadata.len() > MAX_MANIFEST_BYTES {
         return Err(Error::Discovery("registration manifest is unsafe".into()));
     }
+    #[cfg(not(windows))]
     validate_owner_and_mode(path, &metadata, 0o600)?;
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     file.take(MAX_MANIFEST_BYTES + 1)
@@ -257,15 +269,21 @@ fn read_registration(path: &Path) -> Result<Registration> {
 }
 
 fn validate_owner_only_directory(path: &Path) -> Result<()> {
-    let metadata = fs::symlink_metadata(path)
-        .map_err(|error| Error::Discovery(format!("{}: {error}", path.display())))?;
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err(Error::Discovery(format!(
-            "{} is not a safe directory",
-            path.display()
-        )));
+    #[cfg(windows)]
+    return crate::windows_security::validate_owner_only_directory(path)
+        .map_err(|error| Error::Discovery(format!("{}: {error}", path.display())));
+    #[cfg(not(windows))]
+    {
+        let metadata = fs::symlink_metadata(path)
+            .map_err(|error| Error::Discovery(format!("{}: {error}", path.display())))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(Error::Discovery(format!(
+                "{} is not a safe directory",
+                path.display()
+            )));
+        }
+        validate_owner_and_mode(path, &metadata, 0o700)
     }
-    validate_owner_and_mode(path, &metadata, 0o700)
 }
 
 #[cfg(unix)]
@@ -282,7 +300,7 @@ fn validate_owner_and_mode(path: &Path, metadata: &fs::Metadata, expected_mode: 
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn validate_owner_and_mode(
     _path: &Path,
     _metadata: &fs::Metadata,
@@ -395,7 +413,14 @@ fn platform_runtime_root() -> Result<PathBuf> {
     Ok(root.join("infra-protocol"))
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn platform_runtime_root() -> Result<PathBuf> {
+    env::var_os("LOCALAPPDATA")
+        .map(|root| PathBuf::from(root).join("infra-protocol"))
+        .ok_or_else(|| Error::Discovery("LOCALAPPDATA is unavailable".into()))
+}
+
+#[cfg(not(any(unix, windows)))]
 fn platform_runtime_root() -> Result<PathBuf> {
     Err(Error::Discovery(
         "a verified INFRA_PROTOCOL_RUNTIME_DIR is required on this platform".into(),
@@ -404,11 +429,13 @@ fn platform_runtime_root() -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::io::Write;
 
     #[cfg(unix)]
     use std::os::unix::fs::OpenOptionsExt;
 
+    #[cfg(unix)]
     use tempfile::tempdir;
 
     use super::*;

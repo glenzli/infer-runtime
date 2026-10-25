@@ -64,6 +64,9 @@ CLI 默认连接 `http://127.0.0.1:8787`，可通过 `--server` 或 `INFER_URL` 
 可选能力还需要相应的 Provider、Build/Deployment、运行环境、模型文件和 App ACL。Runtime
 不会自动下载模型或放宽 placement。完整准备流程见 [运维文档](docs/OPERATIONS.md)。
 
+Windows Shadow 的原生 SDK 接入、WSL2 CUDA 环境和固定模型准备见
+[Windows Shadow / WSL2 CUDA](docs/WINDOWS_SHADOW_WSL.md)。
+
 ## 可信节点（experimental）
 
 每台机器运行自己的 `inferd`。A 可以将已配对的 B/C 导出的本地文本 Deployment 加入候选，

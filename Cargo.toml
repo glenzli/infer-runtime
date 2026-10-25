@@ -50,7 +50,7 @@ httpdate = "1.0"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 libc = "0.2"
 ndarray = "0.17"
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["api-27", "coreml", "load-dynamic", "ndarray", "std", "tracing"] }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["api-27", "coreml", "cuda", "load-dynamic", "ndarray", "std", "tracing"] }
 tokio = { version = "1.44", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tokio-util = "0.7"
 tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }

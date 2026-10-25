@@ -1,0 +1,5 @@
+# Consumer contract digests bind exact bytes on every checkout platform.
+/contracts/** text eol=lf
+/tools/start_shadow_wsl.sh text eol=lf
+/tools/install_onnx_cuda.sh text eol=lf
+/tools/install_ollama_wsl.sh text eol=lf

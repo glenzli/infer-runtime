@@ -43,9 +43,14 @@ over the owner-only `uds-scm-rights` binding, then executes or cancels the Job.
 It never accepts paths, moves pixels over HTTP, or exposes a generic handle
 transport. Windows remains blocked pending the frozen named-pipe/HANDLE binding.
 
-The package currently supports Unix owner/mode verification (macOS/Linux). A Windows release is
-blocked until Infra Discovery and credential ACL checks are implemented with the platform's native
-current-user security model. Stable Responses SSE and speech PCM streaming use separate bounded
+The package supports Unix owner/mode verification (macOS/Linux) and native Windows
+current-user owner/DACL verification. Windows accepts only local fixed drives,
+rejects reparse points throughout the path and permissions granted to other users,
+and checks/reads one opened object while holding its ancestor handles. SYSTEM
+maintenance access is allowed. Windows Discovery defaults to
+`%LOCALAPPDATA%\infra-protocol`; credentials remain ordinary private files.
+See [Windows Shadow / WSL setup](../../docs/WINDOWS_SHADOW_WSL.md) and
+`examples/shadow_vision.rs` for real Consumer checks. Stable Responses SSE and speech PCM streaming use separate bounded
 session APIs (`stream_response` and `stream_speech`); unary return types remain unchanged.
 
 `embed_audio_file` and `embed_audio_text` implement the additive experimental

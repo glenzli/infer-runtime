@@ -1,9 +1,12 @@
 use std::{
     collections::BTreeSet,
-    fmt, fs,
+    fmt,
     io::Read,
     path::{Path, PathBuf},
 };
+
+#[cfg(not(windows))]
+use std::fs;
 
 use reqwest::{Method, RequestBuilder, Response};
 use serde::{Serialize, de::DeserializeOwned};
@@ -529,16 +532,23 @@ pub(crate) async fn read_bounded_file(path: &Path, maximum: u64, kind: &str) -> 
 }
 
 fn read_owner_only_token(path: &Path) -> Result<Zeroizing<String>> {
-    let mut options = fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
-    }
-    let file = options
-        .open(path)
+    #[cfg(windows)]
+    let file = crate::windows_security::open_owner_only_file(path)
         .map_err(|error| Error::Credential(format!("{}: {error}", path.display())))?;
+    #[cfg(not(windows))]
+    let file = {
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC);
+        }
+        let file = options
+            .open(path)
+            .map_err(|error| Error::Credential(format!("{}: {error}", path.display())))?;
+        file
+    };
     let metadata = file
         .metadata()
         .map_err(|error| Error::Credential(format!("{}: {error}", path.display())))?;
@@ -556,12 +566,12 @@ fn read_owner_only_token(path: &Path) -> Result<Zeroizing<String>> {
             ));
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     return Err(Error::Credential(
         "this SDK build does not implement platform ACL verification".into(),
     ));
 
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     {
         let mut token = String::with_capacity(metadata.len() as usize);
         file.take(16 * 1024 + 1)

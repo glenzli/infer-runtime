@@ -26,6 +26,8 @@ pub use media_embedding::{
 };
 mod transport;
 mod vision;
+#[cfg(windows)]
+mod windows_security;
 
 pub use agent_task::{
     AGENT_TASK_CAPABILITIES, AGENT_TASK_INTENT, AgentTaskInputFile, AgentTaskProvenance,
