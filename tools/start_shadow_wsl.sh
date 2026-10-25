@@ -16,6 +16,7 @@ export OLLAMA_MODELS="$runtime_root/.infer-runtime/ollama-models"
 export OLLAMA_CONTEXT_LENGTH=8192
 export OLLAMA_MAX_LOADED_MODELS=1
 export OLLAMA_NUM_PARALLEL=1
+export OLLAMA_KEEP_ALIVE=30s
 export OLLAMA_NO_CLOUD=1
 runtime_libraries="$runtime_root/.infer-runtime/runtimes/onnx-cuda/lib"
 export LD_LIBRARY_PATH="/usr/lib/wsl/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"

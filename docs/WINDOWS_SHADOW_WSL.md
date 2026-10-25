@@ -107,7 +107,8 @@ ollama="$runtime_root/.infer-runtime/runtimes/ollama-v0.40.11/bin/ollama"
 ```
 
 4B 对应基础质量档，8B 对应通用质量档。启动器禁用 Ollama cloud，固定 8192 context、
-单请求和同时最多一个 Ollama 模型驻留。ONNX 会话和 Ollama 是不同内存所有者；这不构成
+单请求和同时最多一个 Ollama 模型驻留；Ollama 模型空闲 30 秒后释放，给原生编辑留出显存。
+ONNX 会话和 Ollama 是不同内存所有者；这不构成
 跨进程显存总预算。Linux 压力采样尚未实现，不能依赖自动显存驱逐。
 
 ## 验证
